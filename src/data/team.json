@@ -1,0 +1,98 @@
+[
+ {
+  "name": "Otavio Mayole (OT)",
+  "tag": "Co-Founder",
+  "role": "Head of Creator Growth",
+  "tier": "manager",
+  "codename": "The Closer",
+  "img": "assets/team/t00.jpeg"
+ },
+ {
+  "name": "David Crueger-Cain",
+  "tag": "Co-Founder",
+  "role": "Onboarding Manager",
+  "tier": "manager",
+  "codename": "The Professor",
+  "img": "assets/team/t01.jpeg"
+ },
+ {
+  "name": "Natalia Muniz",
+  "tag": "Co-Founder",
+  "role": "Head of Creator Tax Strategy",
+  "tier": "manager",
+  "codename": "The Intuition Queen",
+  "img": "assets/team/t02.jpeg"
+ },
+ {
+  "name": "Josiel Gonzalez, CPA",
+  "tag": "",
+  "role": "Tax Manager",
+  "tier": "manager",
+  "codename": "The Tax Yapper",
+  "img": "assets/team/t03.jpeg"
+ },
+ {
+  "name": "Trisann Dumay",
+  "tag": "",
+  "role": "Onboarding Senior",
+  "tier": "senior",
+  "codename": "Miss Sunshine",
+  "img": "assets/team/t04.jpeg"
+ },
+ {
+  "name": "Renee Brown",
+  "tag": "",
+  "role": "Creator Success Senior",
+  "tier": "senior",
+  "codename": null,
+  "img": "assets/team/t05.jpeg"
+ },
+ {
+  "name": "Ashema Honess-Williamson",
+  "tag": "",
+  "role": "Bookkeeping Senior",
+  "tier": "senior",
+  "codename": null,
+  "img": "assets/team/t06.jpeg"
+ },
+ {
+  "name": "Huneth Arce",
+  "tag": "",
+  "role": "Onboarding Staff",
+  "tier": "staff",
+  "codename": null,
+  "img": "assets/team/t07.jpeg"
+ },
+ {
+  "name": "Erica Cercer",
+  "tag": "",
+  "role": "Bookkeeping Staff",
+  "tier": "staff",
+  "codename": null,
+  "img": "assets/team/t08.jpeg"
+ },
+ {
+  "name": "Calvin Chavis, EA",
+  "tag": "",
+  "role": "Tax Staff",
+  "tier": "staff",
+  "codename": null,
+  "img": "assets/team/t09.jpeg"
+ },
+ {
+  "name": "Drea",
+  "tag": "",
+  "role": "Creator Events Coordinator",
+  "tier": "senior",
+  "codename": null,
+  "img": "assets/team/t10.jpeg"
+ },
+ {
+  "name": "Shayla Ramon",
+  "tag": "",
+  "role": "Intern",
+  "tier": "staff",
+  "codename": null,
+  "img": "assets/team/t11.jpeg"
+ }
+]

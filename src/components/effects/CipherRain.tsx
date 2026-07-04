@@ -1,0 +1,113 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { prefersReducedMotion, randChar } from "@/lib/decrypt";
+
+interface Drop {
+  el: HTMLSpanElement;
+  y: number;
+  spd: number;
+}
+
+/**
+ * Fixed full-screen background of vertical cipher strings that drift upward
+ * continuously, flicker, and parallax against scroll.
+ */
+export default function CipherRain() {
+  const aRef = useRef<HTMLDivElement>(null);
+  const bRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const a = aRef.current;
+    const b = bRef.current;
+    if (!a || !b || prefersReducedMotion()) return;
+
+    const rand = (n: number) => Math.floor(Math.random() * n);
+    const randStr = () => {
+      let str = "";
+      const len = 6 + rand(10);
+      for (let j = 0; j < len; j++) str += randChar();
+      return str;
+    };
+
+    const drops: Drop[] = [];
+    const allSpans: HTMLSpanElement[] = [];
+    const build = (
+      layer: HTMLDivElement,
+      count: number,
+      size: number,
+      spdMin: number,
+      spdMax: number,
+      colA: string,
+      colB: string,
+    ) => {
+      for (let i = 0; i < count; i++) {
+        const s = document.createElement("span");
+        s.textContent = randStr();
+        s.style.cssText = `position:absolute;font-family:var(--font-mono);font-size:${size}px;letter-spacing:3px;writing-mode:vertical-rl;user-select:none;`;
+        s.style.left = `${rand(100)}%`;
+        s.style.color = rand(2) ? colA : colB;
+        const y = rand(250) - 30;
+        s.style.top = `${y}vh`;
+        layer.appendChild(s);
+        allSpans.push(s);
+        drops.push({ el: s, y, spd: spdMin + Math.random() * (spdMax - spdMin) });
+      }
+    };
+    build(a, 22, 12, 1.6, 3.2, "rgba(255,45,120,.07)", "rgba(139,43,232,.09)");
+    build(b, 16, 15, 3.2, 5.6, "rgba(255,45,120,.10)", "rgba(255,92,46,.08)");
+
+    // random flicker: re-randomize a few strings on a slow interval
+    const flick = setInterval(() => {
+      for (let k = 0; k < 3; k++) {
+        const s = allSpans[rand(allSpans.length)];
+        s.textContent = randStr();
+        s.style.opacity = (0.35 + Math.random() * 0.65).toFixed(2);
+      }
+    }, 380);
+
+    // constant upward drift, independent of scroll
+    let raf = 0;
+    let lastT = performance.now();
+    const loop = (t: number) => {
+      const dt = Math.min(60, t - lastT) / 1000;
+      lastT = t;
+      for (const sp of drops) {
+        sp.y -= sp.spd * dt;
+        if (sp.y < -35) {
+          sp.y += 260;
+          sp.el.style.left = `${rand(100)}%`;
+        }
+        sp.el.style.top = `${sp.y.toFixed(2)}vh`;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+
+    // scroll parallax on each layer
+    const onScroll = () => {
+      const y = window.scrollY || 0;
+      a.style.transform = `translateY(${(-y * 0.05).toFixed(1)}px)`;
+      b.style.transform = `translateY(${(-y * 0.11).toFixed(1)}px)`;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      clearInterval(flick);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll);
+      a.replaceChildren();
+      b.replaceChildren();
+    };
+  }, []);
+
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+    >
+      <div ref={aRef} className="absolute inset-0 will-change-transform" />
+      <div ref={bRef} className="absolute inset-0 will-change-transform" />
+    </div>
+  );
+}
