@@ -54,8 +54,8 @@ export default function CipherRain() {
         drops.push({ el: s, y, spd: spdMin + Math.random() * (spdMax - spdMin) });
       }
     };
-    build(a, 22, 12, 1.6, 3.2, "rgba(255,45,120,.07)", "rgba(139,43,232,.09)");
-    build(b, 16, 15, 3.2, 5.6, "rgba(255,45,120,.10)", "rgba(255,92,46,.08)");
+    build(a, 38, 13, 1.6, 3.2, "rgba(255,45,120,.16)", "rgba(139,43,232,.20)");
+    build(b, 28, 16, 3.2, 5.6, "rgba(255,45,120,.24)", "rgba(255,92,46,.20)");
 
     // random flicker: re-randomize a few strings on a slow interval
     const flick = setInterval(() => {

@@ -12,7 +12,7 @@ import { TeamMember } from "@/lib/team";
 export default function TeamCard({ p }: { p: TeamMember }) {
   const codeRef = useRef<HTMLSpanElement>(null);
 
-  const reveal = () => decryptTo(codeRef.current, p.codename, 650);
+  const reveal = () => decryptTo(codeRef.current, p.codename);
   const hide = () => {
     const txt = codeRef.current;
     if (!txt) return;

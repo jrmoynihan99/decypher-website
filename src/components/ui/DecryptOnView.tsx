@@ -11,7 +11,7 @@ export default function DecryptOnView({
   text,
   as = "h2",
   className,
-  duration = 1200,
+  duration,
   threshold = 0.5,
 }: {
   text: string;

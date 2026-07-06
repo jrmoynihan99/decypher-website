@@ -8,7 +8,7 @@ const footerHeading =
 
 export default function Footer() {
   return (
-    <footer className="relative z-[1] border-t border-edge-soft px-6 pb-[70px] pt-[60px]">
+    <footer className="relative z-[1] border-t border-edge-soft bg-night px-6 pb-[70px] pt-[60px]">
       <div className="mx-auto grid max-w-[1160px] grid-cols-[repeat(auto-fit,minmax(240px,1fr))] items-start gap-10">
         <div className="flex flex-col gap-3.5">
           <Image

@@ -2,10 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import {
+  armHover,
   cancelDecrypt,
   decryptTo,
+  encrypt,
   prefersReducedMotion,
-  scramble,
 } from "@/lib/decrypt";
 
 /**
@@ -15,7 +16,7 @@ import {
  */
 export function useDecryptOnView<T extends HTMLElement>(
   text: string,
-  { duration = 1200, threshold = 0.5 }: { duration?: number; threshold?: number } = {},
+  { duration, threshold = 0.5 }: { duration?: number; threshold?: number } = {},
 ) {
   const ref = useRef<T | null>(null);
 
@@ -24,14 +25,14 @@ export function useDecryptOnView<T extends HTMLElement>(
     if (!el || prefersReducedMotion()) return;
     let done = false;
     if (el.getBoundingClientRect().top > window.innerHeight) {
-      el.textContent = scramble(text);
+      encrypt(el, text);
     }
     const io = new IntersectionObserver(
       (entries) => {
         for (const en of entries) {
           if (en.isIntersecting && !done) {
             done = true;
-            decryptTo(el, text, duration);
+            decryptTo(el, text, duration, () => armHover(el));
             io.unobserve(el);
           }
         }
