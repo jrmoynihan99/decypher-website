@@ -1,5 +1,6 @@
 import Image from "next/image";
 import SectionHeading from "@/components/ui/SectionHeading";
+import Marquee from "@/components/ui/Marquee";
 import { Creator, creatorHandle, creators } from "@/lib/creators";
 
 const ROW_A = creators.slice(0, 8);
@@ -15,10 +16,10 @@ function RosterRow({
   className?: string;
 }) {
   return (
-    <div
-      className={`flex w-max gap-5 hover:[animation-play-state:paused] ${
-        reverse ? "animate-marquee-rev" : "animate-marquee"
-      } ${className}`}
+    <Marquee
+      duration={reverse ? 78 : 64}
+      reverse={reverse}
+      className={`gap-5 ${className}`}
     >
       {[...row, ...row].map((c, i) => (
         <div key={`${c.name}-${i}`} className="flex w-[230px] flex-none flex-col gap-3">
@@ -39,7 +40,7 @@ function RosterRow({
           </div>
         </div>
       ))}
-    </div>
+    </Marquee>
   );
 }
 

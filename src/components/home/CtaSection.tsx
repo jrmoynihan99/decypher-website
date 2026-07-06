@@ -4,7 +4,7 @@ import GlowOrb from "@/components/ui/GlowOrb";
 
 export default function CtaSection() {
   return (
-    <section className="relative z-[1] overflow-hidden px-6 pb-[150px] pt-[60px] text-center">
+    <section className="relative z-[1] overflow-x-clip px-6 pb-[150px] pt-[60px] text-center">
       <GlowOrb size={840} blur={56} alpha={0.22} beta={0.14} duration={14} />
       <DecryptOnView
         as="h2"

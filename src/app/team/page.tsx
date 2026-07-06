@@ -28,7 +28,6 @@ export default function TeamPage() {
         <DecryptOnView
           as="h1"
           text="The team behind creator wealth."
-          duration={1400}
           threshold={0}
           className="relative mx-auto mt-[18px] max-w-[20ch] font-display text-[clamp(38px,5.4vw,72px)] font-bold leading-[1.04] tracking-[-0.03em] text-fog"
         />

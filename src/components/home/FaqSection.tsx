@@ -6,8 +6,8 @@ import { FAQS, Faq } from "@/lib/content";
 import {
   cancelDecrypt,
   decryptTo,
+  encrypt,
   prefersReducedMotion,
-  scramble,
 } from "@/lib/decrypt";
 
 /**
@@ -25,8 +25,7 @@ function FaqItem({ faq }: { faq: Faq }) {
     const txt = txtRef.current;
     if (!txt || prefersReducedMotion()) return;
     if (!decrypted.current) {
-      txt.textContent = scramble(faq.a);
-      txt.style.filter = "blur(5px)";
+      encrypt(txt, faq.a);
     }
     return () => {
       cancelDecrypt(txt);
@@ -46,8 +45,7 @@ function FaqItem({ faq }: { faq: Faq }) {
       wrap.style.maxHeight = `${txt.scrollHeight + 60}px`;
       if (!decrypted.current) {
         decrypted.current = true;
-        txt.style.filter = "blur(0px)";
-        decryptTo(txt, faq.a, 1100, () => {
+        decryptTo(txt, faq.a, undefined, () => {
           // re-measure: decrypted text is usually shorter than the scramble
           if (openRef.current) wrap.style.maxHeight = `${txt.scrollHeight + 34}px`;
         });
@@ -78,7 +76,7 @@ function FaqItem({ faq }: { faq: Faq }) {
       >
         <p
           ref={txtRef}
-          className="m-0 max-w-[64ch] px-1 pb-[26px] text-[15.5px] leading-[1.68] text-mist transition-[filter] duration-[600ms]"
+          className="m-0 max-w-[64ch] px-1 pb-[26px] text-[15.5px] leading-[1.68] text-mist"
         >
           {faq.a}
         </p>

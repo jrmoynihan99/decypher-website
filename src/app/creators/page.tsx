@@ -28,7 +28,6 @@ export default function CreatorsPage() {
         <DecryptOnView
           as="h1"
           text="The creators we keep in the black."
-          duration={1400}
           threshold={0}
           className="relative mx-auto mt-[18px] max-w-[20ch] font-display text-[clamp(38px,5.4vw,72px)] font-bold leading-[1.04] tracking-[-0.03em] text-fog"
         />

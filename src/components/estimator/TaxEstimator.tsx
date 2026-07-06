@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import {
   ESTIMATOR_CONFIG,
@@ -98,7 +98,6 @@ function StepDots({ done }: { done: 1 | 2 }) {
 }
 
 export default function TaxEstimator() {
-  const rootRef = useRef<HTMLDivElement>(null);
   const [screen, setScreen] = useState<"input" | "results">("input");
 
   // form fields
@@ -134,13 +133,6 @@ export default function TaxEstimator() {
 
   const clearErr = (field: string) =>
     setErrors((e) => (e[field] ? { ...e, [field]: "" } : e));
-
-  const scrollToWidget = useCallback(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const top = window.scrollY + el.getBoundingClientRect().top - 90;
-    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  }, []);
 
   /* ===================== validation + estimate ===================== */
   const runEstimate = (): boolean => {
@@ -222,11 +214,6 @@ export default function TaxEstimator() {
     });
     return true;
   };
-
-  // scroll the page back to the widget when switching screens
-  useEffect(() => {
-    scrollToWidget();
-  }, [screen, scrollToWidget]);
 
   // count the headline total up from $0 (writes to the DOM directly, like
   // the prototype, so per-frame updates don't re-render the whole widget)
@@ -313,7 +300,6 @@ export default function TaxEstimator() {
     sendEstimateEmail(l, snapshot);
     setModalOpen(false);
     setUnlocked(true);
-    scrollToWidget();
   };
 
   const bookingConfigured = !ESTIMATOR_CONFIG.bookingUrl.includes("REPLACE");
@@ -968,7 +954,7 @@ export default function TaxEstimator() {
   }
 
   return (
-    <div ref={rootRef} className="mx-auto w-full max-w-[640px]">
+    <div className="mx-auto w-full max-w-[640px]">
       {screen === "input" ? inputScreen : resultsScreen}
       <LeadModal
         open={modalOpen}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import WaveField from "@/components/effects/WaveField";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
 import { SERVICES } from "@/lib/content";
@@ -34,7 +35,7 @@ export default function ServicesSection() {
       if (next !== idxRef.current) {
         idxRef.current = next;
         setIdx(next);
-        decryptTo(promiseRefs.current[next], SERVICES[next].promise, 700);
+        decryptTo(promiseRefs.current[next], SERVICES[next].promise);
       }
     };
     const onScroll = () => {
@@ -54,6 +55,7 @@ export default function ServicesSection() {
     <section id="services" className="relative z-[1]">
       <div ref={outerRef} className="relative h-[320vh]">
         <div className="sticky top-0 flex h-screen items-center overflow-hidden">
+          <WaveField />
           <div className="mx-auto grid w-full max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-center gap-12 px-7 pt-[70px]">
             {/* left column */}
             <div className="relative">

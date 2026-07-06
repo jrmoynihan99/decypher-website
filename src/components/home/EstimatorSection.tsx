@@ -1,9 +1,11 @@
+import WaveField from "@/components/effects/WaveField";
 import SectionHeading from "@/components/ui/SectionHeading";
 import TaxEstimator from "@/components/estimator/TaxEstimator";
 
 export default function EstimatorSection() {
   return (
     <section id="estimator" className="relative z-[1] px-6 pb-[120px] pt-10">
+      <WaveField />
       <SectionHeading
         eyebrow="[ 02 // run the numbers ]"
         title="Decrypt your tax bill."
