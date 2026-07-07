@@ -9,7 +9,7 @@ import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
-import { creators } from "@/lib/creators";
+import type { Creator } from "@/lib/creators";
 import {
   armHover,
   cancelDecrypt,
@@ -17,12 +17,26 @@ import {
   prefersReducedMotion,
 } from "@/lib/decrypt";
 
-const LINE_1 = "We decrypt";
-const LINE_2 = "your tax savings.";
+export interface HeroContent {
+  eyebrow?: string;
+  headlineLine1?: string;
+  headlineLine2?: string;
+  body?: string;
+  ctaLabel?: string;
+  secondaryCtaLabel?: string;
+  scrollHint?: string;
+}
 
-const STRIP = creators.slice(0, 16);
-
-export default function Hero() {
+export default function Hero({
+  content,
+  creators,
+}: {
+  content: HeroContent;
+  creators: Creator[];
+}) {
+  const line1 = content.headlineLine1 ?? "";
+  const line2 = content.headlineLine2 ?? "";
+  const strip = creators.slice(0, 16);
   const line1Ref = useRef<HTMLSpanElement>(null);
   const line2Ref = useRef<HTMLSpanElement>(null);
 
@@ -33,8 +47,8 @@ export default function Hero() {
     if (!e1 || !e2 || prefersReducedMotion()) return;
     decryptSegments(
       [
-        { el: e1, text: LINE_1 },
-        { el: e2, text: LINE_2 },
+        { el: e1, text: line1 },
+        { el: e2, text: line2 },
       ],
       undefined,
       () => {
@@ -45,11 +59,11 @@ export default function Hero() {
     return () => {
       cancelDecrypt(e1);
       cancelDecrypt(e2);
-      e1.textContent = LINE_1;
-      e2.textContent = LINE_2;
+      e1.textContent = line1;
+      e2.textContent = line2;
       e2.removeAttribute("style");
     };
-  }, []);
+  }, [line1, line2]);
 
   return (
     <SectionReveal>
@@ -58,37 +72,37 @@ export default function Hero() {
 
         <SubheadingReveal className="relative">
           <p className="m-0 font-mono text-[12.5px] uppercase tracking-[0.34em] text-magenta">
-            [ Accounting for creators ]
+            {content.eyebrow}
           </p>
         </SubheadingReveal>
         <h1 className="relative mt-[22px] max-w-[1060px] font-display text-[clamp(44px,7.2vw,94px)] font-bold leading-[1.03] tracking-[-0.03em]">
           <span ref={line1Ref} className="block text-fog">
-            {LINE_1}
+            {line1}
           </span>
           <span ref={line2Ref} className="block text-grad">
-            {LINE_2}
+            {line2}
           </span>
         </h1>
         <ParagraphReveal
           delay={0.5}
           className="relative mt-[26px] max-w-[58ch] text-[clamp(16px,1.9vw,19px)] leading-relaxed text-mist [text-wrap:pretty]"
         >
-          Tax is a creator’s biggest expense. We find the strategies hiding in
-          your numbers — so you keep more of every brand deal, sponsorship, and
-          payout.
+          {content.body ?? ""}
         </ParagraphReveal>
 
         <Reveal
           delay={0.75}
           className="relative mt-8 flex flex-wrap items-center justify-center gap-4"
         >
-          <ConsultButton size="lg" />
-          <a
-            href="#proof"
-            className="rounded-full border border-edge-bright px-[30px] py-4 font-display text-[16.5px] font-semibold text-fog no-underline transition-colors hover:border-magenta"
-          >
-            See the proof
-          </a>
+          <ConsultButton size="lg">{content.ctaLabel}</ConsultButton>
+          {content.secondaryCtaLabel && (
+            <a
+              href="#proof"
+              className="rounded-full border border-edge-bright px-[30px] py-4 font-display text-[16.5px] font-semibold text-fog no-underline transition-colors hover:border-magenta"
+            >
+              {content.secondaryCtaLabel}
+            </a>
+          )}
         </Reveal>
 
         {/* creator photo strip — reveals early, alongside the body copy.
@@ -99,7 +113,7 @@ export default function Hero() {
           className="relative mt-4 w-full overflow-hidden pb-12 pt-10 [mask-image:linear-gradient(90deg,transparent,#000_12%,#000_88%,transparent)]"
         >
           <Marquee duration={64} curve={80} scrollDrive className="gap-5">
-            {[...STRIP, ...STRIP].map((c, i) => (
+            {[...strip, ...strip].map((c, i) => (
               <Image
                 key={`${c.name}-${i}`}
                 src={c.img}
@@ -112,14 +126,16 @@ export default function Hero() {
           </Marquee>
         </Reveal>
 
-        <SubheadingReveal
-          delay={1.2}
-          className="absolute inset-x-0 bottom-[26px]"
-        >
-          <p className="m-0 font-mono text-[11px] tracking-[0.22em] text-faint">
-            SCROLL TO DECRYPT <span className="animate-blink">▼</span>
-          </p>
-        </SubheadingReveal>
+        {content.scrollHint && (
+          <SubheadingReveal
+            delay={1.2}
+            className="absolute inset-x-0 bottom-[26px]"
+          >
+            <p className="m-0 font-mono text-[11px] tracking-[0.22em] text-faint">
+              {content.scrollHint} <span className="animate-blink">▼</span>
+            </p>
+          </SubheadingReveal>
+        )}
       </section>
     </SectionReveal>
   );

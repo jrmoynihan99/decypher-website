@@ -10,7 +10,6 @@ import {
   fieldLabelCls,
 } from "@/components/estimator/fields";
 import DecryptOnView from "@/components/ui/DecryptOnView";
-import { SERVICES_FIVE } from "@/lib/content";
 
 /**
  * Booking-call form — front-end only for now. Submitting validates the two
@@ -33,7 +32,11 @@ const REVENUE_BANDS = ["Under 50k", "50–100k", "100–250k", "250–500k", "50
 const textareaCls =
   "min-h-[110px] w-full resize-y rounded-[11px] border border-white/15 bg-panel-2 px-3 py-[11px] font-body text-base text-fog outline-none transition-[border-color,box-shadow] duration-150 focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.22)]";
 
-export default function ScheduleForm() {
+export default function ScheduleForm({
+  serviceTitles,
+}: {
+  serviceTitles: string[];
+}) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -222,13 +225,13 @@ export default function ScheduleForm() {
                 What do you need? <span className="text-dusk">(pick any)</span>
               </label>
               <div className="flex flex-wrap gap-2.5">
-                {SERVICES_FIVE.map((svc) => {
-                  const on = interests.includes(svc.title);
+                {serviceTitles.map((title) => {
+                  const on = interests.includes(title);
                   return (
                     <button
-                      key={svc.num}
+                      key={title}
                       type="button"
-                      onClick={() => toggleInterest(svc.title)}
+                      onClick={() => toggleInterest(title)}
                       aria-pressed={on}
                       className={`cursor-pointer rounded-full border px-4 py-2 font-mono text-[11px] tracking-[0.08em] transition-colors duration-200 ${
                         on
@@ -236,7 +239,7 @@ export default function ScheduleForm() {
                           : "border-white/15 bg-panel-2 text-muted hover:border-magenta/50 hover:text-mist"
                       }`}
                     >
-                      {svc.title.toUpperCase()}
+                      {title.toUpperCase()}
                     </button>
                   );
                 })}

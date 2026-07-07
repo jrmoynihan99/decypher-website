@@ -1,4 +1,7 @@
-import creatorsJson from "@/data/creators.json";
+/**
+ * Creator display helpers. The roster itself lives in Sanity
+ * (fetched via getCreators() in src/sanity/queries.ts).
+ */
 
 export interface CreatorLink {
   plat: string;
@@ -11,14 +14,9 @@ export interface Creator {
   group: string;
   desc: string;
   links: CreatorLink[];
+  /** CDN image URL. */
   img: string;
 }
-
-/** Full roster, with image paths rooted at /public. */
-export const creators: Creator[] = (creatorsJson as Creator[]).map((c) => ({
-  ...c,
-  img: `/${c.img}`,
-}));
 
 /** Accent color per creator category (badge text + border tint). */
 export const ACCENT: Record<string, string> = {

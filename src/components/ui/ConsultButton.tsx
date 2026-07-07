@@ -1,4 +1,6 @@
-import { SCHEDULE_URL } from "@/lib/content";
+"use client";
+
+import { useConsultCta } from "@/context/ConsultCtaContext";
 
 const SIZES = {
   sm: { spin: 260, label: "px-[22px] py-[11px]", text: "text-sm" },
@@ -13,17 +15,18 @@ const SIZES = {
  */
 export default function ConsultButton({
   size = "sm",
-  href = SCHEDULE_URL,
-  children = "Free Consultation",
+  href,
+  children,
 }: {
   size?: keyof typeof SIZES;
   href?: string;
   children?: React.ReactNode;
 }) {
+  const cta = useConsultCta();
   const s = SIZES[size];
   return (
     <a
-      href={href}
+      href={href ?? cta.href}
       className={`group relative inline-block overflow-hidden rounded-full font-display font-semibold text-white no-underline transition-shadow duration-300 hover:shadow-[0_0_38px_rgba(139,43,232,0.5)] ${s.text}`}
     >
       <span
@@ -42,7 +45,7 @@ export default function ConsultButton({
       <span
         className={`relative inline-block transition-all duration-300 group-hover:bg-[linear-gradient(115deg,#FF5C2E,#FF2D78_45%,#B06CFF)] group-hover:bg-clip-text group-hover:text-transparent ${s.label}`}
       >
-        {children}
+        {children ?? cta.label}
       </span>
     </a>
   );

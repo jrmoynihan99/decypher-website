@@ -10,8 +10,27 @@ import ServicesShowcase from "@/components/home/ServicesShowcase";
 import StatsSection from "@/components/home/StatsSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
 import VideoSection from "@/components/home/VideoSection";
+import type { Creator } from "@/lib/creators";
+import type {
+  CmsService,
+  CmsTestimonial,
+  HomePageDoc,
+  SiteSettings,
+} from "@/sanity/types";
 
-export default function Home() {
+export default function HomeTemplate({
+  page,
+  settings,
+  creators,
+  services,
+  testimonials,
+}: {
+  page: HomePageDoc;
+  settings: SiteSettings | null;
+  creators: Creator[];
+  services: CmsService[];
+  testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
+}) {
   return (
     <main id="top" className="relative">
       <CipherRain />
@@ -30,10 +49,15 @@ export default function Home() {
               "linear-gradient(to bottom, transparent 0, #000 220px, #000 calc(100% - 360px), transparent 100%)",
           }}
         />
-        <Hero />
-        <StatsSection />
+        <Hero content={page.hero ?? {}} creators={creators} />
+        <StatsSection
+          eyebrow={page.statsSection?.eyebrow}
+          title={page.statsSection?.title}
+          stats={settings?.stats ?? []}
+          disclaimer={settings?.statsDisclaimer}
+        />
       </div>
-      <EstimatorSection />
+      <EstimatorSection content={page.estimatorSection ?? {}} />
       {/* continuous mesh over Video + Roster: bleeds up into the Estimator and
           fades back out as the Services section scrolls in below */}
       <div className="relative z-[1]">
@@ -46,17 +70,31 @@ export default function Home() {
               "linear-gradient(to bottom, transparent 0, #000 300px, #000 calc(100% - 300px), transparent 100%)",
           }}
         />
-        <VideoSection />
-        <RosterSection />
+        <VideoSection content={page.videoSection ?? {}} />
+        <RosterSection
+          content={page.rosterSection ?? {}}
+          creators={creators.slice(0, 16)}
+          totalCount={creators.length}
+        />
       </div>
       {/* Services + everything below share one web: in Atlas mode the
           stage's own mesh bleeds down behind Testimonials/FAQ/CTA (one
           simulation, one canvas); in Flyover mode the classic background
           web takes over below the pin. ServicesShowcase owns the wiring. */}
-      <ServicesShowcase>
-        <TestimonialsSection />
-        <FaqSection />
-        <CtaSection />
+      <ServicesShowcase
+        content={page.servicesSection ?? {}}
+        services={services.slice(0, 5)}
+      >
+        <TestimonialsSection
+          content={page.testimonialsSection ?? {}}
+          rowA={testimonials.rowA}
+          rowB={testimonials.rowB}
+        />
+        <FaqSection
+          content={page.faqSection ?? {}}
+          faqs={page.faqSection?.items ?? []}
+        />
+        <CtaSection content={page.cta ?? {}} />
       </ServicesShowcase>
     </main>
   );

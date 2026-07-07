@@ -2,15 +2,20 @@ import WaveField from "@/components/effects/WaveField";
 import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import TaxEstimator from "@/components/estimator/TaxEstimator";
+import type { SectionHeadingContent } from "@/sanity/types";
 
-export default function EstimatorSection() {
+export default function EstimatorSection({
+  content,
+}: {
+  content: SectionHeadingContent;
+}) {
   return (
     <section id="estimator" className="relative z-[1] px-6 pb-[120px] pt-10">
       <WaveField />
       <SectionHeading
-        eyebrow="[ 02 // run the numbers ]"
-        title="Decrypt your tax bill."
-        sub="A 60-second, no-login estimate of your self-employment, federal, and state taxes — plus what you could be saving. 2026 tax year, US self-employed."
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub={content.sub}
         glowDuration={18}
       />
       <Reveal amount={0.15} className="mx-auto mt-11 w-full max-w-[760px]">

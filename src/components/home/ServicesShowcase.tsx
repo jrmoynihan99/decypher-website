@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import ServicesAtlas from "@/components/home/services-variants/ServicesAtlas";
 import ServicesFlyover from "@/components/home/services-variants/ServicesFlyover";
+import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 
 /**
  * Home-page services section: the two neural-web finalists with a small
@@ -21,8 +22,12 @@ import ServicesFlyover from "@/components/home/services-variants/ServicesFlyover
  * Once a winner is picked, delete the toggle and the losing branch.
  */
 export default function ServicesShowcase({
+  content,
+  services,
   children,
 }: {
+  content: SectionHeadingContent;
+  services: CmsService[];
   children?: React.ReactNode;
 }) {
   const [mode, setMode] = useState<"atlas" | "flyover">("atlas");
@@ -52,13 +57,18 @@ export default function ServicesShowcase({
 
   return mode === "atlas" ? (
     <div ref={groupRef} className="relative z-[1]">
-      <ServicesAtlas key="atlas" bleedTo={groupRef} />
+      <ServicesAtlas
+        key="atlas"
+        content={content}
+        services={services}
+        bleedTo={groupRef}
+      />
       {toggle}
       {children}
     </div>
   ) : (
     <>
-      <ServicesFlyover key="flyover" />
+      <ServicesFlyover key="flyover" content={content} services={services} />
       <div className="relative z-[1]">
         <NeuralWeb
           style={{
