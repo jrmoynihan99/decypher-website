@@ -23,7 +23,7 @@ export interface Service {
   imgLabel: string;
 }
 
-export const SERVICES: Service[] = [
+export const SERVICES_FIVE: Service[] = [
   {
     num: "01",
     title: "Tax Filing + Strategy",
@@ -46,7 +46,30 @@ export const SERVICES: Service[] = [
     body: "We specialize in the creator economy. Your finances are done weekly — so you can make decisions when you need to, and capture every write-off you're owed.",
     imgLabel: "// BOOKKEEPING.IMG",
   },
+  // 04 + 05 are placeholder copy — swap for real offerings before shipping.
+  {
+    num: "04",
+    title: "S-Corp + Payroll",
+    promise: "KEEP MORE OF EVERY DOLLAR",
+    body: "When the numbers say it's time, we handle the S-corp election, set a reasonable salary, and run your payroll on autopilot — so the savings actually land.",
+    chips: ["ELECTION", "PAYROLL", "QUARTERLIES"],
+    imgLabel: "// SCORP_PAYROLL.IMG",
+  },
+  {
+    num: "05",
+    title: "Fractional CFO",
+    promise: "A FINANCE TEAM ON SPEED DIAL",
+    body: "Forecasting, brand-deal pricing, cash-flow planning — senior finance help in your corner for every decision bigger than a spreadsheet.",
+    imgLabel: "// FRACTIONAL_CFO.IMG",
+  },
 ];
+
+/**
+ * The original three services. The earlier variants were built around a
+ * 3-card layout (orbit geometry, `/03` readouts) — they keep consuming this
+ * slice while the neural-web variants render all of SERVICES_FIVE.
+ */
+export const SERVICES: Service[] = SERVICES_FIVE.slice(0, 3);
 
 export interface Testimonial {
   quote: string;

@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 import CipherRain from "@/components/effects/CipherRain";
+import ServicesAtlas from "@/components/home/services-variants/ServicesAtlas";
+import ServicesAtlasFramed from "@/components/home/services-variants/ServicesAtlasFramed";
 import ServicesCinema from "@/components/home/services-variants/ServicesCinema";
 import ServicesCircuit from "@/components/home/services-variants/ServicesCircuit";
+import ServicesDeepField from "@/components/home/services-variants/ServicesDeepField";
+import ServicesFlyover from "@/components/home/services-variants/ServicesFlyover";
 import ServicesLedger from "@/components/home/services-variants/ServicesLedger";
 import ServicesLens from "@/components/home/services-variants/ServicesLens";
 import ServicesOrbit from "@/components/home/services-variants/ServicesOrbit";
@@ -18,6 +22,8 @@ import ServicesTuner from "@/components/home/services-variants/ServicesTuner";
  *
  * SET A gates the info behind play — fun, but work to read.
  * SET B is zero-effort: scrolling (or nothing at all) reveals everything.
+ * SET C scatters all FIVE services across a neural web seen from a birds-eye
+ *       view, and the camera flies down into whichever one you engage.
  */
 
 interface Variant {
@@ -25,7 +31,7 @@ interface Variant {
   num: string;
   name: string;
   desc: string;
-  Comp: () => React.JSX.Element;
+  Comp: React.ComponentType;
 }
 
 const SET_A: Variant[] = [
@@ -90,16 +96,48 @@ const SET_B: Variant[] = [
   },
 ];
 
+const SET_C: Variant[] = [
+  {
+    key: "atlas",
+    num: "09",
+    name: "NEURAL ATLAS",
+    desc: "All five services scattered across a fully lit neural map. Hovering a node illuminates it, spins its cluster up, and flashes CLICK TO OPEN; clicking dives the camera in — the hub blooms into a tumbling 3D neuron with the copy growing out of it as open editorial type. A CLICK TO CLOSE chip rides the cursor while zoomed; click anywhere off a node (or Esc) to climb back out.",
+    Comp: ServicesAtlas,
+  },
+  {
+    key: "flyover",
+    num: "10",
+    name: "THE FLYOVER",
+    desc: "The zero-effort cut of the map: scroll is the flight stick. The camera dives into node 01 — a 3D neuron blooms under Sequence-style type — then climbs out, glides across the web, and dives into the next, ending back in orbit with every hub lit. The scrollbar is the flight path.",
+    Comp: ServicesFlyover,
+  },
+  {
+    key: "deepfield",
+    num: "11",
+    name: "DEEP FIELD",
+    desc: "The dossiers physically live in the web — headlines readable from orbit, fine print too far away. Hover one and the camera closes the distance until it fills your screen. The info was always on the map; you just fly closer.",
+    Comp: ServicesDeepField,
+  },
+  {
+    key: "atlasframed",
+    num: "12",
+    name: "ATLAS · FRAMED",
+    desc: "The Neural Atlas in its original frame: same lit map, camera dives, 3D neurons, and node-anchored type — contained in a rounded map panel in page flow instead of taking the whole viewport.",
+    Comp: ServicesAtlasFramed,
+  },
+];
+
 const GROUPS = [
   { label: "SET A — HANDS-ON TOYS", items: SET_A },
   { label: "SET B — ZERO-EFFORT · SCROLL-DRIVEN", items: SET_B },
+  { label: "SET C — NEURAL WEB · CAMERA FLIGHTS", items: SET_C },
 ];
 
-const ALL = [...SET_A, ...SET_B];
+const ALL = [...SET_A, ...SET_B, ...SET_C];
 
 export default function ServicesLabPage() {
-  // default to the first zero-effort variant — the current direction
-  const [key, setKey] = useState("cinema");
+  // default to the newest direction — the neural-web camera flights
+  const [key, setKey] = useState("atlas");
   const v = ALL.find((x) => x.key === key) ?? ALL[0];
   const Active = v.Comp;
 
@@ -112,7 +150,7 @@ export default function ServicesLabPage() {
             [ services // variant lab ]
           </p>
           <h1 className="mt-3 font-display text-[clamp(28px,3.4vw,44px)] font-bold tracking-[-0.02em] text-fog">
-            Eight ways to decrypt the services.
+            Twelve ways to decrypt the services.
           </h1>
           <p className="mt-3 max-w-[70ch] text-[15px] leading-relaxed text-mist">
             Drop-in replacements for{" "}
@@ -120,8 +158,9 @@ export default function ServicesLabPage() {
               ServicesSection
             </span>
             . Set A is interactive show-and-tell; Set B reveals everything
-            through normal scrolling — no puzzles. Pick one, then swap the
-            import in{" "}
+            through normal scrolling — no puzzles. Set C lays all five
+            services on a neural map and flies the camera into whichever one
+            you engage. Pick one, then swap the import in{" "}
             <span className="font-mono text-[13.5px] text-magenta">
               src/app/page.tsx
             </span>

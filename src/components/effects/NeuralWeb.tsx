@@ -92,6 +92,16 @@ export default function NeuralWeb({
       pointer.cx = -1e5;
       pointer.cy = -1e5;
     };
+    // click-and-hold strengthens the pull; `grip` eases toward held-ness each
+    // frame so the two modes blend instead of snapping
+    let held = false;
+    let grip = 0;
+    const onDown = () => {
+      held = true;
+    };
+    const onUp = () => {
+      held = false;
+    };
 
     let last = 0;
     const draw = (t: number) => {
@@ -105,21 +115,27 @@ export default function NeuralWeb({
       const my = pointer.cy - rect.top;
       const mouseOn = mx > -MOUSE_R && mx < w + MOUSE_R && my > -MOUSE_R && my < h + MOUSE_R;
 
+      // grip ramps 0→1 while held (≈0.3s) and back down on release; the
+      // boosted force and speed cap ride it, so the hand-off is one curve
+      grip += ((held ? 1 : 0) - grip) * (1 - Math.exp(-dtF * 0.12));
+      const pull = 0.028 * (1 + grip * 4.5);
+      const cap = MAX_SPD * (1 + grip * 2.2);
+
       for (const n of nodes) {
         if (mouseOn) {
           const dx = mx - n.x;
           const dy = my - n.y;
           const d = Math.hypot(dx, dy);
           if (d < MOUSE_R && d > 1) {
-            const f = (1 - d / MOUSE_R) * 0.028 * dtF;
+            const f = (1 - d / MOUSE_R) * pull * dtF;
             n.vx += (dx / d) * f;
             n.vy += (dy / d) * f;
           }
         }
         const spd = Math.hypot(n.vx, n.vy);
-        if (spd > MAX_SPD) {
-          n.vx = (n.vx / spd) * MAX_SPD;
-          n.vy = (n.vy / spd) * MAX_SPD;
+        if (spd > cap) {
+          n.vx = (n.vx / spd) * cap;
+          n.vy = (n.vy / spd) * cap;
         }
         n.x += n.vx * dtF;
         n.y += n.vy * dtF;
@@ -212,12 +228,18 @@ export default function NeuralWeb({
     ro.observe(wrap);
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerout", onLeave, { passive: true });
+    window.addEventListener("pointerdown", onDown, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
 
     return () => {
       io.disconnect();
       ro.disconnect();
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerout", onLeave);
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       if (raf) cancelAnimationFrame(raf);
     };
   }, [opacity]);
