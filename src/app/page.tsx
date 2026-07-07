@@ -6,7 +6,7 @@ import EstimatorSection from "@/components/home/EstimatorSection";
 import FaqSection from "@/components/home/FaqSection";
 import Hero from "@/components/home/Hero";
 import RosterSection from "@/components/home/RosterSection";
-import ServicesCinema from "@/components/home/services-variants/ServicesCinema";
+import ServicesShowcase from "@/components/home/ServicesShowcase";
 import StatsSection from "@/components/home/StatsSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
 import VideoSection from "@/components/home/VideoSection";
@@ -49,22 +49,15 @@ export default function Home() {
         <VideoSection />
         <RosterSection />
       </div>
-      <ServicesCinema />
-      {/* continuous mesh over Testimonials + FAQ + CTA, fading in at the top of
-          Testimonials and out at the very bottom of the page */}
-      <div className="relative z-[1]">
-        <NeuralWeb
-          style={{
-            WebkitMaskImage:
-              "linear-gradient(to bottom, transparent 0, #000 320px, #000 calc(100% - 220px), transparent 100%)",
-            maskImage:
-              "linear-gradient(to bottom, transparent 0, #000 320px, #000 calc(100% - 220px), transparent 100%)",
-          }}
-        />
+      {/* Services + everything below share one web: in Atlas mode the
+          stage's own mesh bleeds down behind Testimonials/FAQ/CTA (one
+          simulation, one canvas); in Flyover mode the classic background
+          web takes over below the pin. ServicesShowcase owns the wiring. */}
+      <ServicesShowcase>
         <TestimonialsSection />
         <FaqSection />
         <CtaSection />
-      </div>
+      </ServicesShowcase>
     </main>
   );
 }

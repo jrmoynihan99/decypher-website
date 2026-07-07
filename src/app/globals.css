@@ -34,6 +34,7 @@
   --animate-beam-sweep: beam-sweep 9s linear infinite;
   --animate-pulse-ring: pulse-ring 2.6s ease-out infinite;
   --animate-scan: scan-move 1.7s linear infinite;
+  --animate-node-float: node-float 6s ease-in-out infinite;
 
   @keyframes glow-drift {
     0% {
@@ -99,6 +100,15 @@
     }
     100% {
       background-position: 0 48px;
+    }
+  }
+  @keyframes node-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
     }
   }
 }
