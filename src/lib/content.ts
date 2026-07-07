@@ -1,6 +1,10 @@
 /** Static marketing copy for the homepage sections. */
 
-export const SCHEDULE_URL = "https://wedecypher.co/schedule-team";
+/** All booking CTAs route to the on-site schedule page. */
+export const SCHEDULE_URL = "/schedule";
+
+/** External scheduling tool — linked from the schedule page's form flow later. */
+export const EXTERNAL_SCHEDULE_URL = "https://wedecypher.co/schedule-team";
 
 export interface Stat {
   value: string;
@@ -21,6 +25,9 @@ export interface Service {
   body: string;
   chips?: string[];
   imgLabel: string;
+  /** Path under /public — once real service imagery lands, layouts render it
+   *  in place of the framed placeholder slot. */
+  img?: string;
 }
 
 export const SERVICES_FIVE: Service[] = [

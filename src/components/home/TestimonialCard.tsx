@@ -1,82 +1,20 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useSpotlight } from "@/hooks/useSpotlight";
 import { Testimonial } from "@/lib/content";
 
 /**
- * Frosted-glass testimonial card with a cursor-tracking spotlight that eases
- * toward the pointer (rAF spring, no snap) and a smooth hover lift. Mirrors the
- * stat cards. Card-local spotlight coords are recomputed per move, so it stays
- * correct even while the card rides the marquee.
+ * Frosted-glass testimonial card with a cursor-tracking spotlight
+ * (useSpotlight) and a smooth hover lift. Mirrors the stat cards.
  */
 export default function TestimonialCard({ t }: { t: Testimonial }) {
-  const ref = useRef<HTMLElement>(null);
-  const follow = useRef({
-    tx: 0,
-    ty: 0,
-    cx: 0,
-    cy: 0,
-    raf: 0,
-    running: false,
-    entered: false,
-  });
-
-  useEffect(() => {
-    const f = follow.current;
-    return () => {
-      if (f.raf) cancelAnimationFrame(f.raf);
-    };
-  }, []);
-
-  const run = () => {
-    const s = follow.current;
-    if (s.running) return;
-    s.running = true;
-    const step = () => {
-      const k = 0.16; // easing stiffness — lower = more trailing lag
-      s.cx += (s.tx - s.cx) * k;
-      s.cy += (s.ty - s.cy) * k;
-      const el = ref.current;
-      if (el) {
-        el.style.setProperty("--mx", `${s.cx.toFixed(1)}px`);
-        el.style.setProperty("--my", `${s.cy.toFixed(1)}px`);
-      }
-      if (Math.abs(s.tx - s.cx) < 0.5 && Math.abs(s.ty - s.cy) < 0.5) {
-        s.running = false;
-        s.raf = 0;
-        return;
-      }
-      s.raf = requestAnimationFrame(step);
-    };
-    s.raf = requestAnimationFrame(step);
-  };
-
-  const onMove = (e: React.MouseEvent<HTMLElement>) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const s = follow.current;
-    s.tx = e.clientX - r.left;
-    s.ty = e.clientY - r.top;
-    if (!s.entered) {
-      s.entered = true;
-      s.cx = s.tx;
-      s.cy = s.ty;
-      el.style.setProperty("--mx", `${s.cx.toFixed(1)}px`);
-      el.style.setProperty("--my", `${s.cy.toFixed(1)}px`);
-    }
-    run();
-  };
-
-  const onLeave = () => {
-    follow.current.entered = false;
-  };
+  const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLElement>();
 
   return (
     <figure
       ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
       className="group relative m-0 w-[400px] flex-none overflow-hidden rounded-[18px] border border-white/10 bg-gradient-to-b from-white/[0.09] to-white/[0.02] p-7 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)]"
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}

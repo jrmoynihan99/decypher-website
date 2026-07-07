@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
 import Footer from "@/components/layout/Footer";
 import Navbar from "@/components/layout/Navbar";
+import Providers from "./Providers";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -40,12 +41,15 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-page-transition="wipe"
       className={`${spaceGrotesk.variable} ${inter.variable} ${plexMono.variable}`}
     >
       <body className="relative min-h-screen">
-        <Navbar />
-        {children}
-        <Footer />
+        <Providers>
+          <Navbar />
+          {children}
+          <Footer />
+        </Providers>
       </body>
     </html>
   );

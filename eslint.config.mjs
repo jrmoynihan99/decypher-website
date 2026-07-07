@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Design handoff prototype (not app code):
     "decipher-homepage-design/**",
+    // Reference copies of the reveal components (live in src/components/reveal):
+    "reveal-animations/**",
   ]),
 ]);
 

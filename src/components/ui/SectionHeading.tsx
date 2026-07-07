@@ -1,9 +1,15 @@
+import ParagraphReveal from "@/components/reveal/ParagraphReveal";
+import Reveal from "@/components/reveal/Reveal";
+import SectionReveal from "@/components/reveal/SectionReveal";
+import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
 
 /**
  * Centered section header: mono eyebrow, decrypting display heading, and an
  * optional subline (body copy or a mono code-comment), over an ambient glow.
+ * One SectionReveal drives the choreography: eyebrow slides up first, the
+ * heading decrypts on its own observer, and the subline follows.
  */
 export default function SectionHeading({
   eyebrow,
@@ -19,11 +25,13 @@ export default function SectionHeading({
   glowDuration?: number;
 }) {
   return (
-    <div className="relative mx-auto max-w-[860px] px-6 text-center">
+    <SectionReveal className="relative mx-auto max-w-[860px] px-6 text-center">
       <GlowOrb duration={glowDuration} />
-      <p className="relative m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-        {eyebrow}
-      </p>
+      <SubheadingReveal className="relative">
+        <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
+          {eyebrow}
+        </p>
+      </SubheadingReveal>
       <DecryptOnView
         as="h2"
         text={title}
@@ -31,14 +39,25 @@ export default function SectionHeading({
       />
       {sub != null &&
         (subMono ? (
-          <p className="relative mt-[18px] font-mono text-[11.5px] tracking-[0.14em] text-faint">
+          <SubheadingReveal delay={0.35} className="relative mt-[18px]">
+            <p className="m-0 font-mono text-[11.5px] tracking-[0.14em] text-faint">
+              {sub}
+            </p>
+          </SubheadingReveal>
+        ) : typeof sub === "string" ? (
+          <ParagraphReveal
+            delay={0.25}
+            className="relative mx-auto mt-4 max-w-[54ch] text-[16.5px] leading-relaxed text-mist"
+          >
             {sub}
-          </p>
+          </ParagraphReveal>
         ) : (
-          <p className="relative mx-auto mt-4 max-w-[54ch] text-[16.5px] leading-relaxed text-mist">
-            {sub}
-          </p>
+          <Reveal delay={0.25} className="relative">
+            <p className="mx-auto mt-4 max-w-[54ch] text-[16.5px] leading-relaxed text-mist">
+              {sub}
+            </p>
+          </Reveal>
         ))}
-    </div>
+    </SectionReveal>
   );
 }

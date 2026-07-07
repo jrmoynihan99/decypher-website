@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { prefersReducedMotion, randChar } from "@/lib/decrypt";
 
 interface Drop {
@@ -102,12 +103,15 @@ export default function CipherRain() {
   }, []);
 
   return (
-    <div
+    <motion.div
       aria-hidden
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 2, ease: "easeOut" }}
       className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
     >
       <div ref={aRef} className="absolute inset-0 will-change-transform" />
       <div ref={bRef} className="absolute inset-0 will-change-transform" />
-    </div>
+    </motion.div>
   );
 }

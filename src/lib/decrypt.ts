@@ -30,23 +30,44 @@ type DecryptEl = HTMLElement & { _decryptToken?: number };
  * snaps back when it settles. For any element whose *final* text lays out on a
  * single line, pin `white-space: nowrap` while the effect runs so wider glyphs
  * overflow invisibly instead of wrapping. Genuinely multi-line text is measured
- * and left untouched, so the visual effect is unchanged. Cleared by
+ * and left untouched, so the visual effect is unchanged. Centered (or
+ * right-aligned) single-line text additionally has its width pinned to the
+ * final copy and is left-anchored for the run, so revealed characters don't
+ * dance horizontally as the scrambled width fluctuates. Cleared by
  * `unlockLineWidth` when the effect completes or cancels.
  */
 function lockLineWidth(el: HTMLElement, target: string): void {
-  // measure natural wrapping with no pin in effect
+  // clear any pins from a prior run so we measure the element's natural layout
   el.style.whiteSpace = "";
+  el.style.width = "";
+  el.style.marginInline = "";
+  el.style.textAlign = "";
   const probe = " "; // one non-breaking space → exactly one line tall
   el.textContent = probe;
   const singleLineH = el.offsetHeight;
   el.textContent = target;
   const fullH = el.offsetHeight;
-  if (singleLineH > 0 && fullH <= singleLineH * 1.5)
+  if (singleLineH > 0 && fullH <= singleLineH * 1.5) {
     el.style.whiteSpace = "nowrap";
+    // Center-/right-aligned text shifts horizontally as proportional cipher
+    // glyphs change width mid-decrypt. Pin the box to the final text width and
+    // left-anchor it (kept centered with auto margins) so already-revealed
+    // characters hold still; only the unrevealed tail can spill sideways.
+    const align = getComputedStyle(el).textAlign;
+    if (align === "center" || align === "right" || align === "end") {
+      el.style.width = "max-content";
+      el.style.width = `${el.offsetWidth}px`;
+      el.style.marginInline = "auto";
+      el.style.textAlign = "left";
+    }
+  }
 }
 
 function unlockLineWidth(el: HTMLElement): void {
   el.style.whiteSpace = "";
+  el.style.width = "";
+  el.style.marginInline = "";
+  el.style.textAlign = "";
 }
 
 /**
@@ -54,7 +75,7 @@ function unlockLineWidth(el: HTMLElement): void {
  * the same amount of time, so longer strings animate proportionally longer
  * (constant per-character speed rather than a fixed total).
  */
-export const MS_PER_CHAR = 10;
+export const MS_PER_CHAR = 25;
 const MIN_DUR = 400;
 // cap the total reveal so long strings (e.g. FAQ answers) don't drag on
 const MAX_DUR = 1000;
@@ -134,6 +155,141 @@ export function cancelDecrypt(el: HTMLElement | null): void {
   node._decryptToken = (node._decryptToken || 0) + 1;
   node.style.filter = "";
   unlockLineWidth(node);
+}
+
+/* ---- fixed-cell reveal: each glyph holds a fixed-width slot ---- */
+
+type Cell = { span: HTMLElement | null; ch: string };
+
+/**
+ * Rebuild `el`'s text as one fixed-width slot per character: every non-space
+ * glyph becomes an `inline-block` pinned to that character's final rendered
+ * width, with its (scrambling) glyph centered inside. Because each slot's width
+ * never changes, the text occupies its exact final footprint at every frame —
+ * so a centered or wrapping headline can't breathe sideways or re-flow to a
+ * different line mid-decrypt (the failure modes `lockLineWidth` can't fix for
+ * multi-line text). Spaces stay as real whitespace so wrapping still happens at
+ * the same points. Widths are measured in one batch before any is pinned, so we
+ * don't force a reflow per character. Returns the ordered cells (span `null`
+ * for whitespace) for the animator to drive; flatten back with
+ * `el.textContent = text` when done so the text reflows normally again.
+ */
+function buildCells(el: HTMLElement, text: string): Cell[] {
+  el.style.whiteSpace = "";
+  el.style.width = "";
+  el.style.marginInline = "";
+  el.style.textAlign = "";
+  el.textContent = "";
+  // Group each run of non-space glyphs into a `nowrap` wrapper so the line can
+  // only break between words (at real whitespace). Without this, every
+  // fixed-width slot is its own break opportunity and long words split
+  // mid-word during the effect, then snap back when the text re-flows.
+  const cells: Cell[] = [];
+  let word: HTMLElement | null = null;
+  for (const ch of Array.from(text)) {
+    if (/\s/.test(ch)) {
+      word = null;
+      el.appendChild(document.createTextNode(ch));
+      cells.push({ span: null, ch });
+      continue;
+    }
+    if (!word) {
+      word = document.createElement("span");
+      word.style.whiteSpace = "nowrap";
+      el.appendChild(word);
+    }
+    const s = document.createElement("span");
+    s.style.display = "inline-block";
+    s.textContent = ch;
+    word.appendChild(s);
+    cells.push({ span: s, ch });
+  }
+  // measure every glyph first (one layout pass), then pin — reading a width
+  // after each pin would thrash layout character by character
+  const widths = cells.map((c) =>
+    c.span ? c.span.getBoundingClientRect().width : 0,
+  );
+  cells.forEach((c, i) => {
+    if (c.span) {
+      c.span.style.width = `${widths[i]}px`;
+      c.span.style.textAlign = "center";
+    }
+  });
+  return cells;
+}
+
+/**
+ * Fixed-cell version of `encrypt`: the pre-reveal resting state for headings
+ * that reveal via `decryptCells`, so they sit correctly wrapped (not breathing)
+ * while scrambled and blurred below the fold.
+ */
+export function encryptCells(el: HTMLElement | null, text: string): void {
+  if (!el || prefersReducedMotion()) return;
+  const cells = buildCells(el, text);
+  for (const c of cells) if (c.span) c.span.textContent = randChar();
+  el.style.filter = `blur(${REVEAL_BLUR}px)`;
+}
+
+/**
+ * Fixed-cell counterpart to `decryptTo`: same left-to-right lock, tail
+ * re-randomization and blur-into-focus, but each glyph animates inside a
+ * fixed-width slot so the line never changes width. Use for centered and/or
+ * multi-line headings. On completion the cells are flattened back to plain text
+ * (so it reflows on resize) before `done` runs.
+ */
+export function decryptCells(
+  el: HTMLElement | null,
+  text: string,
+  dur?: number,
+  done?: () => void,
+): void {
+  if (!el) return;
+  const node = el as DecryptEl;
+  if (prefersReducedMotion()) {
+    node.textContent = text;
+    done?.();
+    return;
+  }
+  const cells = buildCells(node, text);
+  const n = cells.length;
+  const scr = cells.map((c) => (c.span ? randChar() : ""));
+  // paint the fully-scrambled, blurred state synchronously so the real text
+  // measured a moment ago never flashes before the first animation frame
+  cells.forEach((c, i) => {
+    if (c.span) c.span.textContent = scr[i];
+  });
+  node.style.filter = `blur(${REVEAL_BLUR}px)`;
+  const duration = dur ?? Math.min(Math.max(MS_PER_CHAR * n, MIN_DUR), MAX_DUR);
+  const t0 = performance.now();
+  let last = 0;
+  const token = (node._decryptToken = (node._decryptToken || 0) + 1);
+  function frame(t: number) {
+    if (node._decryptToken !== token) return;
+    const p = Math.min(1, (t - t0) / duration);
+    const lock = Math.floor(p * n);
+    const b = REVEAL_BLUR * Math.max(0, 1 - p / 0.6);
+    node.style.filter = b > 0.05 ? `blur(${b.toFixed(2)}px)` : "";
+    const reRand = t - last > 45;
+    if (reRand) last = t;
+    for (let i = 0; i < n; i++) {
+      const c = cells[i];
+      if (!c.span) continue;
+      if (i < lock) {
+        if (c.span.textContent !== c.ch) c.span.textContent = c.ch;
+      } else if (reRand) {
+        scr[i] = randChar();
+        c.span.textContent = scr[i];
+      }
+    }
+    if (p < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      node.textContent = text;
+      node.style.filter = "";
+      done?.();
+    }
+  }
+  requestAnimationFrame(frame);
 }
 
 /**
@@ -245,31 +401,53 @@ export function armHover(el: HTMLElement, gradient = false): void {
   }
   const chars = Array.from(txt);
   const n = chars.length;
+  // Same word-grouping as `buildCells`: keep each word's letters in a `nowrap`
+  // wrapper so a letter that becomes a fixed-width slot on hover can't open a
+  // mid-word break.
+  let word: HTMLElement | null = null;
   chars.forEach((ch, i) => {
+    if (/\s/.test(ch)) {
+      word = null;
+      el.appendChild(document.createTextNode(ch));
+      return;
+    }
+    if (!word) {
+      word = document.createElement("span");
+      word.style.whiteSpace = "nowrap";
+      el.appendChild(word);
+    }
     const s = document.createElement("span");
     s.textContent = ch;
     const cbase = gradient ? gradAt(n <= 1 ? 0 : i / (n - 1)) : "";
     if (cbase) s.style.color = cbase;
-    if (!/\s/.test(ch)) {
-      let busy = false;
-      s.addEventListener("mouseenter", () => {
-        if (busy) return;
-        busy = true;
-        let k = 0;
-        s.style.color = "#FF2D78";
-        s.style.textShadow = "0 0 20px rgba(255,45,120,.85)";
-        const iv = setInterval(() => {
-          s.textContent = randChar();
-          if (++k > 5) {
-            clearInterval(iv);
-            s.textContent = ch;
-            s.style.color = cbase;
-            s.style.textShadow = "none";
-            busy = false;
-          }
-        }, 45);
-      });
-    }
-    el.appendChild(s);
+    let busy = false;
+    s.addEventListener("mouseenter", () => {
+      if (busy) return;
+      busy = true;
+      // Freeze this glyph's slot to its real width for the flicker so the
+      // wider/narrower cipher glyphs don't shove the rest of the line (and
+      // re-center it) on every scramble frame. Released when the flicker
+      // ends, so the resting line stays natural text and reflows on resize.
+      s.style.width = `${s.getBoundingClientRect().width}px`;
+      s.style.display = "inline-block";
+      s.style.textAlign = "center";
+      let k = 0;
+      s.style.color = "#FF2D78";
+      s.style.textShadow = "0 0 20px rgba(255,45,120,.85)";
+      const iv = setInterval(() => {
+        s.textContent = randChar();
+        if (++k > 5) {
+          clearInterval(iv);
+          s.textContent = ch;
+          s.style.color = cbase;
+          s.style.textShadow = "none";
+          s.style.width = "";
+          s.style.display = "";
+          s.style.textAlign = "";
+          busy = false;
+        }
+      }, 45);
+    });
+    word.appendChild(s);
   });
 }

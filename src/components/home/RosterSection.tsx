@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Marquee from "@/components/ui/Marquee";
 import { Creator, creatorHandle, creators } from "@/lib/creators";
@@ -19,6 +20,8 @@ function RosterRow({
     <Marquee
       duration={reverse ? 78 : 64}
       reverse={reverse}
+      curve={50}
+      scrollDrive
       className={`gap-5 ${className}`}
     >
       {[...row, ...row].map((c, i) => (
@@ -54,10 +57,13 @@ export default function RosterSection() {
         subMono
         glowDuration={16}
       />
-      <div className="mt-[54px] overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]">
+      <Reveal
+        amount={0.2}
+        className="mt-[54px] overflow-hidden py-8 [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+      >
         <RosterRow row={ROW_A} className="py-1.5" />
         <RosterRow row={ROW_B} reverse className="pb-1.5 pt-5" />
-      </div>
+      </Reveal>
     </section>
   );
 }
