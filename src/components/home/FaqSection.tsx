@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Reveal from "@/components/reveal/Reveal";
+import SectionReveal from "@/components/reveal/SectionReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { FAQS, Faq } from "@/lib/content";
 import {
@@ -95,11 +97,16 @@ export default function FaqSection() {
         subMono
         glowDuration={18}
       />
-      <div className="mx-auto mt-12 max-w-[840px] border-t border-edge">
-        {FAQS.map((faq) => (
-          <FaqItem key={faq.q} faq={faq} />
+      <SectionReveal
+        amount={0.1}
+        className="mx-auto mt-12 max-w-[840px] border-t border-edge"
+      >
+        {FAQS.map((faq, i) => (
+          <Reveal key={faq.q} delay={0.1 + i * 0.07}>
+            <FaqItem faq={faq} />
+          </Reveal>
         ))}
-      </div>
+      </SectionReveal>
     </section>
   );
 }

@@ -35,6 +35,7 @@
   --animate-pulse-ring: pulse-ring 2.6s ease-out infinite;
   --animate-scan: scan-move 1.7s linear infinite;
   --animate-node-float: node-float 6s ease-in-out infinite;
+  --animate-rise: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 
   @keyframes glow-drift {
     0% {
@@ -111,6 +112,16 @@
       transform: translateY(-5px);
     }
   }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 }
 
 /* Brand gradient — used as both a background and clipped text fill */
@@ -125,9 +136,11 @@
   color: transparent;
 }
 
+/* No scroll-behavior:smooth here — it fights Lenis and would animate the
+   instant scroll restoration inside the view-transition update window.
+   Anchor links are smoothed by Lenis (`anchors: true` in SmoothScroll). */
 html {
   background: var(--color-night);
-  scroll-behavior: smooth;
 }
 
 body {
@@ -147,5 +160,245 @@ body {
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   View Transitions — page navigation animations
+   The active variant is picked by `data-page-transition` on <html>
+   (set in layout.tsx). Variants: "wipe" | "slide" | "blur" | "zoom".
+   TRANSITION_DURATION in lib/transition-timing.ts (reveal hold) is
+   intentionally independent of these durations — tuned by eye so
+   reveals start before the transition fully settles.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Prevent Safari's single-frame scroll-to-top flash during view transitions.
+   Applied via JS right before the transition starts, removed once the
+   pseudo-elements are composited. */
+html.vt-transitioning {
+  overflow: clip;
+}
+
+/* Overlay elements (rendered in Providers.tsx). Both are parked offscreen
+   so they're invisible during normal browsing; each gets a view-transition
+   snapshot group that its variant animates across the screen. */
+.vt-curtain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  transform: translateY(100%);
+  background-color: #0c0b12;
+  /* gradient hairline on the leading (top) edge of the sweep */
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 45, 120, 0.9) 25%,
+    rgba(139, 43, 232, 0.9) 75%,
+    transparent
+  );
+  background-size: 100% 2px;
+  background-position: top;
+  background-repeat: no-repeat;
+  view-transition-name: curtain;
+}
+
+.vt-scanline {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  /* parked far enough up that the glow can't bleed into the viewport */
+  transform: translateY(-48px);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-magenta) 20%,
+    var(--color-violet) 50%,
+    var(--color-teal) 80%,
+    transparent
+  );
+  box-shadow:
+    0 0 24px 3px rgba(255, 45, 120, 0.5),
+    0 0 8px 1px rgba(61, 214, 196, 0.6);
+  view-transition-name: scanline;
+}
+
+/* Base rules shared by every variant */
+::view-transition-image-pair(*) {
+  isolation: auto;
+}
+
+::view-transition-old(*),
+::view-transition-new(*) {
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(root) {
+  animation: none;
+}
+
+/* ── Variant 1: "wipe" — cipher scanline wipe (default) ──
+   New page is revealed top-to-bottom behind a glowing scanline
+   while the old page dims underneath. 0.65s. */
+html[data-page-transition="wipe"]::view-transition-old(root) {
+  animation: wipe-dim 0.65s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+html[data-page-transition="wipe"]::view-transition-new(root) {
+  animation: wipe-in 0.65s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+html[data-page-transition="wipe"]::view-transition-group(scanline) {
+  z-index: 2;
+  animation: scanline-sweep 0.65s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+html[data-page-transition="wipe"]::view-transition-old(scanline) {
+  display: none; /* old + new snapshots overlap; one glow, not two */
+}
+html[data-page-transition="wipe"]::view-transition-new(scanline) {
+  animation: none;
+}
+
+@keyframes wipe-in {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes wipe-dim {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+@keyframes scanline-sweep {
+  from {
+    transform: translateY(-2px);
+  }
+  to {
+    transform: translateY(100vh);
+  }
+}
+
+/* ── Variant 2: "slide" — page slide + curtain sweep ──
+   Old page slides up and out, new page slides in from below,
+   a dark panel with a gradient hairline chases between them. 0.7s. */
+html[data-page-transition="slide"]::view-transition-old(root) {
+  animation: page-slide-out 0.7s cubic-bezier(0.76, 0, 0.24, 1) both;
+}
+html[data-page-transition="slide"]::view-transition-new(root) {
+  animation: page-slide-in 0.7s cubic-bezier(0.76, 0, 0.24, 1) both;
+}
+html[data-page-transition="slide"]::view-transition-group(curtain) {
+  z-index: 2;
+  animation: curtain-sweep 0.7s cubic-bezier(0.76, 0, 0.24, 1) both;
+}
+html[data-page-transition="slide"]::view-transition-old(curtain) {
+  display: none;
+}
+html[data-page-transition="slide"]::view-transition-new(curtain) {
+  animation: none;
+}
+
+@keyframes page-slide-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+@keyframes page-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes curtain-sweep {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+/* ── Variant 3: "blur" — decrypt fade ──
+   Fades through a gaussian blur, like content resolving into focus. 0.4s. */
+html[data-page-transition="blur"]::view-transition-old(root) {
+  animation: blur-out 0.4s ease both;
+}
+html[data-page-transition="blur"]::view-transition-new(root) {
+  animation: blur-in 0.4s ease both;
+}
+
+@keyframes blur-out {
+  from {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    filter: blur(12px);
+  }
+}
+@keyframes blur-in {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* ── Variant 4: "zoom" — depth fade ──
+   Old page recedes into the dark, new page settles forward. 0.5s. */
+html[data-page-transition="zoom"]::view-transition-old(root) {
+  animation: zoom-out-fade 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+html[data-page-transition="zoom"]::view-transition-new(root) {
+  animation: zoom-in-fade 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes zoom-out-fade {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.965);
+  }
+}
+@keyframes zoom-in-fade {
+  from {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Reduced motion — disable all view transition animations */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
   }
 }

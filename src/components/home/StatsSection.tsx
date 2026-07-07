@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import NumberFlow from "@number-flow/react";
+import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
+import { useSpotlight } from "@/hooks/useSpotlight";
 import { STATS } from "@/lib/content";
 import { prefersReducedMotion } from "@/lib/decrypt";
 
@@ -25,7 +27,13 @@ function parseStat(v: string): { prefix: string; num: number; suffix: string } {
 
 const PARSED = STATS.map((s) => parseStat(s.value));
 
-export default function StatsSection() {
+export default function StatsSection({
+  eyebrow = "[ 01 // proof of work ]",
+  title = "Receipts, decrypted.",
+}: {
+  eyebrow?: string;
+  title?: string;
+}) {
   const gridRef = useRef<HTMLDivElement>(null);
   const wipeRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const [revealed, setRevealed] = useState<boolean[]>(() =>
@@ -74,7 +82,7 @@ export default function StatsSection() {
 
   return (
     <section id="proof" className="relative z-[1] px-6 pb-[110px] pt-[100px]">
-      <SectionHeading eyebrow="[ 01 // proof of work ]" title="Receipts, decrypted." />
+      <SectionHeading eyebrow={eyebrow} title={title} />
       <div
         ref={gridRef}
         className="mx-auto mt-[52px] grid max-w-[1160px] grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-[18px]"
@@ -91,17 +99,18 @@ export default function StatsSection() {
           />
         ))}
       </div>
-      <p className="mt-[26px] text-center font-mono text-[11px] tracking-[0.14em] text-faint">
-        {"// placeholder figures — swap in your real numbers"}
-      </p>
+      <SubheadingReveal delay={0.2} className="mt-[26px] text-center">
+        <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint">
+          {"// placeholder figures — swap in your real numbers"}
+        </p>
+      </SubheadingReveal>
     </section>
   );
 }
 
 /**
- * A single frosted-glass stat card. The cursor spotlight eases toward the
- * pointer via a rAF spring (rather than snapping), so the light trails the
- * cursor smoothly; the lift / border / glow ride CSS transitions.
+ * A single frosted-glass stat card. The cursor spotlight (useSpotlight)
+ * trails the pointer; the lift / border / glow ride CSS transitions.
  */
 function StatCard({
   stat,
@@ -114,74 +123,13 @@ function StatCard({
   value: number;
   registerWipe: (el: HTMLSpanElement | null) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const follow = useRef({
-    tx: 0,
-    ty: 0,
-    cx: 0,
-    cy: 0,
-    raf: 0,
-    running: false,
-    entered: false,
-  });
-
-  useEffect(() => {
-    const f = follow.current;
-    return () => {
-      if (f.raf) cancelAnimationFrame(f.raf);
-    };
-  }, []);
-
-  const run = () => {
-    const s = follow.current;
-    if (s.running) return;
-    s.running = true;
-    const step = () => {
-      const k = 0.16; // easing stiffness — lower = more trailing lag
-      s.cx += (s.tx - s.cx) * k;
-      s.cy += (s.ty - s.cy) * k;
-      const el = ref.current;
-      if (el) {
-        el.style.setProperty("--mx", `${s.cx.toFixed(1)}px`);
-        el.style.setProperty("--my", `${s.cy.toFixed(1)}px`);
-      }
-      if (Math.abs(s.tx - s.cx) < 0.5 && Math.abs(s.ty - s.cy) < 0.5) {
-        s.running = false;
-        s.raf = 0;
-        return;
-      }
-      s.raf = requestAnimationFrame(step);
-    };
-    s.raf = requestAnimationFrame(step);
-  };
-
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const s = follow.current;
-    s.tx = e.clientX - r.left;
-    s.ty = e.clientY - r.top;
-    // on first entry, place the light under the cursor so it doesn't fly in
-    if (!s.entered) {
-      s.entered = true;
-      s.cx = s.tx;
-      s.cy = s.ty;
-      el.style.setProperty("--mx", `${s.cx.toFixed(1)}px`);
-      el.style.setProperty("--my", `${s.cy.toFixed(1)}px`);
-    }
-    run();
-  };
-
-  const onLeave = () => {
-    follow.current.entered = false;
-  };
+  const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLDivElement>();
 
   return (
     <div
       ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
       className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] px-7 py-8 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)]"
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}

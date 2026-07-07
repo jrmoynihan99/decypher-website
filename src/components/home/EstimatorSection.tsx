@@ -1,4 +1,5 @@
 import WaveField from "@/components/effects/WaveField";
+import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import TaxEstimator from "@/components/estimator/TaxEstimator";
 
@@ -9,18 +10,12 @@ export default function EstimatorSection() {
       <SectionHeading
         eyebrow="[ 02 // run the numbers ]"
         title="Decrypt your tax bill."
-        sub={
-          <>
-            A 60-second, no-login estimate of your self-employment, federal,
-            and state taxes &mdash; plus what you could be saving. 2026 tax
-            year, US self-employed.
-          </>
-        }
+        sub="A 60-second, no-login estimate of your self-employment, federal, and state taxes — plus what you could be saving. 2026 tax year, US self-employed."
         glowDuration={18}
       />
-      <div className="mx-auto mt-11 w-full max-w-[760px]">
+      <Reveal amount={0.15} className="mx-auto mt-11 w-full max-w-[760px]">
         <TaxEstimator />
-      </div>
+      </Reveal>
     </section>
   );
 }

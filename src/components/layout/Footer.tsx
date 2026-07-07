@@ -21,6 +21,21 @@ export default function Footer() {
           </p>
         </div>
         <div className="flex flex-col gap-2.5">
+          <p className={footerHeading}>Explore</p>
+          <a href="/services" className={footerLink}>
+            Services
+          </a>
+          <a href="/creators" className={footerLink}>
+            Our Creators
+          </a>
+          <a href="/team" className={footerLink}>
+            Our Team
+          </a>
+          <a href="/schedule" className={footerLink}>
+            Book a Call
+          </a>
+        </div>
+        <div className="flex flex-col gap-2.5">
           <p className={footerHeading}>Stay in touch</p>
           <a href="tel:+19784094901" className={footerLink}>
             (978) 409-4901

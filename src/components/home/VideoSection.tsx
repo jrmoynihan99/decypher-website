@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ScaleReveal from "@/components/reveal/ScaleReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { prefersReducedMotion } from "@/lib/decrypt";
 
@@ -50,7 +51,7 @@ export default function VideoSection() {
         sub="Three minutes on how DeCypher turns creator chaos into a tax strategy that pays for itself."
         glowDuration={19}
       />
-      <div className="relative mx-auto mt-[58px] max-w-[980px]">
+      <ScaleReveal className="relative mx-auto mt-[58px] max-w-[980px]">
         <div
           ref={glowRef}
           aria-hidden
@@ -104,7 +105,7 @@ export default function VideoSection() {
             </p>
           </div>
         </div>
-      </div>
+      </ScaleReveal>
     </section>
   );
 }

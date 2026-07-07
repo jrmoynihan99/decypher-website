@@ -11,15 +11,17 @@ export default function DecryptOnView({
   text,
   as = "h2",
   className,
+  style,
   duration,
   threshold = 0.5,
 }: {
   text: string;
   as?: "h1" | "h2" | "h3" | "p" | "span";
   className?: string;
+  style?: React.CSSProperties;
   duration?: number;
   threshold?: number;
 }) {
   const ref = useDecryptOnView<HTMLElement>(text, { duration, threshold });
-  return createElement(as, { ref, className }, text);
+  return createElement(as, { ref, className, style }, text);
 }

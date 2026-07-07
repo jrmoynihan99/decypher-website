@@ -4,8 +4,8 @@ import { useEffect, useRef } from "react";
 import {
   armHover,
   cancelDecrypt,
-  decryptTo,
-  encrypt,
+  decryptCells,
+  encryptCells,
   prefersReducedMotion,
 } from "@/lib/decrypt";
 
@@ -25,14 +25,14 @@ export function useDecryptOnView<T extends HTMLElement>(
     if (!el || prefersReducedMotion()) return;
     let done = false;
     if (el.getBoundingClientRect().top > window.innerHeight) {
-      encrypt(el, text);
+      encryptCells(el, text);
     }
     const io = new IntersectionObserver(
       (entries) => {
         for (const en of entries) {
           if (en.isIntersecting && !done) {
             done = true;
-            decryptTo(el, text, duration, () => armHover(el));
+            decryptCells(el, text, duration, () => armHover(el));
             io.unobserve(el);
           }
         }

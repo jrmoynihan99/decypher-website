@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { prefersReducedMotion } from "@/lib/decrypt";
 
 interface Node {
@@ -245,14 +246,17 @@ export default function NeuralWeb({
   }, [opacity]);
 
   return (
-    <div
+    <motion.div
       ref={wrapRef}
       data-glow
       aria-hidden
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 2, ease: "easeOut" }}
       className={`pointer-events-none absolute inset-0 -z-10 overflow-hidden ${className ?? ""}`}
       style={style}
     >
       <canvas ref={canvasRef} />
-    </div>
+    </motion.div>
   );
 }

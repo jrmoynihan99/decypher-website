@@ -1,3 +1,4 @@
+import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Marquee from "@/components/ui/Marquee";
 import TestimonialCard from "@/components/home/TestimonialCard";
@@ -10,17 +11,24 @@ const repeat = <T,>(arr: T[], n: number): T[] =>
 const ROW_A = repeat(TESTIMONIALS_ROW_A, 4);
 const ROW_B = repeat(TESTIMONIALS_ROW_B, 4);
 
-export default function TestimonialsSection() {
+export default function TestimonialsSection({
+  eyebrow = "[ 06 // reviews ]",
+}: {
+  eyebrow?: string;
+}) {
   return (
     <section id="reviews" className="relative z-[1] pb-[130px] pt-[120px]">
       <SectionHeading
-        eyebrow="[ 06 // reviews ]"
+        eyebrow={eyebrow}
         title="Creators who cracked the code."
         sub="// grab and throw the reel"
         subMono
         glowDuration={16}
       />
-      <div className="mt-[54px] overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]">
+      <Reveal
+        amount={0.2}
+        className="mt-[54px] overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+      >
         <Marquee duration={58} className="gap-5 px-6 pt-2.5">
           {ROW_A.map((t, i) => (
             <TestimonialCard key={`a-${i}`} t={t} />
@@ -31,7 +39,7 @@ export default function TestimonialsSection() {
             <TestimonialCard key={`b-${i}`} t={t} />
           ))}
         </Marquee>
-      </div>
+      </Reveal>
     </section>
   );
 }
