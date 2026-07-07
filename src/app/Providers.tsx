@@ -66,16 +66,31 @@ function TransitionInterceptor() {
       if (!anchor) return;
 
       const href = anchor.getAttribute("href");
-      if (!href || !href.startsWith("/")) return;
-
-      // Don't transition to the page we're already on
-      const cleanHref = href.split("?")[0].split("#")[0];
-      if (cleanHref === currentPath) return;
+      if (!href) return;
 
       // Let browser handle modified clicks (new tab, etc.)
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const target = anchor.getAttribute("target");
       if (target && target !== "_self") return;
+
+      // Same-page hash links (#proof, /#proof while on "/") must NOT hit the
+      // browser's fragment navigation: the history entry it pushes fires a
+      // popstate that next-view-transitions turns into a spurious page
+      // transition. Prevent the default — Lenis (anchors: true) still scrolls.
+      const hashIndex = href.indexOf("#");
+      if (hashIndex !== -1) {
+        const path = href.slice(0, hashIndex);
+        if (path === "" || path === window.location.pathname) {
+          e.preventDefault();
+          return;
+        }
+      }
+
+      if (!href.startsWith("/")) return;
+
+      // Don't transition to the page we're already on
+      const cleanHref = href.split("?")[0].split("#")[0];
+      if (cleanHref === currentPath) return;
 
       // Switch to manual scroll restoration on first navigation
       history.scrollRestoration = "manual";

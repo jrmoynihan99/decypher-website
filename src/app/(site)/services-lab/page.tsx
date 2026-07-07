@@ -14,6 +14,15 @@ import ServicesOrbit from "@/components/home/services-variants/ServicesOrbit";
 import ServicesScanner from "@/components/home/services-variants/ServicesScanner";
 import ServicesTerminal from "@/components/home/services-variants/ServicesTerminal";
 import ServicesTuner from "@/components/home/services-variants/ServicesTuner";
+import { LAB_SERVICES, LAB_SERVICES_HEADING } from "@/lib/lab-fixtures";
+
+/** The CMS-driven finalists, frozen to lab fixtures for comparison. */
+const LabServicesAtlas = () => (
+  <ServicesAtlas content={LAB_SERVICES_HEADING} services={LAB_SERVICES} />
+);
+const LabServicesFlyover = () => (
+  <ServicesFlyover content={LAB_SERVICES_HEADING} services={LAB_SERVICES} />
+);
 
 /**
  * Preview lab for the experimental ServicesSection replacements. Each is a
@@ -102,14 +111,14 @@ const SET_C: Variant[] = [
     num: "09",
     name: "NEURAL ATLAS",
     desc: "All five services scattered across a fully lit neural map. Hovering a node illuminates it, spins its cluster up, and flashes CLICK TO OPEN; clicking dives the camera in — the hub blooms into a tumbling 3D neuron with the copy growing out of it as open editorial type. A CLICK TO CLOSE chip rides the cursor while zoomed; click anywhere off a node (or Esc) to climb back out.",
-    Comp: ServicesAtlas,
+    Comp: LabServicesAtlas,
   },
   {
     key: "flyover",
     num: "10",
     name: "THE FLYOVER",
     desc: "The zero-effort cut of the map: scroll is the flight stick. The camera dives into node 01 — a 3D neuron blooms under Sequence-style type — then climbs out, glides across the web, and dives into the next, ending back in orbit with every hub lit. The scrollbar is the flight path.",
-    Comp: ServicesFlyover,
+    Comp: LabServicesFlyover,
   },
   {
     key: "deepfield",

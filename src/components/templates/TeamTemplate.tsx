@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
@@ -9,23 +8,27 @@ import ConsultButton from "@/components/ui/ConsultButton";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
 import PageHeader from "@/components/ui/PageHeader";
-import { teamTiers } from "@/lib/team";
+import Readout from "@/components/ui/Readout";
+import { buildTeamTiers } from "@/lib/team";
+import type { CmsTeamMember, TeamPageDoc } from "@/sanity/types";
 
-export const metadata: Metadata = {
-  title: "Our Team — DeCypher Financials",
-  description:
-    "The experts who help creators build generational wealth through finance and tax strategy.",
-};
-
-/** One-line mission per tier, keyed by tier label. */
-const TIER_TAGLINES: Record<string, string> = {
-  Managers: "The strategists who own your file.",
-  Seniors: "Deep in your numbers every single week.",
-  Staff: "The engine room — books, filings, follow-through.",
-};
-
-export default function TeamPage() {
+export default function TeamTemplate({
+  page,
+  members,
+}: {
+  page: TeamPageDoc;
+  members: CmsTeamMember[];
+}) {
+  const header = page.header ?? {};
+  const cta = page.cta ?? {};
+  const teamTiers = buildTeamTiers(members);
   const total = teamTiers.reduce((n, t) => n + t.people.length, 0);
+  /** One-line mission per tier, keyed by tier label. */
+  const tierTaglines: Record<string, string | undefined> = {
+    Managers: page.tierTaglines?.managers,
+    Seniors: page.tierTaglines?.seniors,
+    Staff: page.tierTaglines?.staff,
+  };
   return (
     <main className="relative">
       {/* one continuous mesh from the header down the personnel files,
@@ -40,16 +43,20 @@ export default function TeamPage() {
           }}
         />
         <PageHeader
-          eyebrow="[ personnel file // our team ]"
-          title="The team behind creator wealth."
-          sub="The experts who help creators build generational wealth through finance and tax strategy. Each one runs a codename — the thing they’re deadliest at."
+          eyebrow={header.eyebrow ?? ""}
+          title={header.title ?? ""}
+          sub={header.sub}
           readout={
-            <>
-              {`// ${String(total).padStart(2, "0")} OPERATIVES · ${teamTiers.length} TIERS — HOVER A CARD TO `}
-              <span className="text-magenta">DECRYPT</span>
-              {" THEIR CODENAME "}
-              <span className="animate-blink text-magenta">▮</span>
-            </>
+            header.readout && (
+              <Readout
+                text={header.readout}
+                vars={{
+                  count: String(total).padStart(2, "0"),
+                  tiers: teamTiers.length,
+                }}
+                blink
+              />
+            )
           }
         />
 
@@ -72,9 +79,9 @@ export default function TeamPage() {
                   <span className="font-mono text-[13px] tracking-[0.06em] text-faint">
                     {tier.count}
                   </span>
-                  {TIER_TAGLINES[tier.label] && (
+                  {tierTaglines[tier.label] && (
                     <span className="ml-auto text-[14px] text-muted">
-                      {TIER_TAGLINES[tier.label]}
+                      {tierTaglines[tier.label]}
                     </span>
                   )}
                 </div>
@@ -115,24 +122,27 @@ export default function TeamPage() {
           <GlowOrb size={760} blur={54} alpha={0.2} beta={0.12} duration={15} />
           <DecryptOnView
             as="h2"
-            text="Want this team in your corner?"
+            text={cta.title ?? ""}
             className="relative mx-auto max-w-[20ch] font-display text-[clamp(32px,4.6vw,56px)] font-bold leading-[1.05] tracking-[-0.025em] text-fog"
           />
-          <ParagraphReveal
-            delay={0.2}
-            className="relative mx-auto mt-5 max-w-[48ch] text-[16.5px] leading-relaxed text-mist"
-          >
-            Every client gets the full bench — bookkeeping, tax, and strategy
-            on one thread. No hand-offs, no black boxes.
-          </ParagraphReveal>
+          {cta.body && (
+            <ParagraphReveal
+              delay={0.2}
+              className="relative mx-auto mt-5 max-w-[48ch] text-[16.5px] leading-relaxed text-mist"
+            >
+              {cta.body}
+            </ParagraphReveal>
+          )}
           <Reveal delay={0.4} className="relative mt-8">
-            <ConsultButton size="lg" />
+            <ConsultButton size="lg">{cta.ctaLabel}</ConsultButton>
           </Reveal>
-          <SubheadingReveal delay={0.55} className="relative mt-[22px]">
-            <p className="m-0 font-mono text-[11.5px] tracking-[0.16em] text-faint">
-              {"// ONE TEAM. EVERY SERVICE. ZERO YEARLY CONTRACTS."}
-            </p>
-          </SubheadingReveal>
+          {cta.readout && (
+            <SubheadingReveal delay={0.55} className="relative mt-[22px]">
+              <p className="m-0 font-mono text-[11.5px] tracking-[0.16em] text-faint">
+                {cta.readout}
+              </p>
+            </SubheadingReveal>
+          )}
         </section>
       </SectionReveal>
     </main>

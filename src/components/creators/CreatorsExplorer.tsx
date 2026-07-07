@@ -10,7 +10,6 @@ import {
   Creator,
   PLATFORM_LABEL,
   accentFor,
-  creators,
   hexToRgba,
 } from "@/lib/creators";
 
@@ -93,10 +92,14 @@ function CreatorCard({ c, fileNo }: { c: Creator; fileNo: string }) {
   );
 }
 
-export default function CreatorsExplorer() {
+export default function CreatorsExplorer({
+  creators,
+}: {
+  creators: Creator[];
+}) {
   const [active, setActive] = useState("all");
   const [query, setQuery] = useState("");
-  const tabs = useMemo(() => buildTabs(creators), []);
+  const tabs = useMemo(() => buildTabs(creators), [creators]);
 
   const q = query.trim().toLowerCase();
   const list = creators.filter(

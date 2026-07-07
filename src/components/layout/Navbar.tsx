@@ -5,18 +5,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import logo from "@/assets/decypher-mark.png";
+import fallbackLogo from "@/assets/decypher-mark.png";
 import ConsultButton from "@/components/ui/ConsultButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import type { LinkItem } from "@/sanity/types";
 
-const LINKS = [
-  { href: "/creators", label: "Our Creators" },
-  { href: "/services", label: "Services" },
-  { href: "/team", label: "Our Team" },
-  { href: "#", label: "Client Portal ↗" },
-];
-
-export default function Navbar() {
+export default function Navbar({
+  links,
+  logo,
+}: {
+  links: LinkItem[];
+  logo?: { url: string; width: number; height: number };
+}) {
   const pathname = usePathname();
   const reduced = useReducedMotion();
   const [hidden, setHidden] = useState(false);
@@ -49,15 +49,26 @@ export default function Navbar() {
     >
       <div className="flex h-[70px] items-center justify-between gap-6 px-7">
         <Link href="/" className="flex flex-none items-center no-underline">
-          <Image
-            src={logo}
-            alt="DeCypher Financials"
-            className="block h-9 w-auto"
-            priority
-          />
+          {logo ? (
+            <Image
+              src={logo.url}
+              alt="DeCypher Financials"
+              width={logo.width}
+              height={logo.height}
+              className="block h-9 w-auto"
+              priority
+            />
+          ) : (
+            <Image
+              src={fallbackLogo}
+              alt="DeCypher Financials"
+              className="block h-9 w-auto"
+              priority
+            />
+          )}
         </Link>
         <div className="flex flex-wrap items-center justify-end gap-[26px]">
-          {LINKS.map((l) => {
+          {links.map((l) => {
             const active = l.href === pathname;
             return (
               <Link

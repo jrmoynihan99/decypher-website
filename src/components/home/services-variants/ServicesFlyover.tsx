@@ -3,12 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { SERVICES_FIVE } from "@/lib/content";
 import { cancelDecrypt, decryptTo } from "@/lib/decrypt";
+import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 import NeuralStage, {
   HUBS,
   HUB_COLORS,
-  NODE_TAGS,
   OVERVIEW,
   focusZoom,
   type Cam,
@@ -48,7 +47,13 @@ const smooth = (t: number) => {
 const park = (u: number, a: number, b: number) =>
   smooth(Math.min(1, Math.max(0, (u - a) / Math.max(0.001, 1 - a - b))));
 
-export default function ServicesFlyover() {
+export default function ServicesFlyover({
+  content,
+  services,
+}: {
+  content: SectionHeadingContent;
+  services: CmsService[];
+}) {
   const reduced = useReducedMotion();
   const outerRef = useRef<HTMLDivElement>(null);
   const target = useRef<Cam>({ ...OVERVIEW });
@@ -118,7 +123,7 @@ export default function ServicesFlyover() {
 
       // ---- chapter visibility + hub energy ----
       const outro = Math.max(0, (sp - 0.9) / 0.07);
-      for (let i = 0; i < SERVICES_FIVE.length; i++) {
+      for (let i = 0; i < services.length; i++) {
         const aa = Math.abs(sp - CENTERS[i]);
         const vis =
           aa <= HOLD ? 1 : aa >= EDGE ? 0 : (EDGE - aa) / (EDGE - HOLD);
@@ -141,8 +146,8 @@ export default function ServicesFlyover() {
         setActive(idx);
         if (counterRef.current)
           counterRef.current.textContent = `0${idx + 1}`;
-        decryptTo(titleRefs.current[idx], SERVICES_FIVE[idx].title, 460);
-        decryptTo(promiseRefs.current[idx], SERVICES_FIVE[idx].promise, 520);
+        decryptTo(titleRefs.current[idx], services[idx].title, 460);
+        decryptTo(promiseRefs.current[idx], services[idx].promise, 520);
       }
     };
 
@@ -162,7 +167,7 @@ export default function ServicesFlyover() {
       titles.forEach(cancelDecrypt);
       promises.forEach(cancelDecrypt);
     };
-  }, [reduced]);
+  }, [reduced, services]);
 
   const onStageMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -243,19 +248,19 @@ export default function ServicesFlyover() {
       <section id="services" className="relative z-[1] px-6 pb-[120px] pt-[110px]">
         <div className="mx-auto max-w-[900px]">
           <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            [ 05 // services ]
+            {content.eyebrow}
           </p>
           <h2 className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog">
-            One stop shop for your creator business.
+            {content.title}
           </h2>
           <div className="mt-10 space-y-8">
-            {SERVICES_FIVE.map((svc, i) => (
+            {services.map((svc) => (
               <article
                 key={svc.num}
                 className="rounded-[20px] border border-edge bg-panel p-7"
               >
                 <p className="m-0 font-mono text-[11px] tracking-[0.2em] text-faint">
-                  NODE {svc.num} — {NODE_TAGS[i]}
+                  NODE {svc.num} — {svc.nodeTag}
                 </p>
                 <h3 className="mt-3 font-display text-[clamp(24px,3vw,34px)] font-semibold tracking-[-0.015em] text-fog">
                   {svc.title}
@@ -280,11 +285,11 @@ export default function ServicesFlyover() {
           the viewport is pure map */}
       <div className="mx-auto max-w-[760px] px-6 pb-14 pt-[110px] text-center">
         <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-          [ 05 // services ]
+          {content.eyebrow}
         </p>
         <DecryptOnView
           as="h2"
-          text="One stop shop for your creator business."
+          text={content.title ?? ""}
           className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog"
         />
         <p className="mx-auto mt-[18px] max-w-[52ch] text-base leading-relaxed text-mist">
@@ -307,7 +312,7 @@ export default function ServicesFlyover() {
             onFrame={onFrame}
             stiffness={9}
           >
-            {SERVICES_FIVE.map((svc, i) => {
+            {services.map((svc, i) => {
               const hub = HUBS[i];
               return (
                 // hub marker: the node itself is the canvas light source —
@@ -353,7 +358,7 @@ export default function ServicesFlyover() {
 
           {/* chapters — anchored to their node's screen position every frame;
               scale + opacity ride the camera zoom (see onFrame) */}
-          {SERVICES_FIVE.map((svc, i) => (
+          {services.map((svc, i) => (
             <div
               key={svc.num}
               ref={(el) => {
@@ -388,7 +393,7 @@ export default function ServicesFlyover() {
                   style={{ willChange: "transform" }}
                 >
                   <p className="m-0 font-mono text-[11px] tracking-[0.26em] text-faint">
-                    NODE {svc.num} — {NODE_TAGS[i]}{" "}
+                    NODE {svc.num} — {svc.nodeTag}{" "}
                     <span className="text-teal">● LIVE</span>
                   </p>
                   <h3
@@ -434,7 +439,7 @@ export default function ServicesFlyover() {
                 ref={railFillRef}
                 className="h-full w-full origin-top rounded bg-[linear-gradient(#FF5C2E,#FF2D78,#8B2BE8)] shadow-[0_0_10px_rgba(255,45,120,.5)] [transform:scaleY(0)]"
               />
-              {SERVICES_FIVE.map((svc, i) => (
+              {services.map((svc, i) => (
                 <button
                   key={svc.num}
                   type="button"

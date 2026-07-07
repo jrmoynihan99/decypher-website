@@ -208,6 +208,12 @@ export default function NeuralWeb({
       return () => ro.disconnect();
     }
 
+    // Paint one frame synchronously on mount. The RAF loop below is gated
+    // behind the IntersectionObserver, so it hasn't fired yet when a page's
+    // view-transition snapshot is captured — without this the canvas is blank
+    // in the snapshot and the whole mesh vanishes for the length of the wipe.
+    draw(0);
+
     let raf = 0;
     const loop = (t: number) => {
       raf = requestAnimationFrame(loop);

@@ -2,26 +2,29 @@ import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Marquee from "@/components/ui/Marquee";
 import TestimonialCard from "@/components/home/TestimonialCard";
-import { TESTIMONIALS_ROW_A, TESTIMONIALS_ROW_B } from "@/lib/content";
+import type { CmsTestimonial, SectionHeadingContent } from "@/sanity/types";
 
 /** Repeat a row enough times for a seamless -50% marquee loop. */
 const repeat = <T,>(arr: T[], n: number): T[] =>
   Array.from({ length: n }, () => arr).flat();
 
-const ROW_A = repeat(TESTIMONIALS_ROW_A, 4);
-const ROW_B = repeat(TESTIMONIALS_ROW_B, 4);
-
 export default function TestimonialsSection({
-  eyebrow = "[ 06 // reviews ]",
+  content,
+  rowA,
+  rowB,
 }: {
-  eyebrow?: string;
+  content: SectionHeadingContent;
+  rowA: CmsTestimonial[];
+  rowB: CmsTestimonial[];
 }) {
+  const loopA = repeat(rowA, 4);
+  const loopB = repeat(rowB, 4);
   return (
     <section id="reviews" className="relative z-[1] pb-[130px] pt-[120px]">
       <SectionHeading
-        eyebrow={eyebrow}
-        title="Creators who cracked the code."
-        sub="// grab and throw the reel"
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub={content.sub}
         subMono
         glowDuration={16}
       />
@@ -30,12 +33,12 @@ export default function TestimonialsSection({
         className="mt-[54px] overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
       >
         <Marquee duration={58} className="gap-5 px-6 pt-2.5">
-          {ROW_A.map((t, i) => (
+          {loopA.map((t, i) => (
             <TestimonialCard key={`a-${i}`} t={t} />
           ))}
         </Marquee>
         <Marquee duration={72} reverse className="gap-5 px-6 pb-2.5 pt-5">
-          {ROW_B.map((t, i) => (
+          {loopB.map((t, i) => (
             <TestimonialCard key={`b-${i}`} t={t} />
           ))}
         </Marquee>

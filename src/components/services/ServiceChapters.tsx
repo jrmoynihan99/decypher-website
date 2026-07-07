@@ -2,10 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import {
-  HUB_COLORS,
-  NODE_TAGS,
-} from "@/components/home/services-variants/NeuralStage";
+import { HUB_COLORS } from "@/components/home/services-variants/NeuralStage";
 import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
 import ScaleReveal from "@/components/reveal/ScaleReveal";
@@ -13,8 +10,8 @@ import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import { useTilt } from "@/hooks/useTilt";
-import { SERVICES_FIVE, type Service } from "@/lib/content";
 import { hexToRgba } from "@/lib/creators";
+import type { CmsService } from "@/sanity/types";
 
 /**
  * SERVICES PAGE — "NODE DOSSIERS"
@@ -31,14 +28,14 @@ import { hexToRgba } from "@/lib/creators";
  * tracking the chapter in view and jumping on click.
  */
 
-const chapterId = (svc: Service) => `node-${svc.num}`;
+const chapterId = (svc: CmsService) => `node-${svc.num}`;
 
 /** Framed visual: real image when present, else the awaiting-asset viewport. */
 function ServiceVisual({
   svc,
   accent,
 }: {
-  svc: Service;
+  svc: CmsService;
   accent: string;
 }) {
   const { ref, hovered, onMouseEnter, onMouseMove, onMouseLeave } =
@@ -134,7 +131,11 @@ function ServiceVisual({
   );
 }
 
-export default function ServiceChapters() {
+export default function ServiceChapters({
+  services,
+}: {
+  services: CmsService[];
+}) {
   const [active, setActive] = useState(0);
   const chapterRefs = useRef<(HTMLElement | null)[]>([]);
 
@@ -171,9 +172,9 @@ export default function ServiceChapters() {
           [ flight plan ]
         </p>
         <div className="mt-5 flex flex-col gap-1">
-          {SERVICES_FIVE.map((svc, i) => {
+          {services.map((svc, i) => {
             const on = active === i;
-            const accent = HUB_COLORS[i];
+            const accent = HUB_COLORS[i % HUB_COLORS.length];
             return (
               <button
                 key={svc.num}
@@ -213,18 +214,17 @@ export default function ServiceChapters() {
           })}
         </div>
         <p className="mt-6 font-mono text-[10px] tracking-[0.2em] text-faint">
-          NODE 0{active + 1} / 05
+          NODE 0{active + 1} / {String(services.length).padStart(2, "0")}
         </p>
       </aside>
 
       {/* chapters */}
       <div className="min-w-0 flex-1">
-        {SERVICES_FIVE.map((svc, i) => (
+        {services.map((svc, i) => (
           <SectionReveal key={svc.num} amount={0.25}>
             <ServiceChapter
               svc={svc}
-              i={i}
-              accent={HUB_COLORS[i]}
+              accent={HUB_COLORS[i % HUB_COLORS.length]}
               flip={i % 2 === 1}
               registerRef={(el) => {
                 chapterRefs.current[i] = el;
@@ -245,13 +245,11 @@ export default function ServiceChapters() {
  */
 function ServiceChapter({
   svc,
-  i,
   accent,
   flip,
   registerRef,
 }: {
-  svc: Service;
-  i: number;
+  svc: CmsService;
   accent: string;
   flip: boolean;
   registerRef: (el: HTMLElement | null) => void;
@@ -307,7 +305,7 @@ function ServiceChapter({
         <div ref={copyRef} style={{ willChange: "transform" }} className="relative">
           <SubheadingReveal delay={0.1} className="relative">
             <p className="m-0 font-mono text-[11px] tracking-[0.26em] text-faint">
-              NODE {svc.num} — {NODE_TAGS[i]}{" "}
+              NODE {svc.num} — {svc.nodeTag}{" "}
               <span className="text-teal">● LIVE</span>
             </p>
           </SubheadingReveal>

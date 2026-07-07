@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import StatsSection from "@/components/home/StatsSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
@@ -9,33 +8,26 @@ import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import ScheduleForm from "@/components/schedule/ScheduleForm";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
+import Readout from "@/components/ui/Readout";
+import type {
+  CmsTestimonial,
+  SchedulePageDoc,
+  SiteSettings,
+} from "@/sanity/types";
 
-export const metadata: Metadata = {
-  title: "Book a Call — DeCypher Financials",
-  description:
-    "Book a free consultation. Twenty minutes, zero jargon — we look at your creator business and tell you exactly where the savings are hiding.",
-};
-
-/** What actually happens on the call — set next to the form. */
-const CALL_STEPS = [
-  {
-    num: "01",
-    title: "We scan your setup",
-    body: "Entity, books, filings — where you are today.",
-  },
-  {
-    num: "02",
-    title: "We name the savings",
-    body: "The strategies we'd run and what they're worth.",
-  },
-  {
-    num: "03",
-    title: "You decide",
-    body: "Work with us, or walk away with the plan. No pressure.",
-  },
-];
-
-export default function SchedulePage() {
+export default function ScheduleTemplate({
+  page,
+  settings,
+  serviceTitles,
+  testimonials,
+}: {
+  page: SchedulePageDoc;
+  settings: SiteSettings | null;
+  serviceTitles: string[];
+  testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
+}) {
+  const hero = page.hero ?? {};
+  const steps = hero.steps ?? [];
   return (
     <main className="relative">
       {/* one continuous mesh from the hero through the proof, fading out
@@ -65,33 +57,34 @@ export default function SchedulePage() {
             <div className="relative text-center lg:pt-6 lg:text-left">
               <SubheadingReveal>
                 <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-                  [ schedule // free consultation ]
+                  {hero.eyebrow}
                 </p>
               </SubheadingReveal>
               <DecryptOnView
                 as="h1"
-                text="Book your decryption call."
+                text={hero.title ?? ""}
                 threshold={0}
                 style={{ maxWidth: "14ch" }}
                 className="mx-auto mt-[18px] font-display text-[clamp(38px,4.6vw,62px)] font-bold leading-[1.05] tracking-[-0.03em] text-fog lg:mx-0"
               />
-              <ParagraphReveal
-                delay={0.3}
-                className="mx-auto mt-[22px] max-w-[48ch] text-[clamp(15.5px,1.7vw,17.5px)] leading-relaxed text-mist [text-wrap:pretty] lg:mx-0"
-              >
-                Twenty minutes, zero jargon. We look at your numbers, tell you
-                exactly what we’d do, and you decide if we’re your team.
-              </ParagraphReveal>
+              {hero.body && (
+                <ParagraphReveal
+                  delay={0.3}
+                  className="mx-auto mt-[22px] max-w-[48ch] text-[clamp(15.5px,1.7vw,17.5px)] leading-relaxed text-mist [text-wrap:pretty] lg:mx-0"
+                >
+                  {hero.body}
+                </ParagraphReveal>
+              )}
 
               <ol className="mx-auto mt-9 flex max-w-[420px] list-none flex-col gap-5 p-0 text-left lg:mx-0">
-                {CALL_STEPS.map((s, i) => (
-                  <li key={s.num}>
+                {steps.map((s, i) => (
+                  <li key={i}>
                     <Reveal
                       delay={0.5 + i * 0.12}
                       className="flex items-start gap-4"
                     >
                       <span className="mt-[3px] flex-none font-mono text-[12px] tracking-[0.14em] text-magenta">
-                        [{s.num}]
+                        [{String(i + 1).padStart(2, "0")}]
                       </span>
                       <span>
                         <b className="block font-display text-[16.5px] font-semibold tracking-[-0.01em] text-fog">
@@ -106,25 +99,35 @@ export default function SchedulePage() {
                 ))}
               </ol>
 
-              <SubheadingReveal delay={0.9} className="mt-9">
-                <p className="m-0 font-mono text-[11.5px] tracking-[0.16em] text-faint">
-                  {"// AVG RESPONSE TIME < 24 HOURS "}
-                  <span className="animate-blink text-magenta">▮</span>
-                </p>
-              </SubheadingReveal>
+              {hero.readout && (
+                <SubheadingReveal delay={0.9} className="mt-9">
+                  <p className="m-0 font-mono text-[11.5px] tracking-[0.16em] text-faint">
+                    <Readout text={hero.readout} blink />
+                  </p>
+                </SubheadingReveal>
+              )}
             </div>
 
             <Reveal delay={0.35}>
-              <ScheduleForm />
+              <ScheduleForm serviceTitles={serviceTitles} />
             </Reveal>
           </section>
         </SectionReveal>
 
         {/* the proof */}
-        <StatsSection eyebrow="[ 01 // the proof ]" />
+        <StatsSection
+          eyebrow={page.statsSection?.eyebrow}
+          title={page.statsSection?.title}
+          stats={settings?.stats ?? []}
+          disclaimer={settings?.statsDisclaimer}
+        />
 
         {/* the receipts */}
-        <TestimonialsSection eyebrow="[ 02 // reviews ]" />
+        <TestimonialsSection
+          content={page.testimonialsSection ?? {}}
+          rowA={testimonials.rowA}
+          rowB={testimonials.rowB}
+        />
       </div>
     </main>
   );

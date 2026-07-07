@@ -1,13 +1,13 @@
 "use client";
 
 import { useSpotlight } from "@/hooks/useSpotlight";
-import { Testimonial } from "@/lib/content";
+import type { CmsTestimonial } from "@/sanity/types";
 
 /**
  * Frosted-glass testimonial card with a cursor-tracking spotlight
  * (useSpotlight) and a smooth hover lift. Mirrors the stat cards.
  */
-export default function TestimonialCard({ t }: { t: Testimonial }) {
+export default function TestimonialCard({ t }: { t: CmsTestimonial }) {
   const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLElement>();
 
   return (

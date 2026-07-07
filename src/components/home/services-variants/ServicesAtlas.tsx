@@ -3,12 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { SERVICES_FIVE } from "@/lib/content";
 import { cancelDecrypt, decryptTo } from "@/lib/decrypt";
+import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 import NeuralStage, {
   HUBS,
   HUB_COLORS,
-  NODE_TAGS,
   OVERVIEW,
   focusZoom,
   type Cam,
@@ -43,9 +42,13 @@ const smooth = (t: number) => {
 };
 
 export default function ServicesAtlas({
+  content,
+  services,
   framed = false,
   bleedTo,
 }: {
+  content: SectionHeadingContent;
+  services: CmsService[];
   framed?: boolean;
   /**
    * Unified page web: ref to a wrapper whose bottom edge the stage's canvas
@@ -126,8 +129,8 @@ export default function ServicesAtlas({
       if (Math.abs(st - window.scrollY) > 2)
         scrollAnim.current = { target: st, pos: window.scrollY };
     }
-    decryptTo(titleRefs.current[i], SERVICES_FIVE[i].title, 460);
-    decryptTo(promiseRefs.current[i], SERVICES_FIVE[i].promise, 520);
+    decryptTo(titleRefs.current[i], services[i].title, 460);
+    decryptTo(promiseRefs.current[i], services[i].promise, 520);
   };
 
   const pullBack = () => {
@@ -246,13 +249,13 @@ export default function ServicesAtlas({
       <section id="services" className="relative z-[1] px-6 pb-[120px] pt-[110px]">
         <div className="mx-auto max-w-[1180px]">
           <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            [ 05 // services ]
+            {content.eyebrow}
           </p>
           <h2 className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog">
-            One stop shop for your creator business.
+            {content.title}
           </h2>
           <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {SERVICES_FIVE.map((svc) => (
+            {services.map((svc) => (
               <article
                 key={svc.num}
                 className="rounded-[20px] border border-edge-mid bg-panel p-6"
@@ -284,11 +287,11 @@ export default function ServicesAtlas({
       }`}
     >
       <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-        [ 05 // services ]
+        {content.eyebrow}
       </p>
       <DecryptOnView
         as="h2"
-        text="One stop shop for your creator business."
+        text={content.title ?? ""}
         className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog"
       />
       <p className="mx-auto mt-[18px] max-w-[52ch] text-base leading-relaxed text-mist">
@@ -330,7 +333,7 @@ export default function ServicesAtlas({
         fadeTop={unified ? 320 : 0}
         fadeBottom={unified ? 220 : 0}
       >
-        {SERVICES_FIVE.map((svc, i) => {
+        {services.map((svc, i) => {
           const hub = HUBS[i];
           const focused = focus === i;
           const dimmed = focus >= 0 && !focused;
@@ -396,7 +399,7 @@ export default function ServicesAtlas({
 
       {/* chapters — anchored to their node's screen position every frame;
           scale + opacity ride the camera zoom (see onFrame) */}
-      {SERVICES_FIVE.map((svc, i) => {
+      {services.map((svc, i) => {
         const focused = focus === i;
         return (
           <div
@@ -433,7 +436,7 @@ export default function ServicesAtlas({
                 style={{ willChange: "transform" }}
               >
                 <p className="m-0 font-mono text-[11px] tracking-[0.26em] text-faint">
-                  NODE {svc.num} — {NODE_TAGS[i]}{" "}
+                  NODE {svc.num} — {svc.nodeTag}{" "}
                   <span className="text-teal">● LIVE</span>
                 </p>
                 <h3

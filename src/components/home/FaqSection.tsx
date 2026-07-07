@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
-import { FAQS, Faq } from "@/lib/content";
+import type { FaqContent, SectionHeadingContent } from "@/sanity/types";
 import {
   cancelDecrypt,
   decryptTo,
@@ -16,7 +16,7 @@ import {
  * FAQ accordion. Answers ship "encrypted" (scrambled + blurred) and decrypt
  * the first time their item is opened.
  */
-function FaqItem({ faq }: { faq: Faq }) {
+function FaqItem({ faq }: { faq: FaqContent }) {
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
   const decrypted = useRef(false);
@@ -27,14 +27,14 @@ function FaqItem({ faq }: { faq: Faq }) {
     const txt = txtRef.current;
     if (!txt || prefersReducedMotion()) return;
     if (!decrypted.current) {
-      encrypt(txt, faq.a);
+      encrypt(txt, faq.answer);
     }
     return () => {
       cancelDecrypt(txt);
-      txt.textContent = faq.a;
+      txt.textContent = faq.answer;
       txt.style.filter = "";
     };
-  }, [faq.a]);
+  }, [faq.answer]);
 
   const toggle = () => {
     const wrap = wrapRef.current;
@@ -47,7 +47,7 @@ function FaqItem({ faq }: { faq: Faq }) {
       wrap.style.maxHeight = `${txt.scrollHeight + 60}px`;
       if (!decrypted.current) {
         decrypted.current = true;
-        decryptTo(txt, faq.a, undefined, () => {
+        decryptTo(txt, faq.answer, undefined, () => {
           // re-measure: decrypted text is usually shorter than the scramble
           if (openRef.current) wrap.style.maxHeight = `${txt.scrollHeight + 34}px`;
         });
@@ -66,7 +66,7 @@ function FaqItem({ faq }: { faq: Faq }) {
         className="flex w-full cursor-pointer items-center justify-between gap-[18px] border-none bg-transparent px-1 py-6 text-left"
       >
         <span className="font-display text-[clamp(17px,2vw,20px)] font-semibold text-fog">
-          {faq.q}
+          {faq.question}
         </span>
         <span className="flex-none font-mono text-[15px] text-magenta">
           {open ? "[–]" : "[+]"}
@@ -80,20 +80,26 @@ function FaqItem({ faq }: { faq: Faq }) {
           ref={txtRef}
           className="m-0 max-w-[64ch] px-1 pb-[26px] text-[15.5px] leading-[1.68] text-mist"
         >
-          {faq.a}
+          {faq.answer}
         </p>
       </div>
     </div>
   );
 }
 
-export default function FaqSection() {
+export default function FaqSection({
+  content,
+  faqs,
+}: {
+  content: SectionHeadingContent;
+  faqs: FaqContent[];
+}) {
   return (
     <section id="faq" className="relative z-[1] px-6 pb-[130px] pt-10">
       <SectionHeading
-        eyebrow="[ 07 // faq ]"
-        title="Questions, decrypted on demand."
-        sub="// answers ship encrypted — open one to decrypt"
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub={content.sub}
         subMono
         glowDuration={18}
       />
@@ -101,8 +107,8 @@ export default function FaqSection() {
         amount={0.1}
         className="mx-auto mt-12 max-w-[840px] border-t border-edge"
       >
-        {FAQS.map((faq, i) => (
-          <Reveal key={faq.q} delay={0.1 + i * 0.07}>
+        {faqs.map((faq, i) => (
+          <Reveal key={faq.question} delay={0.1 + i * 0.07}>
             <FaqItem faq={faq} />
           </Reveal>
         ))}

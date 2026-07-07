@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import NumberFlow from "@number-flow/react";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { useSpotlight } from "@/hooks/useSpotlight";
-import { STATS } from "@/lib/content";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import type { StatContent } from "@/sanity/types";
 
 /**
  * Proof stats: values roll up (NumberFlow) as the grid scrolls into view while
@@ -25,19 +25,22 @@ function parseStat(v: string): { prefix: string; num: number; suffix: string } {
   return { prefix: m[1], num: parseFloat(m[2]), suffix: m[3] };
 }
 
-const PARSED = STATS.map((s) => parseStat(s.value));
-
 export default function StatsSection({
   eyebrow = "[ 01 // proof of work ]",
   title = "Receipts, decrypted.",
+  stats,
+  disclaimer,
 }: {
   eyebrow?: string;
   title?: string;
+  stats: StatContent[];
+  disclaimer?: string;
 }) {
+  const parsed = useMemo(() => stats.map((s) => parseStat(s.value)), [stats]);
   const gridRef = useRef<HTMLDivElement>(null);
   const wipeRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const [revealed, setRevealed] = useState<boolean[]>(() =>
-    STATS.map(() => false),
+    stats.map(() => false),
   );
 
   useEffect(() => {
@@ -47,7 +50,7 @@ export default function StatsSection({
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (prefersReducedMotion()) {
       // defer the state update out of the effect body (no cascading render)
-      timers.push(setTimeout(() => setRevealed(STATS.map(() => true))));
+      timers.push(setTimeout(() => setRevealed(stats.map(() => true))));
       wipes.forEach((w) => w && (w.style.transform = "scaleX(0)"));
       return () => timers.forEach(clearTimeout);
     }
@@ -56,7 +59,7 @@ export default function StatsSection({
         for (const en of entries) {
           if (!en.isIntersecting) continue;
           io.disconnect();
-          STATS.forEach((_, i) => {
+          stats.forEach((_, i) => {
             timers.push(
               setTimeout(() => {
                 setRevealed((prev) => {
@@ -78,7 +81,7 @@ export default function StatsSection({
       io.disconnect();
       timers.forEach(clearTimeout);
     };
-  }, []);
+  }, [stats]);
 
   return (
     <section id="proof" className="relative z-[1] px-6 pb-[110px] pt-[100px]">
@@ -87,23 +90,25 @@ export default function StatsSection({
         ref={gridRef}
         className="mx-auto mt-[52px] grid max-w-[1160px] grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-[18px]"
       >
-        {STATS.map((stat, i) => (
+        {stats.map((stat, i) => (
           <StatCard
             key={stat.label}
             stat={stat}
-            p={PARSED[i]}
-            value={revealed[i] ? PARSED[i].num : 0}
+            p={parsed[i]}
+            value={revealed[i] ? parsed[i].num : 0}
             registerWipe={(el) => {
               wipeRefs.current[i] = el;
             }}
           />
         ))}
       </div>
-      <SubheadingReveal delay={0.2} className="mt-[26px] text-center">
-        <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint">
-          {"// placeholder figures — swap in your real numbers"}
-        </p>
-      </SubheadingReveal>
+      {disclaimer && (
+        <SubheadingReveal delay={0.2} className="mt-[26px] text-center">
+          <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint">
+            {disclaimer}
+          </p>
+        </SubheadingReveal>
+      )}
     </section>
   );
 }
@@ -118,7 +123,7 @@ function StatCard({
   value,
   registerWipe,
 }: {
-  stat: (typeof STATS)[number];
+  stat: StatContent;
   p: { prefix: string; num: number; suffix: string };
   value: number;
   registerWipe: (el: HTMLSpanElement | null) => void;

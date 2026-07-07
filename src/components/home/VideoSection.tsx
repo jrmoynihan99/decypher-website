@@ -4,13 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import ScaleReveal from "@/components/reveal/ScaleReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import type { SectionHeadingContent } from "@/sanity/types";
 
 /**
- * Video placeholder frame: scales up and glows as it approaches the center
- * of the viewport; the play button reveals the "paste your embed" note until
- * a real video is wired in.
+ * Video frame: scales up and glows as it approaches the center of the
+ * viewport. With a videoUrl from the CMS it renders the real embed;
+ * without one it shows the on-brand placeholder frame.
  */
-export default function VideoSection() {
+export default function VideoSection({
+  content,
+}: {
+  content: SectionHeadingContent & { videoUrl?: string };
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const glowRef = useRef<HTMLDivElement>(null);
   const [played, setPlayed] = useState(false);
@@ -46,9 +51,9 @@ export default function VideoSection() {
   return (
     <section id="video" className="relative z-[1] px-6 pb-[130px] pt-[60px]">
       <SectionHeading
-        eyebrow="[ 03 // transmission ]"
-        title="Watch the method."
-        sub="Three minutes on how DeCypher turns creator chaos into a tax strategy that pays for itself."
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub={content.sub}
         glowDuration={19}
       />
       <ScaleReveal className="relative mx-auto mt-[58px] max-w-[980px]">
@@ -68,6 +73,16 @@ export default function VideoSection() {
           // against the scroll handler's inline `transform` scale.
           className="relative aspect-video overflow-hidden rounded-[22px] border border-edge-mid bg-[linear-gradient(160deg,#16141D,#0D0B13)] shadow-[0_30px_80px_rgba(0,0,0,.55)] [transform:scale(.88)]"
         >
+          {content.videoUrl ? (
+            <iframe
+              src={content.videoUrl}
+              title={content.title ?? "Video"}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="absolute inset-0 h-full w-full border-0"
+            />
+          ) : (
+            <>
           {/* grid backdrop */}
           <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.03)_1px,transparent_1px)] bg-[size:44px_44px]" />
           <div className="absolute left-[22px] top-[18px] flex items-center gap-2 font-mono text-[11.5px] tracking-[0.18em] text-muted">
@@ -104,6 +119,8 @@ export default function VideoSection() {
               {"// paste your YouTube embed here — 16:9"}
             </p>
           </div>
+            </>
+          )}
         </div>
       </ScaleReveal>
     </section>
