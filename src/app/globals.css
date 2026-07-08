@@ -141,11 +141,15 @@
    Anchor links are smoothed by Lenis (`anchors: true` in SmoothScroll). */
 html {
   background: var(--color-night);
-  /* body's overflow-x clip doesn't catch layers whose containing block is
-     the viewport (fixed/sticky chrome) — without this the page can pan
-     sideways a few px on phones. Complements, not replaces, body's clip.
-     `hidden` first: engines without `clip` support (iOS < 16) drop that
-     declaration entirely and would otherwise fall back to visible. */
+  /* Horizontal-pan guard MUST live here on <html>, not <body>: in this engine
+     body-level overflow-x neither self-clips nor propagates to the viewport
+     (verified — body overflow-x:hidden leaves docScrollWidth unchanged), so
+     only the root clips the document. Wide absolutely-positioned decorations
+     (GlowOrb ~620px, centered) escape body and would pan the page a few px
+     without this. Removing it does NOT fix the iOS 26 top-bar bleed (that was
+     tested — the bar has a different cause), so it stays.
+     `hidden` first: engines without `clip` (iOS < 16) drop the clip line and
+     fall back to hidden. See memory: ios26-fullbleed-no-theme-color. */
   overflow-x: hidden;
   overflow-x: clip;
 }
@@ -156,7 +160,10 @@ body {
   color: var(--color-fog);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
-  /* hidden = fallback for engines without `clip` (see html rule above) */
+  /* Horizontal-pan guard lives here on <body>, NOT on <html> (overflow on the
+     <html> viewport scroller breaks iOS 26 edge-to-edge — see html rule above).
+     `clip` is the real rule; `hidden` is the fallback for engines without clip
+     support (iOS < 16), which drop the clip declaration entirely. */
   overflow-x: hidden;
   overflow-x: clip;
 }

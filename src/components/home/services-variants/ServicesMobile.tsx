@@ -38,11 +38,17 @@ export default function ServicesMobile({
                 className="relative overflow-hidden rounded-[20px] border border-edge-mid bg-panel/90 p-6"
               >
                 {/* node-colored corner glow — each card reads as one lit hub
-                    from the desktop map */}
+                    from the desktop map. Filter-FREE: softness is baked into the
+                    gradient stops instead of a blur() (same reasoning as GlowOrb's
+                    coarse branch). These sit over the always-on NeuralWeb canvas,
+                    so a real blur() would mean 5 blurred layers re-compositing
+                    every scroll frame — a mobile fill-rate wall for zero benefit. */}
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute -right-12 -top-12 h-[150px] w-[150px] rounded-full opacity-20 blur-2xl"
-                  style={{ background: color }}
+                  className="pointer-events-none absolute -right-12 -top-12 h-[160px] w-[160px] rounded-full"
+                  style={{
+                    background: `radial-gradient(circle, ${color}33 0%, ${color}1f 38%, ${color}0d 58%, transparent 76%)`,
+                  }}
                 />
                 <p
                   className="relative m-0 font-mono text-[10px] tracking-[0.26em]"

@@ -9,6 +9,7 @@ import fallbackLogo from "@/assets/decypher-mark.png";
 import ConsultButton from "@/components/ui/ConsultButton";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { noop } from "@/lib/noop";
 import type { LinkItem } from "@/sanity/types";
 
 export default function Navbar({
@@ -55,14 +56,17 @@ export default function Navbar({
     return () => window.removeEventListener("scroll", onScroll);
   }, [open]);
 
-  // Scroll lock while the overlay is up. Touch scrolling is native (Lenis
-  // never hijacks it), so overflow:hidden on both roots is enough.
+  // Scroll lock while the overlay is up. Lock ONLY <body>, never
+  // documentElement: toggling overflow on the <html> viewport scroller knocks
+  // iOS 26 Safari out of its edge-to-edge state (the top bar stops bleeding
+  // content behind the glass and goes solid) and it doesn't recover cleanly
+  // after the menu closes. The opaque full-screen overlay hides the page
+  // anyway, so a body-only lock is enough. Touch scrolling is native (Lenis
+  // never hijacks it). See memory: ios26-fullbleed-no-theme-color.
   useEffect(() => {
     if (!open) return;
-    document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
     return () => {
-      document.documentElement.style.overflow = "";
       document.body.style.overflow = "";
     };
   }, [open]);
@@ -86,20 +90,41 @@ export default function Navbar({
         initial={reduced ? false : { y: "-100%" }}
         animate={
           isMobile
-            ? { y: 0, opacity: !reduced && hidden ? 0 : 1 }
-            : { y: !reduced && hidden ? "-100%" : 0, opacity: 1 }
+            ? {
+                y: 0,
+                opacity: !reduced && hidden ? 0 : 1,
+                // Match aletheia: once the bar has faded out on scroll, DISPLAY:
+                // NONE it. A fixed element left in the DOM (even at opacity 0)
+                // keeps iOS 26 Safari painting its liquid-glass status-bar fill
+                // solid instead of bleeding page content up into it. `display:
+                // block` is re-applied at the start of the show animation (before
+                // the opacity fade-in); `transitionEnd` drops it to none only
+                // after the hide fade completes.
+                display: "block",
+                transitionEnd: {
+                  display: !reduced && hidden ? "none" : "block",
+                },
+              }
+            : { y: !reduced && hidden ? "-100%" : 0, opacity: 1, display: "block" }
         }
         transition={{
           duration: reduced ? 0 : isMobile ? 0.3 : 0.6,
           ease: [0.08, 0.82, 0.17, 1] as [number, number, number, number],
         }}
-        // fixed (not sticky) on mobile: iOS 26 Safari keeps its toolbars
-        // opaque when ANY sticky element is in the DOM, killing the
-        // edge-to-edge treatment. The spacer below re-occupies the bar's
-        // flow space so page layout is unchanged.
-        className="fixed inset-x-0 top-0 z-[100] pointer-events-none md:sticky md:inset-x-auto md:pointer-events-auto md:border-b md:border-edge-soft md:bg-night/40 md:backdrop-blur-[24px]"
+        onUpdate={noop}
+        // INSET floating bar on mobile (top-2 left-2 right-2), deliberately NOT
+        // spanning edge-to-edge: a fixed element flush to the top AND side edges
+        // reads to iOS 26 Safari as page chrome, so it reserves/paints the
+        // status-bar region solid instead of bleeding page content behind the
+        // liquid glass. Insetting it off every edge (as the reference site's nav
+        // does) keeps the edge-to-edge bleed; content px is px-3 to offset the
+        // side inset. A small top inset (top-1) keeps the bar off the very top
+        // edge while sitting the logo/hamburger high; the shorter mobile row
+        // (h-14 vs h-[70px]) raises them further. Desktop resets to a full-width
+        // sticky glass bar. See memory: ios26-fullbleed-no-theme-color.
+        className="fixed left-2 right-2 top-1 z-[100] pointer-events-none md:sticky md:inset-x-auto md:top-0 md:pointer-events-auto md:border-b md:border-edge-soft md:bg-night/40 md:backdrop-blur-[24px]"
       >
-        <div className="flex h-[70px] items-center justify-between gap-6 px-5 md:px-7">
+        <div className="flex h-14 items-center justify-between gap-6 px-3 md:h-[70px] md:px-7">
           <Link
             href="/"
             className={`flex flex-none items-center no-underline ${tap}`}
@@ -185,6 +210,7 @@ export default function Navbar({
             animate={{ opacity: 1 }}
             exit={reduced ? undefined : { opacity: 0 }}
             transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
+            onUpdate={noop}
             className="fixed inset-0 z-[90] bg-night/95 md:hidden"
             onClick={() => setOpen(false)}
           >
@@ -201,6 +227,7 @@ export default function Navbar({
                       ease: "easeOut",
                       delay: reduced ? 0 : 0.08 + i * 0.05,
                     }}
+                    onUpdate={noop}
                   >
                     <Link
                       href={l.href}
@@ -221,6 +248,7 @@ export default function Navbar({
                   ease: "easeOut",
                   delay: reduced ? 0 : 0.08 + links.length * 0.05,
                 }}
+                onUpdate={noop}
                 className="pt-8"
               >
                 <ConsultButton size="sm" />

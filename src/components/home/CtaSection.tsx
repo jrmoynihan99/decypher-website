@@ -10,7 +10,10 @@ import type { CtaContent } from "@/sanity/types";
 export default function CtaSection({ content }: { content: CtaContent }) {
   return (
     <SectionReveal>
-      <section className="relative z-[1] overflow-x-clip px-6 pb-20 pt-10 text-center md:pb-[150px] md:pt-[60px]">
+      {/* No overflow-x-clip here (unlike the old markup): it clipped the glow's
+          upward bleed into a hard line at the FAQ seam. The other sections don't
+          clip either — horizontal-pan is already guarded on <body> in globals. */}
+      <section className="relative z-[1] px-6 pb-20 pt-10 text-center md:pb-[150px] md:pt-[60px]">
         {/* anchorTop: this orb is a direct child of the (tall) section, not a
             top-anchored heading block, so without it the glow centers low and
             never reaches up into the FAQ above. */}

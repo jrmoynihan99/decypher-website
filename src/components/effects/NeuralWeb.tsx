@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import { fxOff } from "@/lib/fx";
 import { glowColor } from "@/lib/glowHue";
+import { noop } from "@/lib/noop";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 interface Node {
@@ -324,6 +325,10 @@ export default function NeuralWeb({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 2, ease: "easeOut" }}
+      // JS-drive the fade (see lib/noop): Safari flickers WAAPI opacity
+      // animations when the view-transition pseudo-elements tear down, and this
+      // full-screen layer is mid-fade on every freshly-navigated page.
+      onUpdate={noop}
       className={`pointer-events-none absolute inset-0 -z-10 overflow-hidden ${className ?? ""}`}
       style={style}
     >
