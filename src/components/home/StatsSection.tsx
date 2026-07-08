@@ -135,7 +135,10 @@ function StatCard({
       ref={ref}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
-      className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] px-4 py-5 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:px-7 md:py-8"
+      // frost is md+ only: the card sits on an always-animating canvas, so a
+      // backdrop-filter re-blurs EVERY frame while visible — too hot for
+      // mobile GPUs. Phones get a near-opaque panel instead.
+      className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-panel/85 px-4 py-5 transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:bg-white/[0.045] md:px-7 md:py-8 md:backdrop-blur-xl"
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}
       <div

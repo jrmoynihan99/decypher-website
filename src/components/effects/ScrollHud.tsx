@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { setGlowHue } from "@/lib/glowHue";
+import { isCoarsePointer } from "@/lib/perf";
 
 /**
  * Scroll-as-decryption HUD: a gradient progress bar pinned to the top and a
@@ -13,8 +14,9 @@ import { setGlowHue } from "@/lib/glowHue";
  * variable on <html> looks tidier but an unregistered custom property
  * inherits, so every change invalidates the computed style of the ENTIRE
  * document — profiled at 25-44ms of forced style recalc per frame during a
- * smooth-scroll glide. The value is quantized to 0.5° so the orb layers only
- * re-rasterize when it actually changes, not on every frame.
+ * smooth-scroll glide. The value is quantized (0.5° desktop, 6° on phones)
+ * so the orb layers only re-rasterize when it actually changes, not on
+ * every frame.
  */
 export default function ScrollHud() {
   const barRef = useRef<HTMLDivElement>(null);
@@ -24,6 +26,10 @@ export default function ScrollHud() {
     let raf = 0;
     let lastPct = -1;
     let lastHue = NaN;
+    // every step re-rasterizes each [data-glow] layer (big blurred orbs).
+    // 0.5° is fine on desktop; phones step 6° so a full-page scroll costs
+    // ~12 re-rasters instead of ~140.
+    const hueStep = isCoarsePointer() ? 6 : 0.5;
     const tick = () => {
       raf = 0;
       const y = window.scrollY || 0;
@@ -44,7 +50,7 @@ export default function ScrollHud() {
 
       const hue = p * 70 - 15;
       setGlowHue(hue);
-      const q = Math.round(hue * 2) / 2;
+      const q = Math.round(hue / hueStep) * hueStep;
       if (q !== lastHue) {
         lastHue = q;
         const filter = `hue-rotate(${q}deg)`;

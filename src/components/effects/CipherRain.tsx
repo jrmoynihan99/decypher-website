@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion, randChar } from "@/lib/decrypt";
+import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 interface Drop {
   el: HTMLSpanElement;
@@ -59,8 +60,13 @@ export default function CipherRain() {
         drops.push({ el: s, y, spd: spdMin + Math.random() * (spdMax - spdMin) });
       }
     };
-    build(a, 38, 13, 1.6, 3.2, "rgba(255,45,120,.16)", "rgba(139,43,232,.20)");
-    build(b, 28, 16, 3.2, 5.6, "rgba(255,45,120,.24)", "rgba(255,92,46,.20)");
+    // every drop is its own composited layer (will-change) updated per frame,
+    // and this layer never pauses — on phones that compositing bill runs the
+    // battery hot, so they get roughly viewport-density (narrow screen) and
+    // the loop below drops to ~30fps
+    const coarse = isCoarsePointer();
+    build(a, coarse ? 12 : 38, 13, 1.6, 3.2, "rgba(255,45,120,.16)", "rgba(139,43,232,.20)");
+    build(b, coarse ? 8 : 28, 16, 3.2, 5.6, "rgba(255,45,120,.24)", "rgba(255,92,46,.20)");
 
     // random flicker: re-randomize a few strings on a slow interval
     const flick = setInterval(() => {
@@ -74,7 +80,12 @@ export default function CipherRain() {
     // constant upward drift, independent of scroll
     let raf = 0;
     let lastT = performance.now();
+    const minFrame = coarse ? COARSE_FRAME_MS : 0;
     const loop = (t: number) => {
+      if (t - lastT < minFrame) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
       const dt = Math.min(60, t - lastT) / 1000;
       lastT = t;
       for (const sp of drops) {

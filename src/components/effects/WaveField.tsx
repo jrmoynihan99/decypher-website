@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 /**
  * Flowing "wireframe wave" background: a stack of parallel lines warped by
@@ -37,11 +38,14 @@ export default function WaveField({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const reduce = prefersReducedMotion();
+    // phones: lower backing-store cap + ~30fps loop (see lib/perf.ts) — the
+    // wave motion is absolute-time-based, so skipped frames don't change it
+    const coarse = isCoarsePointer();
 
     let w = 0;
     let h = 0;
     const resize = () => {
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(coarse ? 1.5 : 2, window.devicePixelRatio || 1);
       w = wrap.clientWidth;
       h = wrap.clientHeight;
       canvas.width = Math.max(1, Math.round(w * dpr));
@@ -156,8 +160,12 @@ export default function WaveField({
 
     // animate only while on screen
     let raf = 0;
+    let lastDraw = 0;
+    const minFrame = coarse ? COARSE_FRAME_MS : 0;
     const loop = (t: number) => {
       raf = requestAnimationFrame(loop);
+      if (t - lastDraw < minFrame) return;
+      lastDraw = t;
       draw(t);
     };
     const io = new IntersectionObserver(([en]) => {

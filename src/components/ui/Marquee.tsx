@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import { ensureScrollDrive, scrollVelocity } from "@/lib/scrollDrive";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { COARSE_FRAME_MS } from "@/lib/perf";
 
 /**
  * Horizontal auto-scrolling marquee. Children must be duplicated an even
@@ -278,6 +279,9 @@ export default function Marquee({
         return;
       }
       raf = requestAnimationFrame(tick);
+      // ~30fps drift is invisible at these speeds but halves (or quarters,
+      // on 120Hz phones) the scroll/composite work of a big image strip
+      if (t - prev < COARSE_FRAME_MS) return;
       if (!prev) prev = t;
       const dt = Math.min(0.05, (t - prev) / 1000);
       prev = t;
