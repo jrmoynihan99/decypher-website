@@ -93,7 +93,11 @@ export default function Navbar({
           duration: reduced ? 0 : isMobile ? 0.3 : 0.6,
           ease: [0.08, 0.82, 0.17, 1] as [number, number, number, number],
         }}
-        className="pointer-events-none sticky top-0 z-[100] md:pointer-events-auto md:border-b md:border-edge-soft md:bg-night/40 md:backdrop-blur-[24px]"
+        // fixed (not sticky) on mobile: iOS 26 Safari keeps its toolbars
+        // opaque when ANY sticky element is in the DOM, killing the
+        // edge-to-edge treatment. The spacer below re-occupies the bar's
+        // flow space so page layout is unchanged.
+        className="fixed inset-x-0 top-0 z-[100] pointer-events-none md:sticky md:inset-x-auto md:pointer-events-auto md:border-b md:border-edge-soft md:bg-night/40 md:backdrop-blur-[24px]"
       >
         <div className="flex h-[70px] items-center justify-between gap-6 px-5 md:px-7">
           <Link
@@ -164,6 +168,10 @@ export default function Navbar({
           </button>
         </div>
       </motion.div>
+
+      {/* holds the fixed mobile bar's 70px of flow space (desktop's sticky
+          bar occupies its own) */}
+      <div aria-hidden className="h-[70px] md:hidden" />
 
       {/* mobile menu — full-screen overlay below the bar (z-[90] < z-[100])
           so the logo and X stay visible and tappable on top of it. Near-solid
