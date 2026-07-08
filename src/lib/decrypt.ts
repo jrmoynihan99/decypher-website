@@ -2,6 +2,8 @@
  * "Decrypt" text effects shared across the site: text starts as scrambled
  * cipher characters and resolves left-to-right into the real copy.
  */
+import { fxOff } from "./fx";
+
 export const CIPHER_CHARS = "abcdefghjkmnpqrstuvwxyz0123456789#$%&@+=/<>";
 
 export function randChar(): string {
@@ -91,6 +93,10 @@ export const REVEAL_BLUR = 5;
  */
 export function encrypt(el: HTMLElement | null, text: string): void {
   if (!el) return;
+  if (fxOff("decrypt")) {
+    el.textContent = text;
+    return;
+  }
   lockLineWidth(el, text);
   el.textContent = scramble(text);
   el.style.filter = `blur(${REVEAL_BLUR}px)`;
@@ -111,7 +117,7 @@ export function decryptTo(
 ): void {
   if (!el) return;
   const node = el as DecryptEl;
-  if (prefersReducedMotion()) {
+  if (prefersReducedMotion() || fxOff("decrypt")) {
     node.textContent = target;
     done?.();
     return;
@@ -226,7 +232,7 @@ function buildCells(el: HTMLElement, text: string): Cell[] {
  * while scrambled and blurred below the fold.
  */
 export function encryptCells(el: HTMLElement | null, text: string): void {
-  if (!el || prefersReducedMotion()) return;
+  if (!el || prefersReducedMotion() || fxOff("decrypt")) return;
   const cells = buildCells(el, text);
   for (const c of cells) if (c.span) c.span.textContent = randChar();
   el.style.filter = `blur(${REVEAL_BLUR}px)`;
@@ -247,7 +253,7 @@ export function decryptCells(
 ): void {
   if (!el) return;
   const node = el as DecryptEl;
-  if (prefersReducedMotion()) {
+  if (prefersReducedMotion() || fxOff("decrypt")) {
     node.textContent = text;
     done?.();
     return;
@@ -310,7 +316,7 @@ export function decryptSegments(
     (s): s is { el: HTMLElement; text: string } => !!s.el,
   );
   if (!segs.length) return;
-  if (prefersReducedMotion()) {
+  if (prefersReducedMotion() || fxOff("decrypt")) {
     for (const s of segs) s.el.textContent = s.text;
     done?.();
     return;
@@ -398,7 +404,7 @@ function gradAt(t: number): string {
  * gradient survives the split. Call once after the element has decrypted.
  */
 export function armHover(el: HTMLElement, gradient = false): void {
-  if (prefersReducedMotion()) return;
+  if (prefersReducedMotion() || fxOff("decrypt")) return;
   const txt = el.textContent ?? "";
   el.textContent = "";
   if (gradient) {

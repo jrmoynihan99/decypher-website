@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { fxOff } from "@/lib/fx";
 
 /** Global nudge to every glow's peak intensity (core + mid opacity). */
 const GLOW_BOOST = 1.15;
 
 /**
  * Ambient radial glow that drifts slowly behind a section and grows in the
- * first time it scrolls into view. The `data-glow` attribute lets the homepage
- * scroll HUD hue-rotate every orb (via `filter`) as you scroll — so the grow
- * uses `transform`/`opacity` only, to stay out of its way.
+ * first time it scrolls into view. The grow uses `transform`/`opacity` only —
+ * anything touching `filter` on this layer re-rasterizes the huge blur, which
+ * is why the scroll-driven hue-rotate was removed (see ScrollHud).
  */
 export default function GlowOrb({
   size = 660,
@@ -38,6 +39,10 @@ export default function GlowOrb({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (fxOff("orbs")) {
+      el.style.display = "none";
+      return;
+    }
     const reduce = prefersReducedMotion();
     const io = new IntersectionObserver(
       (entries) => {
@@ -57,7 +62,6 @@ export default function GlowOrb({
   return (
     <div
       ref={ref}
-      data-glow
       aria-hidden
       className={`pointer-events-none absolute ${className ?? ""}`}
       style={{

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion, randChar } from "@/lib/decrypt";
+import { fxOff } from "@/lib/fx";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 interface Drop {
@@ -22,7 +23,7 @@ export default function CipherRain() {
   useEffect(() => {
     const a = aRef.current;
     const b = bRef.current;
-    if (!a || !b || prefersReducedMotion()) return;
+    if (!a || !b || prefersReducedMotion() || fxOff("rain")) return;
 
     const rand = (n: number) => Math.floor(Math.random() * n);
     const randStr = () => {
