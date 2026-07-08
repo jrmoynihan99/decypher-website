@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { glowColor } from "@/lib/glowHue";
 
 interface Node {
   x: number;
@@ -12,6 +13,8 @@ interface Node {
   r: number;
   hub: boolean;
   color: string;
+  /** Inside the drawable window this frame (physics still runs when false). */
+  in: boolean;
 }
 
 /**
@@ -42,14 +45,28 @@ export default function NeuralWeb({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const reduce = prefersReducedMotion();
+    // animated mode rotates the palette per draw (see glowHue.ts); reduced
+    // motion renders ONE static frame, so it opts back into ScrollHud's
+    // inline hue-rotate filter via data-glow instead — filtering a
+    // never-repainting layer is cheap, and the scroll hue keeps applying
+    const col = reduce ? (c: string) => c : glowColor;
+    if (reduce) wrap.setAttribute("data-glow", "");
 
     const COLORS = ["#FF2D78", "#8B2BE8", "#FF5C2E"];
     const LINK = 130; // node↔node link distance (px)
     const MOUSE_R = 190; // cursor link / attraction radius (px)
     const MAX_SPD = 0.55; // px per 60fps-frame speed cap
+    // The wrapper can span several sections; allocating (and clearing) a
+    // full-height canvas texture every frame is the expensive part, so the
+    // canvas is only viewport-sized (+margin) and slides down the wrapper to
+    // track the visible band. Margin must exceed MOUSE_R so cursor strands
+    // never get clipped at the window edge.
+    const MARGIN = 220;
 
     let w = 0;
-    let h = 0;
+    let h = 0; // full wrapper height (node space)
+    let vh = 0; // canvas window height
+    let offY = 0; // window's offset down the wrapper
     let nodes: Node[] = [];
 
     const seed = () => {
@@ -65,6 +82,7 @@ export default function NeuralWeb({
           r: hub ? 2.6 + Math.random() * 1.4 : 1.1 + Math.random() * 1.2,
           hub,
           color: COLORS[Math.random() < 0.45 ? 0 : Math.random() < 0.75 ? 1 : 2],
+          in: true,
         };
       });
     };
@@ -74,11 +92,13 @@ export default function NeuralWeb({
       const pw = w;
       w = wrap.clientWidth;
       h = wrap.clientHeight;
+      // reduced motion draws a single static frame, so it needs the full
+      // height — there is no per-frame loop to slide the window
+      vh = reduce ? h : Math.min(h, window.innerHeight + MARGIN * 2);
       canvas.width = Math.max(1, Math.round(w * dpr));
-      canvas.height = Math.max(1, Math.round(h * dpr));
+      canvas.height = Math.max(1, Math.round(vh * dpr));
       canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      canvas.style.height = `${vh}px`;
       if (!nodes.length || Math.abs(w - pw) > 200) seed();
     };
     resize();
@@ -97,11 +117,18 @@ export default function NeuralWeb({
     // frame so the two modes blend instead of snapping
     let held = false;
     let grip = 0;
-    const onDown = () => {
+    const onDown = (e: PointerEvent) => {
       held = true;
+      // a stationary touch never fires pointermove — seed the position here
+      // so tap-and-hold pulls the mesh toward the finger
+      pointer.cx = e.clientX;
+      pointer.cy = e.clientY;
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       held = false;
+      // touch has no hover: lifting the finger ends the interaction outright
+      // instead of leaving strands anchored at the last contact point
+      if (e.pointerType !== "mouse") onLeave();
     };
 
     let last = 0;
@@ -109,9 +136,24 @@ export default function NeuralWeb({
       // normalize physics to 60fps so speed doesn't depend on refresh rate
       const dtF = last ? Math.min(2, (t - last) / 16.7) : 1;
       last = t;
-      ctx.clearRect(0, 0, w, h);
 
-      const rect = canvas.getBoundingClientRect();
+      const rect = wrap.getBoundingClientRect();
+      // slide the canvas window to the wrapper's visible band; drawing below
+      // compensates via the context transform, so content stays put
+      if (vh < h) {
+        offY = Math.max(0, Math.min(h - vh, -rect.top - MARGIN));
+        canvas.style.transform = `translate3d(0,${offY.toFixed(1)}px,0)`;
+      } else if (offY) {
+        offY = 0;
+        canvas.style.transform = "";
+      }
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, -offY * dpr);
+      ctx.clearRect(0, offY, w, vh);
+      // drawable band in node space, padded so nothing pops at the edges
+      const wy0 = offY - LINK;
+      const wy1 = offY + vh + LINK;
+
       const mx = pointer.cx - rect.left;
       const my = pointer.cy - rect.top;
       const mouseOn = mx > -MOUSE_R && mx < w + MOUSE_R && my > -MOUSE_R && my < h + MOUSE_R;
@@ -145,15 +187,19 @@ export default function NeuralWeb({
         else if (n.x > w + 20) n.x = -20;
         if (n.y < -20) n.y = h + 20;
         else if (n.y > h + 20) n.y = -20;
+        n.in = n.y > wy0 && n.y < wy1;
       }
 
       // mesh edges (violet, faint)
-      ctx.strokeStyle = "#8B2BE8";
+      ctx.strokeStyle = col("#8B2BE8");
       ctx.lineWidth = 1;
       for (let i = 0; i < nodes.length; i++) {
         const a = nodes[i];
         for (let j = i + 1; j < nodes.length; j++) {
           const b = nodes[j];
+          // both endpoints outside the window → the link can't be visible
+          // (the window is padded by LINK, longer links don't exist)
+          if (!a.in && !b.in) continue;
           const dx = a.x - b.x;
           const dy = a.y - b.y;
           const d2 = dx * dx + dy * dy;
@@ -168,8 +214,9 @@ export default function NeuralWeb({
 
       // cursor strands (magenta, brighter) — the "you're touching it" cue
       if (mouseOn) {
-        ctx.strokeStyle = "#FF2D78";
+        ctx.strokeStyle = col("#FF2D78");
         for (const n of nodes) {
+          if (!n.in) continue;
           const d = Math.hypot(n.x - mx, n.y - my);
           if (d > MOUSE_R) continue;
           ctx.globalAlpha = (1 - d / MOUSE_R) * 0.55 * opacity;
@@ -182,15 +229,17 @@ export default function NeuralWeb({
 
       // nodes on top; hubs get a soft halo
       for (const n of nodes) {
+        if (!n.in) continue;
+        const fill = col(n.color);
         if (n.hub) {
           ctx.globalAlpha = 0.18 * opacity;
-          ctx.fillStyle = n.color;
+          ctx.fillStyle = fill;
           ctx.beginPath();
           ctx.arc(n.x, n.y, n.r * 3.2, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 0.85 * opacity;
-        ctx.fillStyle = n.color;
+        ctx.fillStyle = fill;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
         ctx.fill();
@@ -233,6 +282,9 @@ export default function NeuralWeb({
     io.observe(wrap);
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
+    // the wrapper's box doesn't necessarily change when only the viewport
+    // height does, and the canvas window is sized to the viewport
+    window.addEventListener("resize", resize);
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerout", onLeave, { passive: true });
     window.addEventListener("pointerdown", onDown, { passive: true });
@@ -242,6 +294,7 @@ export default function NeuralWeb({
     return () => {
       io.disconnect();
       ro.disconnect();
+      window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerout", onLeave);
       window.removeEventListener("pointerdown", onDown);
@@ -252,9 +305,11 @@ export default function NeuralWeb({
   }, [opacity]);
 
   return (
+    // no data-glow here: a CSS hue-rotate on a full-section canvas layer would
+    // re-filter megapixels whenever the scroll hue changes — the draw loop
+    // rotates its palette via lib/glowHue.ts instead (identical output)
     <motion.div
       ref={wrapRef}
-      data-glow
       aria-hidden
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -262,7 +317,10 @@ export default function NeuralWeb({
       className={`pointer-events-none absolute inset-0 -z-10 overflow-hidden ${className ?? ""}`}
       style={style}
     >
-      <canvas ref={canvasRef} />
+      <canvas
+        ref={canvasRef}
+        className="absolute left-0 top-0 will-change-transform"
+      />
     </motion.div>
   );
 }

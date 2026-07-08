@@ -80,7 +80,9 @@ const MIN_DUR = 400;
 // cap the total reveal so long strings (e.g. FAQ answers) don't drag on
 const MAX_DUR = 1000;
 
-/** Blur applied to encrypted / mid-decrypt text — the "out of focus" look. */
+/** Blur applied to encrypted / mid-decrypt text — the "out of focus" look.
+ * Keep in sync with `.decrypt-pending` in globals.css (the pre-hydration
+ * resting state), so handing off from CSS to the JS effect is seamless. */
 export const REVEAL_BLUR = 5;
 
 /**
@@ -324,6 +326,12 @@ export function decryptSegments(
   const scrs = segs.map((s) =>
     Array.from(s.text, (c) => (/\s/.test(c) ? c : randChar())),
   );
+  // paint the fully-scrambled, blurred state synchronously so the real text
+  // measured a moment ago never flashes before the first animation frame
+  for (let si = 0; si < nodes.length; si++) {
+    nodes[si].textContent = scrs[si].join("");
+    nodes[si].style.filter = `blur(${REVEAL_BLUR}px)`;
+  }
   const t0 = performance.now();
   let last = 0;
   function frame(t: number) {

@@ -23,5 +23,15 @@ export default function DecryptOnView({
   threshold?: number;
 }) {
   const ref = useDecryptOnView<HTMLElement>(text, { duration, threshold });
-  return createElement(as, { ref, className, style }, text);
+  // decrypt-pending blurs the server-rendered copy until the hook's effect
+  // takes over, so the finished text never flashes before the scramble
+  return createElement(
+    as,
+    {
+      ref,
+      className: className ? `${className} decrypt-pending` : "decrypt-pending",
+      style,
+    },
+    text,
+  );
 }

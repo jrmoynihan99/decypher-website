@@ -18,18 +18,21 @@ function RosterRow({
     <Marquee
       duration={reverse ? 78 : 64}
       reverse={reverse}
-      curve={50}
+      curve={20}
       scrollDrive
-      className={`gap-5 ${className}`}
+      className={`gap-4 md:gap-5 ${className}`}
     >
       {[...row, ...row].map((c, i) => (
-        <div key={`${c.name}-${i}`} className="flex w-[230px] flex-none flex-col gap-3">
+        <div
+          key={`${c.name}-${i}`}
+          className="flex w-[164px] flex-none flex-col gap-3 md:w-[230px]"
+        >
           <Image
             src={c.img}
             alt={c.name}
             width={230}
             height={280}
-            className="block h-[280px] w-[230px] rounded-2xl border border-edge bg-panel object-cover object-[50%_20%]"
+            className="block h-[200px] w-[164px] rounded-2xl border border-edge bg-panel object-cover object-[50%_20%] md:h-[280px] md:w-[230px]"
           />
           <div className="flex flex-col gap-[3px] px-1">
             <b className="font-display text-[15px] font-semibold text-fog">
@@ -67,7 +70,7 @@ export default function RosterSection({
       />
       <Reveal
         amount={0.2}
-        className="mt-[54px] overflow-hidden py-8 [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+        className="mt-[54px] overflow-hidden py-4 md:py-8 md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
       >
         <RosterRow row={rowA} className="py-1.5" />
         <RosterRow row={rowB} reverse className="pb-1.5 pt-5" />

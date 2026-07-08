@@ -299,7 +299,7 @@ export default function ServicesFlyover({
 
       <div ref={outerRef} className="relative h-[640vh]">
         <div
-          className="sticky top-0 h-screen overflow-hidden"
+          className="sticky top-0 h-svh overflow-hidden"
           onMouseMove={onStageMove}
           onMouseLeave={onStageLeave}
         >

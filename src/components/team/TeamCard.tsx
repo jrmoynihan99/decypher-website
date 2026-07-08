@@ -1,21 +1,46 @@
 "use client";
 
 import Image from "next/image";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useSpotlight } from "@/hooks/useSpotlight";
 import { cancelDecrypt, decryptTo } from "@/lib/decrypt";
 import { TeamMember } from "@/lib/team";
 
-/** Codename redaction: decrypts on hover, re-redacts on leave. */
+const noHover = () =>
+  typeof window !== "undefined" && !window.matchMedia("(hover: hover)").matches;
+
+/**
+ * Codename redaction: decrypts on hover, re-redacts on leave. Touch devices
+ * have no hover, so there the codename decrypts once when it scrolls into
+ * view (and the emulated mouseleave a tap fires never re-redacts it).
+ */
 function useCodename(p: TeamMember) {
   const codeRef = useRef<HTMLSpanElement>(null);
   const reveal = () => decryptTo(codeRef.current, p.codename);
   const hide = () => {
     const txt = codeRef.current;
-    if (!txt) return;
+    if (!txt || noHover()) return;
     cancelDecrypt(txt);
     txt.textContent = p.redacted;
   };
+
+  useEffect(() => {
+    if (!noHover()) return;
+    const el = codeRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          decryptTo(el, p.codename);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.5 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [p.codename]);
+
   return { codeRef, reveal, hide };
 }
 

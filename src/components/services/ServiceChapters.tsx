@@ -296,7 +296,7 @@ function ServiceChapter({
           ref={numeralRef}
           aria-hidden
           style={{ willChange: "transform" }}
-          className="text-grad pointer-events-none absolute -top-16 right-0 select-none font-display text-[170px] font-bold leading-none opacity-[0.07] transition-opacity duration-500 group-hover/row:opacity-[0.12]"
+          className="text-grad pointer-events-none absolute -top-10 right-0 select-none font-display text-[110px] font-bold leading-none opacity-[0.07] transition-opacity duration-500 group-hover/row:opacity-[0.12] sm:-top-16 sm:text-[170px]"
         >
           {svc.num}
         </div>

@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import fallbackLogo from "@/assets/decypher-mark.png";
 import ConsultButton from "@/components/ui/ConsultButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
@@ -20,10 +20,21 @@ export default function Navbar({
   const pathname = usePathname();
   const reduced = useReducedMotion();
   const [hidden, setHidden] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  // the menu closes itself on navigation (view-transition clicks included)
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   // Slide away on scroll down, return on any scroll up; always shown near the
   // top of the page. Small deadzone so trackpad jitter doesn't toggle it.
+  // While the mobile menu is open the bar stays put.
   useEffect(() => {
+    if (open) {
+      setHidden(false);
+      return;
+    }
     let lastY = window.scrollY;
     const onScroll = () => {
       const y = Math.max(0, window.scrollY);
@@ -35,7 +46,7 @@ export default function Navbar({
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [open]);
 
   return (
     <motion.div
@@ -47,7 +58,7 @@ export default function Navbar({
       }}
       className="sticky top-0 z-[100] border-b border-edge-soft bg-night/40 backdrop-blur-[24px]"
     >
-      <div className="flex h-[70px] items-center justify-between gap-6 px-7">
+      <div className="flex h-[70px] items-center justify-between gap-6 px-5 md:px-7">
         <Link href="/" className="flex flex-none items-center no-underline">
           {logo ? (
             <Image
@@ -67,7 +78,9 @@ export default function Navbar({
             />
           )}
         </Link>
-        <div className="flex flex-wrap items-center justify-end gap-[26px]">
+
+        {/* desktop row */}
+        <div className="hidden flex-wrap items-center justify-end gap-[26px] md:flex">
           {links.map((l) => {
             const active = l.href === pathname;
             return (
@@ -84,7 +97,62 @@ export default function Navbar({
           })}
           <ConsultButton size="sm" />
         </div>
+
+        {/* mobile hamburger — 44px hit area */}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? "Close menu" : "Open menu"}
+          className="-mr-2 flex h-11 w-11 cursor-pointer flex-col items-center justify-center gap-[7px] border-0 bg-transparent p-0 md:hidden"
+        >
+          <span
+            className={`block h-[1.5px] w-[22px] bg-fog transition-transform duration-300 ${
+              open ? "translate-y-[4.25px] rotate-45" : ""
+            }`}
+          />
+          <span
+            className={`block h-[1.5px] w-[22px] bg-fog transition-transform duration-300 ${
+              open ? "-translate-y-[4.25px] -rotate-45" : ""
+            }`}
+          />
+        </button>
       </div>
+
+      {/* mobile menu panel */}
+      <AnimatePresence>
+        {open && (
+          <motion.nav
+            key="mobile-menu"
+            initial={reduced ? false : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={reduced ? undefined : { height: 0, opacity: 0 }}
+            transition={{ duration: reduced ? 0 : 0.35, ease: [0.2, 0.7, 0.2, 1] }}
+            className="overflow-hidden border-t border-edge-soft md:hidden"
+          >
+            <div className="flex flex-col px-5 pb-6 pt-2">
+              {links.map((l) => {
+                const active = l.href === pathname;
+                return (
+                  <Link
+                    key={l.label}
+                    href={l.href}
+                    onClick={() => setOpen(false)}
+                    className={`border-b border-edge-soft py-[14px] font-mono text-[13px] uppercase tracking-[0.16em] no-underline transition-colors ${
+                      active ? "text-magenta" : "text-mist"
+                    }`}
+                  >
+                    {l.label}
+                  </Link>
+                );
+              })}
+              <div className="pt-5 text-center">
+                <ConsultButton size="sm" />
+              </div>
+            </div>
+          </motion.nav>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

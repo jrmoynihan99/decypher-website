@@ -56,6 +56,11 @@ export default function Hero({
         armHover(e2, true);
       },
     );
+    // decryptSegments has already painted the scrambled state (with its own
+    // inline blur) synchronously, so the pre-hydration blur class can come
+    // off in the same task without the finished copy ever being visible
+    e1.classList.remove("decrypt-pending");
+    e2.classList.remove("decrypt-pending");
     return () => {
       cancelDecrypt(e1);
       cancelDecrypt(e2);
@@ -67,7 +72,7 @@ export default function Hero({
 
   return (
     <SectionReveal>
-      <section className="relative z-[2] flex min-h-[92vh] flex-col items-center justify-center overflow-x-clip px-6 pb-[64px] pt-8 text-center">
+      <section className="relative z-[2] flex min-h-[92svh] flex-col items-center justify-center overflow-x-clip px-6 pb-[64px] pt-8 text-center">
         <GlowOrb size={860} blur={52} alpha={0.22} beta={0.13} duration={15} />
 
         <SubheadingReveal className="relative">
@@ -76,10 +81,10 @@ export default function Hero({
           </p>
         </SubheadingReveal>
         <h1 className="relative mt-[22px] max-w-[1060px] font-display text-[clamp(44px,7.2vw,94px)] font-bold leading-[1.03] tracking-[-0.03em]">
-          <span ref={line1Ref} className="block text-fog">
+          <span ref={line1Ref} className="decrypt-pending block text-fog">
             {line1}
           </span>
-          <span ref={line2Ref} className="block text-grad">
+          <span ref={line2Ref} className="decrypt-pending block text-grad">
             {line2}
           </span>
         </h1>
@@ -106,13 +111,13 @@ export default function Hero({
         </Reveal>
 
         {/* creator photo strip — reveals early, alongside the body copy.
-            pt-10/pb-12 is the minimum clearance for the curve=80 arc: edges
-            rise ~35px where still visible past the mask, center dips 40px. */}
+            md padding is the clearance for the curve=32 arc + edge tilt;
+            mobile is a flat native scroller (no arc, no edge fade). */}
         <Reveal
           delay={0.35}
-          className="relative mt-4 w-full overflow-hidden pb-12 pt-10 [mask-image:linear-gradient(90deg,transparent,#000_12%,#000_88%,transparent)]"
+          className="relative -mx-6 mt-4 self-stretch overflow-hidden py-3 md:pb-10 md:pt-8 md:[mask-image:linear-gradient(90deg,transparent,#000_12%,#000_88%,transparent)]"
         >
-          <Marquee duration={64} curve={80} scrollDrive className="gap-5">
+          <Marquee duration={64} curve={32} scrollDrive className="gap-4 md:gap-5">
             {[...strip, ...strip].map((c, i) => (
               <Image
                 key={`${c.name}-${i}`}
@@ -120,7 +125,7 @@ export default function Hero({
                 alt={c.name}
                 width={230}
                 height={280}
-                className="h-[280px] w-[230px] flex-none rounded-2xl border border-edge bg-panel object-cover object-[50%_20%]"
+                className="h-[200px] w-[164px] flex-none rounded-2xl border border-edge bg-panel object-cover object-[50%_20%] md:h-[280px] md:w-[230px]"
               />
             ))}
           </Marquee>

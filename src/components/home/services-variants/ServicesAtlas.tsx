@@ -306,10 +306,10 @@ export default function ServicesAtlas({
       ref={stageWrapRef}
       className={`${
         framed
-          ? "relative mt-10 h-[min(82vh,820px)] overflow-hidden rounded-[24px] border border-edge bg-night/40"
+          ? "relative mt-10 h-[min(82svh,820px)] overflow-hidden rounded-[24px] border border-edge bg-night/40"
           : unified
-            ? "relative h-screen" // canvas must escape to bleed below
-            : "relative h-screen overflow-hidden"
+            ? "relative h-svh" // canvas must escape to bleed below
+            : "relative h-svh overflow-hidden"
       } ${focus >= 0 ? "cursor-pointer" : ""}`}
       onMouseMove={onStageMove}
       onMouseLeave={onStageLeave}
@@ -484,10 +484,11 @@ export default function ServicesAtlas({
       })}
 
       {/* CLICK TO CLOSE — rides the cursor while zoomed (hidden while the
-          cursor is offering a different node to open) */}
+          cursor is offering a different node to open). Touch has no cursor to
+          ride, so coarse pointers rely on the bottom HUD line instead. */}
       <div
         ref={chipRef}
-        className={`pointer-events-none absolute left-0 top-0 z-[4] transition-opacity duration-200 ${
+        className={`pointer-events-none absolute left-0 top-0 z-[4] transition-opacity duration-200 pointer-coarse:hidden ${
           focus >= 0 && (hot < 0 || hot === focus) ? "opacity-100" : "opacity-0"
         }`}
         style={{ willChange: "transform" }}
@@ -502,10 +503,18 @@ export default function ServicesAtlas({
         {focus >= 0 ? (
           <>
             LOCKED — <span className="text-magenta">NODE 0{focus + 1}</span> ·
-            CLICK AWAY TO PULL BACK
+            <span className="pointer-coarse:hidden"> CLICK AWAY TO PULL BACK</span>
+            <span className="hidden pointer-coarse:inline"> TAP AWAY TO PULL BACK</span>
           </>
         ) : (
-          "HOVER A NODE · CLICK TO FLY IN"
+          <>
+            <span className="pointer-coarse:hidden">
+              HOVER A NODE · CLICK TO FLY IN
+            </span>
+            <span className="hidden pointer-coarse:inline">
+              TAP A NODE TO FLY IN
+            </span>
+          </>
         )}
       </div>
     </div>

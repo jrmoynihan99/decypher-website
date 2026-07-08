@@ -88,7 +88,7 @@ export default function StatsSection({
       <SectionHeading eyebrow={eyebrow} title={title} />
       <div
         ref={gridRef}
-        className="mx-auto mt-[52px] grid max-w-[1160px] grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-[18px]"
+        className="mx-auto mt-[52px] grid max-w-[1160px] grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fit,minmax(230px,1fr))] md:gap-[18px]"
       >
         {stats.map((stat, i) => (
           <StatCard
@@ -135,7 +135,7 @@ function StatCard({
       ref={ref}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
-      className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] px-7 py-8 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)]"
+      className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] px-4 py-5 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:px-7 md:py-8"
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}
       <div
@@ -152,10 +152,10 @@ function StatCard({
           prefix={p.prefix}
           suffix={p.suffix}
           format={{ maximumFractionDigits: 1 }}
-          className="text-magenta font-display text-[clamp(40px,4vw,56px)] font-bold leading-none tracking-[-0.02em]"
+          className="text-magenta font-display text-[28px] font-bold leading-none tracking-[-0.02em] md:text-[clamp(40px,4vw,56px)]"
         />
         <div className="relative mt-3.5 inline-block">
-          <span className="font-mono text-[11.5px] uppercase tracking-[0.18em] text-muted">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted md:text-[11.5px] md:tracking-[0.18em]">
             {stat.label}
           </span>
           <span

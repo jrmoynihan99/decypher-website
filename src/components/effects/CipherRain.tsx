@@ -45,11 +45,15 @@ export default function CipherRain() {
       for (let i = 0; i < count; i++) {
         const s = document.createElement("span");
         s.textContent = randStr();
-        s.style.cssText = `position:absolute;font-family:var(--font-mono);font-size:${size}px;letter-spacing:3px;writing-mode:vertical-rl;user-select:none;`;
+        // drift is applied via transform (translate3d in vh units), never
+        // `top` — a layout property on 66 spans per frame kept the whole
+        // page's layout permanently dirty. will-change gives each drop its
+        // own tiny layer so the drift is compositor-only work.
+        s.style.cssText = `position:absolute;top:0;font-family:var(--font-mono);font-size:${size}px;letter-spacing:3px;writing-mode:vertical-rl;user-select:none;will-change:transform;`;
         s.style.left = `${rand(100)}%`;
         s.style.color = rand(2) ? colA : colB;
         const y = rand(250) - 30;
-        s.style.top = `${y}vh`;
+        s.style.transform = `translate3d(0,${y}vh,0)`;
         layer.appendChild(s);
         allSpans.push(s);
         drops.push({ el: s, y, spd: spdMin + Math.random() * (spdMax - spdMin) });
@@ -79,7 +83,7 @@ export default function CipherRain() {
           sp.y += 260;
           sp.el.style.left = `${rand(100)}%`;
         }
-        sp.el.style.top = `${sp.y.toFixed(2)}vh`;
+        sp.el.style.transform = `translate3d(0,${sp.y.toFixed(2)}vh,0)`;
       }
       raf = requestAnimationFrame(loop);
     };
