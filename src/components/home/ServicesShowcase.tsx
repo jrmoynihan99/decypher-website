@@ -5,6 +5,7 @@ import NeuralWeb from "@/components/effects/NeuralWeb";
 import ServicesAtlas from "@/components/home/services-variants/ServicesAtlas";
 import ServicesFlyover from "@/components/home/services-variants/ServicesFlyover";
 import ServicesMobile from "@/components/home/services-variants/ServicesMobile";
+import { useHydrated } from "@/hooks/useHydrated";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 
@@ -35,6 +36,12 @@ export default function ServicesShowcase({
   const [mode, setMode] = useState<"atlas" | "flyover">("atlas");
   const groupRef = useRef<HTMLDivElement>(null);
   const mobile = useIsMobile();
+  // useIsMobile hydrates as false, so without this gate a PHONE's first
+  // client render mounts the full Atlas stage (camera, hubs, dot sim) just
+  // to throw it away a frame later. Serve the cheap stacked cut until we
+  // actually know the viewport; on desktop the swap happens right after
+  // hydration, well below the fold.
+  const hydrated = useHydrated();
 
   const toggle = (
     <div className="relative flex items-center justify-center gap-2.5 px-6 pb-16 pt-5">
@@ -61,7 +68,7 @@ export default function ServicesShowcase({
   // phones get the readable stacked cut — the neural map's world renders far
   // too small below md (see ServicesMobile). The touch-reactive background
   // web keeps the section (and the children below it) part of the mesh.
-  if (mobile) {
+  if (!hydrated || mobile) {
     return (
       <div className="relative z-[1]">
         <NeuralWeb

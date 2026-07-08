@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import { glowColor } from "@/lib/glowHue";
+import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 interface Node {
   x: number;
@@ -56,6 +57,12 @@ export default function NeuralWeb({
     const LINK = 130; // node↔node link distance (px)
     const MOUSE_R = 190; // cursor link / attraction radius (px)
     const MAX_SPD = 0.55; // px per 60fps-frame speed cap
+    // phones: at least one of these canvases is intersecting at every scroll
+    // position, so this loop is effectively always on — cap the backing store
+    // at 1.5x (1px strokes at low alpha don't show the difference) and let
+    // the loop below run at ~30fps instead of the display's 60/120
+    const coarse = isCoarsePointer();
+    const DPR_CAP = coarse ? 1.5 : 2;
     // The wrapper can span several sections; allocating (and clearing) a
     // full-height canvas texture every frame is the expensive part, so the
     // canvas is only viewport-sized (+margin) and slides down the wrapper to
@@ -71,7 +78,9 @@ export default function NeuralWeb({
 
     const seed = () => {
       // density scales with area so wide sections don't look sparse
-      const count = Math.max(30, Math.min(90, Math.round((w * h) / 16000)));
+      const count = coarse
+        ? Math.max(24, Math.min(60, Math.round((w * h) / 24000)))
+        : Math.max(30, Math.min(90, Math.round((w * h) / 16000)));
       nodes = Array.from({ length: count }, () => {
         const hub = Math.random() < 0.12;
         return {
@@ -88,7 +97,7 @@ export default function NeuralWeb({
     };
 
     const resize = () => {
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(DPR_CAP, window.devicePixelRatio || 1);
       const pw = w;
       w = wrap.clientWidth;
       h = wrap.clientHeight;
@@ -147,7 +156,7 @@ export default function NeuralWeb({
         offY = 0;
         canvas.style.transform = "";
       }
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(DPR_CAP, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, -offY * dpr);
       ctx.clearRect(0, offY, w, vh);
       // drawable band in node space, padded so nothing pops at the edges
@@ -264,8 +273,11 @@ export default function NeuralWeb({
     draw(0);
 
     let raf = 0;
+    // ~30fps on phones; the dtF clamp in draw() keeps physics speed identical
+    const minFrame = coarse ? COARSE_FRAME_MS : 0;
     const loop = (t: number) => {
       raf = requestAnimationFrame(loop);
+      if (t - last < minFrame) return;
       draw(t);
     };
     const io = new IntersectionObserver(([en]) => {
