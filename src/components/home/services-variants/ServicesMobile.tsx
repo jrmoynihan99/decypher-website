@@ -1,6 +1,6 @@
 "use client";
 
-import DecryptOnView from "@/components/ui/DecryptOnView";
+import SectionHeading from "@/components/ui/SectionHeading";
 import { HUB_COLORS } from "@/components/home/services-variants/NeuralStage";
 import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 
@@ -22,23 +22,14 @@ export default function ServicesMobile({
   services: CmsService[];
 }) {
   return (
-    <section id="services" className="relative px-6 pb-[90px] pt-[96px]">
+    <section id="services" className="relative px-4 pb-14 pt-14 md:px-6 md:pb-[90px] md:pt-[96px]">
+      <SectionHeading
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub="Five services, one network."
+      />
       <div className="mx-auto max-w-[640px]">
-        <div className="text-center">
-          <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            {content.eyebrow}
-          </p>
-          <DecryptOnView
-            as="h2"
-            text={content.title ?? ""}
-            className="mt-4 font-display text-[clamp(30px,8.5vw,44px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog"
-          />
-          <p className="mx-auto mb-0 mt-4 max-w-[46ch] text-[15px] leading-relaxed text-mist">
-            Five services, one network.
-          </p>
-        </div>
-
-        <div className="mt-10 space-y-5">
+        <div className="mt-8 space-y-5">
           {services.map((svc, i) => {
             const color = HUB_COLORS[i % HUB_COLORS.length];
             return (

@@ -20,17 +20,15 @@ export default function TestimonialsSection({
   const loopA = repeat(rowA, 4);
   const loopB = repeat(rowB, 4);
   return (
-    <section id="reviews" className="relative z-[1] pb-[130px] pt-[120px]">
+    <section id="reviews" className="relative z-[1] pb-16 pt-16 md:pb-[130px] md:pt-[120px]">
       <SectionHeading
         eyebrow={content.eyebrow ?? ""}
         title={content.title ?? ""}
-        sub={content.sub}
-        subMono
         glowDuration={16}
       />
       <Reveal
         amount={0.2}
-        className="mt-[54px] overflow-hidden md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+        className="mt-8 overflow-hidden md:mt-[54px] md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
       >
         <Marquee duration={58} className="gap-5 px-6 pt-2.5">
           {loopA.map((t, i) => (

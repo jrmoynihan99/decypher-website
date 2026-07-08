@@ -95,17 +95,18 @@ export default function FaqSection({
   faqs: FaqContent[];
 }) {
   return (
-    <section id="faq" className="relative z-[1] px-6 pb-[130px] pt-10">
+    <section id="faq" className="relative z-[1] px-4 pb-16 pt-10 md:px-6 md:pb-[130px]">
       <SectionHeading
         eyebrow={content.eyebrow ?? ""}
         title={content.title ?? ""}
         sub={content.sub}
         subMono
+        subClassName="hidden md:block"
         glowDuration={18}
       />
       <SectionReveal
         amount={0.1}
-        className="mx-auto mt-12 max-w-[840px] border-t border-edge"
+        className="mx-auto mt-8 max-w-[840px] border-t border-edge md:mt-12"
       >
         {faqs.map((faq, i) => (
           <Reveal key={faq.question} delay={0.1 + i * 0.07}>

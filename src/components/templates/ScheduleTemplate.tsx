@@ -44,7 +44,7 @@ export default function ScheduleTemplate({
 
         {/* hero: the pitch on the left, the form as the hero's content */}
         <SectionReveal>
-          <section className="relative z-[1] mx-auto grid max-w-[1200px] items-start gap-12 px-6 pb-[100px] pt-[80px] lg:grid-cols-[1fr_520px] lg:gap-16">
+          <section className="relative z-[1] mx-auto grid max-w-[1200px] items-start gap-12 px-6 pb-[100px] pt-8 lg:grid-cols-[1fr_520px] lg:gap-16 md:pt-[80px]">
             <GlowOrb
               size={780}
               blur={54}
@@ -119,7 +119,6 @@ export default function ScheduleTemplate({
           eyebrow={page.statsSection?.eyebrow}
           title={page.statsSection?.title}
           stats={settings?.stats ?? []}
-          disclaimer={settings?.statsDisclaimer}
         />
 
         {/* the receipts */}

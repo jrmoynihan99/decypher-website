@@ -54,7 +54,6 @@ export default function HomeTemplate({
           eyebrow={page.statsSection?.eyebrow}
           title={page.statsSection?.title}
           stats={settings?.stats ?? []}
-          disclaimer={settings?.statsDisclaimer}
         />
       </div>
       <EstimatorSection content={page.estimatorSection ?? {}} />
@@ -74,7 +73,6 @@ export default function HomeTemplate({
         <RosterSection
           content={page.rosterSection ?? {}}
           creators={creators.slice(0, 16)}
-          totalCount={creators.length}
         />
       </div>
       {/* Services + everything below share one web: in Atlas mode the

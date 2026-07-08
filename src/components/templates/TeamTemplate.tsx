@@ -102,7 +102,7 @@ export default function TeamTemplate({
               ) : (
                 <SectionReveal
                   amount={0.1}
-                  className="grid grid-cols-[repeat(auto-fill,minmax(228px,1fr))] gap-[18px]"
+                  className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(228px,1fr))] sm:gap-[18px]"
                 >
                   {tier.people.map((p, i) => (
                     <Reveal key={p.fid} delay={0.1 + Math.min(i * 0.06, 0.55)}>

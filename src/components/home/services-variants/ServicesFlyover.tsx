@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import DecryptOnView from "@/components/ui/DecryptOnView";
+import SectionHeading from "@/components/ui/SectionHeading";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { cancelDecrypt, decryptTo } from "@/lib/decrypt";
 import type { CmsService, SectionHeadingContent } from "@/sanity/types";
@@ -245,35 +245,32 @@ export default function ServicesFlyover({
   /* reduced motion: a plain, fully readable stack */
   if (reduced) {
     return (
-      <section id="services" className="relative z-[1] px-6 pb-[120px] pt-[110px]">
-        <div className="mx-auto max-w-[900px]">
-          <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            {content.eyebrow}
-          </p>
-          <h2 className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog">
-            {content.title}
-          </h2>
-          <div className="mt-10 space-y-8">
-            {services.map((svc) => (
-              <article
-                key={svc.num}
-                className="rounded-[20px] border border-edge bg-panel p-7"
-              >
-                <p className="m-0 font-mono text-[11px] tracking-[0.2em] text-faint">
-                  NODE {svc.num} — {svc.nodeTag}
-                </p>
-                <h3 className="mt-3 font-display text-[clamp(24px,3vw,34px)] font-semibold tracking-[-0.015em] text-fog">
-                  {svc.title}
-                </h3>
-                <p className="mb-0 mt-2 font-mono text-xs uppercase tracking-[0.16em] text-magenta">
-                  {svc.promise}
-                </p>
-                <p className="mb-0 mt-3 text-[16px] leading-[1.65] text-mist">
-                  {svc.body}
-                </p>
-              </article>
-            ))}
-          </div>
+      <section id="services" className="relative z-[1] px-4 pb-[120px] pt-[110px] md:px-6">
+        <SectionHeading
+          eyebrow={content.eyebrow ?? ""}
+          title={content.title ?? ""}
+          sub="Five services, one network. Scroll — the camera does the rest."
+        />
+        <div className="mx-auto mt-10 max-w-[900px] space-y-8">
+          {services.map((svc) => (
+            <article
+              key={svc.num}
+              className="rounded-[20px] border border-edge bg-panel p-7"
+            >
+              <p className="m-0 font-mono text-[11px] tracking-[0.2em] text-faint">
+                NODE {svc.num} — {svc.nodeTag}
+              </p>
+              <h3 className="mt-3 font-display text-[clamp(24px,3vw,34px)] font-semibold tracking-[-0.015em] text-fog">
+                {svc.title}
+              </h3>
+              <p className="mb-0 mt-2 font-mono text-xs uppercase tracking-[0.16em] text-magenta">
+                {svc.promise}
+              </p>
+              <p className="mb-0 mt-3 text-[16px] leading-[1.65] text-mist">
+                {svc.body}
+              </p>
+            </article>
+          ))}
         </div>
       </section>
     );
@@ -283,18 +280,12 @@ export default function ServicesFlyover({
     <section id="services" className="relative z-[1]">
       {/* header lives above the pin in normal flow — once the map sticks,
           the viewport is pure map */}
-      <div className="mx-auto max-w-[760px] px-6 pb-14 pt-[110px] text-center">
-        <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-          {content.eyebrow}
-        </p>
-        <DecryptOnView
-          as="h2"
-          text={content.title ?? ""}
-          className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog"
+      <div className="pb-14 pt-[110px]">
+        <SectionHeading
+          eyebrow={content.eyebrow ?? ""}
+          title={content.title ?? ""}
+          sub="Five services, one network. Scroll — the camera does the rest."
         />
-        <p className="mx-auto mt-[18px] max-w-[52ch] text-base leading-relaxed text-mist">
-          Five services, one network. Scroll &mdash; the camera does the rest.
-        </p>
       </div>
 
       <div ref={outerRef} className="relative h-[640vh]">

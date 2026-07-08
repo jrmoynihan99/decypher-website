@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import NumberFlow from "@number-flow/react";
-import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { useSpotlight } from "@/hooks/useSpotlight";
 import { prefersReducedMotion } from "@/lib/decrypt";
@@ -29,12 +28,10 @@ export default function StatsSection({
   eyebrow = "[ 01 // proof of work ]",
   title = "Receipts, decrypted.",
   stats,
-  disclaimer,
 }: {
   eyebrow?: string;
   title?: string;
   stats: StatContent[];
-  disclaimer?: string;
 }) {
   const parsed = useMemo(() => stats.map((s) => parseStat(s.value)), [stats]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -84,11 +81,11 @@ export default function StatsSection({
   }, [stats]);
 
   return (
-    <section id="proof" className="relative z-[1] px-6 pb-[110px] pt-[100px]">
+    <section id="proof" className="relative z-[1] px-4 pb-16 pt-16 md:px-6 md:pb-[110px] md:pt-[100px]">
       <SectionHeading eyebrow={eyebrow} title={title} />
       <div
         ref={gridRef}
-        className="mx-auto mt-[52px] grid max-w-[1160px] grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fit,minmax(230px,1fr))] md:gap-[18px]"
+        className="mx-auto mt-8 grid max-w-[1160px] grid-cols-2 gap-3 md:mt-[52px] md:grid-cols-[repeat(auto-fit,minmax(230px,1fr))] md:gap-[18px]"
       >
         {stats.map((stat, i) => (
           <StatCard
@@ -102,13 +99,6 @@ export default function StatsSection({
           />
         ))}
       </div>
-      {disclaimer && (
-        <SubheadingReveal delay={0.2} className="mt-[26px] text-center">
-          <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint">
-            {disclaimer}
-          </p>
-        </SubheadingReveal>
-      )}
     </section>
   );
 }

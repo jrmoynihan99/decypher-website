@@ -10,8 +10,11 @@ import type { CtaContent } from "@/sanity/types";
 export default function CtaSection({ content }: { content: CtaContent }) {
   return (
     <SectionReveal>
-      <section className="relative z-[1] overflow-x-clip px-6 pb-[150px] pt-[60px] text-center">
-        <GlowOrb size={840} blur={56} alpha={0.22} beta={0.14} duration={14} />
+      <section className="relative z-[1] overflow-x-clip px-6 pb-20 pt-10 text-center md:pb-[150px] md:pt-[60px]">
+        {/* anchorTop: this orb is a direct child of the (tall) section, not a
+            top-anchored heading block, so without it the glow centers low and
+            never reaches up into the FAQ above. */}
+        <GlowOrb size={840} blur={56} alpha={0.22} beta={0.14} duration={14} anchorTop />
         <DecryptOnView
           as="h2"
           text={content.title ?? ""}

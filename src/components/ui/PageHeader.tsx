@@ -31,7 +31,7 @@ export default function PageHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <header className="relative z-[1] overflow-visible px-6 pb-[30px] pt-[90px] text-center">
+    <header className="relative z-[1] overflow-visible px-6 pb-[30px] pt-8 text-center md:pt-[90px]">
       <SectionReveal>
         <GlowOrb
           size={760}
