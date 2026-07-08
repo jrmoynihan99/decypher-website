@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { fxOff } from "@/lib/fx";
 import { glowColor } from "@/lib/glowHue";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
@@ -44,14 +45,11 @@ export default function NeuralWeb({
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx || fxOff("web")) return;
     const reduce = prefersReducedMotion();
     // animated mode rotates the palette per draw (see glowHue.ts); reduced
-    // motion renders ONE static frame, so it opts back into ScrollHud's
-    // inline hue-rotate filter via data-glow instead — filtering a
-    // never-repainting layer is cheap, and the scroll hue keeps applying
+    // motion renders ONE static frame with the base palette
     const col = reduce ? (c: string) => c : glowColor;
-    if (reduce) wrap.setAttribute("data-glow", "");
 
     const COLORS = ["#FF2D78", "#8B2BE8", "#FF5C2E"];
     const LINK = 130; // node↔node link distance (px)

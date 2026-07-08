@@ -1,35 +1,28 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { setGlowHue } from "@/lib/glowHue";
-import { isCoarsePointer } from "@/lib/perf";
+import { fxOff } from "@/lib/fx";
 
 /**
  * Scroll-as-decryption HUD: a gradient progress bar pinned to the top and a
- * "DECRYPTING… NN%" chip in the corner. Also hue-rotates every GlowOrb on the
- * page as scroll progress advances — as inline filter writes on the
- * `[data-glow]` elements (a handful of orbs; the canvas meshes rotate their
- * palettes in-draw via the shared glowHue module instead). Inline writes on
- * a few elements are the CHEAP option here: broadcasting one `--glow-hue`
- * variable on <html> looks tidier but an unregistered custom property
- * inherits, so every change invalidates the computed style of the ENTIRE
- * document — profiled at 25-44ms of forced style recalc per frame during a
- * smooth-scroll glide. The value is quantized (0.5° desktop, 6° on phones)
- * so the orb layers only re-rasterize when it actually changes, not on
- * every frame.
+ * "DECRYPTING… NN%" chip in the corner (both desktop-only).
+ *
+ * This used to also hue-rotate every [data-glow] glow layer as scroll
+ * progress advanced. Removed on purpose: each filter change re-rasterizes
+ * megapixel blurred orb layers, and a filter parked on an ANIMATING canvas
+ * (the estimator WaveField) re-runs on every canvas frame — isolated via the
+ * ?off= bisect as the dominant source of phone scroll jank. If scroll-reactive
+ * color ever comes back, rotate palettes in-draw like NeuralWeb does; never
+ * via a CSS filter on these layers.
  */
 export default function ScrollHud() {
   const barRef = useRef<HTMLDivElement>(null);
   const chipRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
+    if (fxOff("hud")) return;
     let raf = 0;
     let lastPct = -1;
-    let lastHue = NaN;
-    // every step re-rasterizes each [data-glow] layer (big blurred orbs).
-    // 0.5° is fine on desktop; phones step 6° so a full-page scroll costs
-    // ~12 re-rasters instead of ~140.
-    const hueStep = isCoarsePointer() ? 6 : 0.5;
     const tick = () => {
       raf = 0;
       const y = window.scrollY || 0;
@@ -47,17 +40,6 @@ export default function ScrollHud() {
             : `DECRYPTING… ${String(pct).padStart(2, "0")}%`;
         chipRef.current.style.color = pct >= 100 ? "#3DD6C4" : "#9A93AB";
       }
-
-      const hue = p * 70 - 15;
-      setGlowHue(hue);
-      const q = Math.round(hue / hueStep) * hueStep;
-      if (q !== lastHue) {
-        lastHue = q;
-        const filter = `hue-rotate(${q}deg)`;
-        document
-          .querySelectorAll<HTMLElement>("[data-glow]")
-          .forEach((g) => (g.style.filter = filter));
-      }
     };
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(tick);
@@ -69,8 +51,6 @@ export default function ScrollHud() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       if (raf) cancelAnimationFrame(raf);
-      // don't leak the home page's hue onto pages without a ScrollHud
-      setGlowHue(0);
     };
   }, []);
 

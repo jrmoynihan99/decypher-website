@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { fxOff } from "@/lib/fx";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 /**
@@ -36,7 +37,7 @@ export default function WaveField({
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx || fxOff("wave")) return;
     const reduce = prefersReducedMotion();
     // phones: lower backing-store cap + ~30fps loop (see lib/perf.ts) — the
     // wave motion is absolute-time-based, so skipped frames don't change it
@@ -194,7 +195,6 @@ export default function WaveField({
   return (
     <div
       ref={wrapRef}
-      data-glow
       aria-hidden
       className={`pointer-events-none absolute inset-0 -z-10 overflow-hidden ${className ?? ""}`}
       style={style}

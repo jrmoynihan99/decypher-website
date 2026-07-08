@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
+import { fxOff } from "@/lib/fx";
 import { ensureScrollDrive, scrollVelocity } from "@/lib/scrollDrive";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { COARSE_FRAME_MS } from "@/lib/perf";
@@ -46,7 +47,7 @@ export default function Marquee({
 
   /* ── desktop: transform-driven track with drag/throw ── */
   useEffect(() => {
-    if (mobile) return;
+    if (mobile || fxOff("marquee")) return;
     const track = trackRef.current;
     if (!track) return;
     const reduced = prefersReducedMotion();
@@ -226,7 +227,7 @@ export default function Marquee({
 
   /* ── mobile: native scroller + idle drift ── */
   useEffect(() => {
-    if (!mobile) return;
+    if (!mobile || fxOff("marquee")) return;
     const scroller = scrollerRef.current;
     const track = trackRef.current;
     if (!scroller || !track) return;
