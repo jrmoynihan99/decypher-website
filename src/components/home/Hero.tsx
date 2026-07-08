@@ -103,7 +103,7 @@ export default function Hero({
           {content.secondaryCtaLabel && (
             <a
               href="#proof"
-              className="rounded-full border border-edge-bright px-[30px] py-4 font-display text-[16.5px] font-semibold text-fog no-underline transition-colors hover:border-magenta"
+              className="hidden rounded-full border border-edge-bright px-[30px] py-4 font-display text-[16.5px] font-semibold text-fog no-underline transition-colors hover:border-magenta md:inline-block"
             >
               {content.secondaryCtaLabel}
             </a>
