@@ -3,7 +3,9 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { prefersReducedMotion, randChar } from "@/lib/decrypt";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { fxOff } from "@/lib/fx";
+import { noop } from "@/lib/noop";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
 
 interface Drop {
@@ -19,8 +21,15 @@ interface Drop {
 export default function CipherRain() {
   const aRef = useRef<HTMLDivElement>(null);
   const bRef = useRef<HTMLDivElement>(null);
+  // Not rendered on phones: it's a full-screen `fixed inset-0` layer, and a
+  // fixed element flush to the BOTTOM edge makes iOS 26 Safari paint the
+  // home-indicator bar solid (same failure as the top nav — this layer is the
+  // only such element unique to the home page, which is why only home showed a
+  // black bottom bar). Also saves the per-drop compositing cost on mobile.
+  const isMobile = useIsMobile();
 
   useEffect(() => {
+    if (isMobile) return;
     const a = aRef.current;
     const b = bRef.current;
     if (!a || !b || prefersReducedMotion() || fxOff("rain")) return;
@@ -116,7 +125,9 @@ export default function CipherRain() {
       a.replaceChildren();
       b.replaceChildren();
     };
-  }, []);
+  }, [isMobile]);
+
+  if (isMobile) return null;
 
   return (
     <motion.div
@@ -124,6 +135,9 @@ export default function CipherRain() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 2, ease: "easeOut" }}
+      // JS-drive the fade (see lib/noop): dodges Safari's WAAPI-vs-view-
+      // transition compositor flicker on this full-screen layer.
+      onUpdate={noop}
       className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
     >
       <div ref={aRef} className="absolute inset-0 will-change-transform" />
