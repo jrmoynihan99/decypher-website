@@ -10,7 +10,7 @@ export default function EstimatorSection({
   content: SectionHeadingContent;
 }) {
   return (
-    <section id="estimator" className="relative z-[1] px-6 pb-[120px] pt-10">
+    <section id="estimator" className="relative z-[1] px-4 pb-16 pt-10 md:px-6 md:pb-[120px]">
       <WaveField />
       <SectionHeading
         eyebrow={content.eyebrow ?? ""}
@@ -18,7 +18,7 @@ export default function EstimatorSection({
         sub={content.sub}
         glowDuration={18}
       />
-      <Reveal amount={0.15} className="mx-auto mt-11 w-full max-w-[760px]">
+      <Reveal amount={0.15} className="mx-auto mt-8 w-full max-w-[760px] md:mt-11">
         <TaxEstimator />
       </Reveal>
     </section>

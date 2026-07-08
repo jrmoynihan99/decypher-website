@@ -129,7 +129,7 @@ export default function CreatorsExplorer({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="SEARCH THE DATABASE…"
               aria-label="Search creators"
-              className="w-full border-none bg-transparent font-mono text-[12.5px] tracking-[0.1em] text-fog outline-none placeholder:text-faint"
+              className="w-full border-none bg-transparent font-mono text-[16px] tracking-[0.1em] text-fog outline-none placeholder:text-faint"
             />
             {query && (
               <button

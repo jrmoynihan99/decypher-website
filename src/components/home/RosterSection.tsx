@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Reveal from "@/components/reveal/Reveal";
+import ConsultButton from "@/components/ui/ConsultButton";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Marquee from "@/components/ui/Marquee";
 import { Creator, creatorHandle } from "@/lib/creators";
@@ -51,26 +52,25 @@ function RosterRow({
 export default function RosterSection({
   content,
   creators,
-  totalCount,
 }: {
   content: SectionHeadingContent;
   creators: Creator[];
-  totalCount: number;
 }) {
   const rowA = creators.slice(0, 8);
   const rowB = creators.slice(8, 16);
   return (
-    <section id="roster" className="relative z-[1] pb-[130px] pt-10">
+    <section id="roster" className="relative z-[1] pb-16 pt-10 md:pb-[130px]">
       <SectionHeading
         eyebrow={content.eyebrow ?? ""}
         title={content.title ?? ""}
-        sub={content.sub?.replaceAll("{count}", String(totalCount))}
-        subMono
         glowDuration={16}
       />
+      <Reveal delay={0.2} className="mt-7 flex justify-center">
+        <ConsultButton href="/creators" size="lg">Our Creators</ConsultButton>
+      </Reveal>
       <Reveal
         amount={0.2}
-        className="mt-[54px] overflow-hidden py-4 md:py-8 md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+        className="mt-8 overflow-hidden py-4 md:mt-11 md:py-8 md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
       >
         <RosterRow row={rowA} className="py-1.5" />
         <RosterRow row={rowB} reverse className="pb-1.5 pt-5" />

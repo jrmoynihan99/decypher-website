@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import DecryptOnView from "@/components/ui/DecryptOnView";
+import SectionHeading from "@/components/ui/SectionHeading";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { cancelDecrypt, decryptTo } from "@/lib/decrypt";
 import type { CmsService, SectionHeadingContent } from "@/sanity/types";
@@ -246,58 +246,44 @@ export default function ServicesAtlas({
   /* reduced motion: flat, fully readable grid */
   if (reduced) {
     return (
-      <section id="services" className="relative z-[1] px-6 pb-[120px] pt-[110px]">
-        <div className="mx-auto max-w-[1180px]">
-          <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            {content.eyebrow}
-          </p>
-          <h2 className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog">
-            {content.title}
-          </h2>
-          <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {services.map((svc) => (
-              <article
-                key={svc.num}
-                className="rounded-[20px] border border-edge-mid bg-panel p-6"
-              >
-                <div className="font-mono text-[12.5px] tracking-[0.14em] text-magenta">
-                  {svc.num}
-                </div>
-                <h3 className="mt-2.5 font-display text-[22px] font-semibold tracking-[-0.01em] text-fog">
-                  {svc.title}
-                </h3>
-                <p className="mb-0 mt-2 font-mono text-[11px] uppercase tracking-[0.16em] text-magenta">
-                  {svc.promise}
-                </p>
-                <p className="mb-0 mt-3 text-[14.5px] leading-[1.62] text-mist">
-                  {svc.body}
-                </p>
-              </article>
-            ))}
-          </div>
+      <section id="services" className="relative z-[1] px-4 pb-[120px] pt-[110px] md:px-6">
+        <SectionHeading
+          eyebrow={content.eyebrow ?? ""}
+          title={content.title ?? ""}
+          sub="Five services, one network. Click a node — the camera does the rest."
+        />
+        <div className="mx-auto mt-10 grid max-w-[1180px] gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {services.map((svc) => (
+            <article
+              key={svc.num}
+              className="rounded-[20px] border border-edge-mid bg-panel p-6"
+            >
+              <div className="font-mono text-[12.5px] tracking-[0.14em] text-magenta">
+                {svc.num}
+              </div>
+              <h3 className="mt-2.5 font-display text-[22px] font-semibold tracking-[-0.01em] text-fog">
+                {svc.title}
+              </h3>
+              <p className="mb-0 mt-2 font-mono text-[11px] uppercase tracking-[0.16em] text-magenta">
+                {svc.promise}
+              </p>
+              <p className="mb-0 mt-3 text-[14.5px] leading-[1.62] text-mist">
+                {svc.body}
+              </p>
+            </article>
+          ))}
         </div>
       </section>
     );
   }
 
   const header = (
-    <div
-      className={`mx-auto max-w-[760px] text-center ${
-        framed ? "" : "px-6 pb-14 pt-[110px]"
-      }`}
-    >
-      <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-        {content.eyebrow}
-      </p>
-      <DecryptOnView
-        as="h2"
-        text={content.title ?? ""}
-        className="mt-4 font-display text-[clamp(32px,4vw,52px)] font-bold leading-[1.06] tracking-[-0.025em] text-fog"
+    <div className={framed ? "" : "pb-4 pt-[110px]"}>
+      <SectionHeading
+        eyebrow={content.eyebrow ?? ""}
+        title={content.title ?? ""}
+        sub="Five services, one network. Click a node — the camera does the rest."
       />
-      <p className="mx-auto mt-[18px] max-w-[52ch] text-base leading-relaxed text-mist">
-        Five services, one network. Click a node &mdash; the camera does the
-        rest.
-      </p>
     </div>
   );
 
@@ -308,8 +294,8 @@ export default function ServicesAtlas({
         framed
           ? "relative mt-10 h-[min(82svh,820px)] overflow-hidden rounded-[24px] border border-edge bg-night/40"
           : unified
-            ? "relative h-svh" // canvas must escape to bleed below
-            : "relative h-svh overflow-hidden"
+            ? "relative -mt-[6vh] h-svh" // canvas must escape to bleed below
+            : "relative -mt-[6vh] h-svh overflow-hidden"
       } ${focus >= 0 ? "cursor-pointer" : ""}`}
       onMouseMove={onStageMove}
       onMouseLeave={onStageLeave}

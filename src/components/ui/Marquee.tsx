@@ -5,7 +5,6 @@ import { prefersReducedMotion } from "@/lib/decrypt";
 import { fxOff } from "@/lib/fx";
 import { ensureScrollDrive, scrollVelocity } from "@/lib/scrollDrive";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { COARSE_FRAME_MS } from "@/lib/perf";
 
 /**
  * Horizontal auto-scrolling marquee. Children must be duplicated an even
@@ -246,13 +245,16 @@ export default function Marquee({
     ro.observe(track);
 
     // The OS owns the gesture. We only drift while the user is idle: any
-    // touch pauses it, and every scroll event we didn't cause ourselves
-    // (finger OR momentum) pushes the resume point out.
+    // touch pauses it, and any scroll we didn't cause ourselves (finger OR
+    // momentum) pushes the resume point out. We tell our own drift apart from
+    // a real interaction by comparing the live scroll position against the
+    // last value we wrote — a counter of "expected" scroll events can't
+    // survive the browser coalescing several programmatic writes into one.
     const IDLE_MS = 180;
     let touching = false;
     let idleAt = 0;
-    let expectScroll = 0; // our own scrollLeft writes also fire scroll events
     let pos = -1; // float mirror of scrollLeft (integer writes would stall sub-px drift)
+    let lastWritten = -1; // scrollLeft right after our most recent drift write
     let raf = 0;
     let prev = 0;
     let visible = true;
@@ -266,10 +268,10 @@ export default function Marquee({
       idleAt = performance.now();
     };
     const onScroll = () => {
-      if (expectScroll > 0) {
-        expectScroll--;
+      // our own drift lands within a pixel of lastWritten; a finger or
+      // momentum fling moves further — that's a real interaction.
+      if (lastWritten >= 0 && Math.abs(scroller.scrollLeft - lastWritten) < 2)
         return;
-      }
       pos = -1; // user/momentum moved us — resync when drift resumes
       idleAt = performance.now();
     };
@@ -280,9 +282,10 @@ export default function Marquee({
         return;
       }
       raf = requestAnimationFrame(tick);
-      // ~30fps drift is invisible at these speeds but halves (or quarters,
-      // on 120Hz phones) the scroll/composite work of a big image strip
-      if (t - prev < COARSE_FRAME_MS) return;
+      // Run every frame at fractional precision: on a high-DPR phone this
+      // advances by sub-CSS-pixel device steps, so the strip glides. The old
+      // 30fps + Math.round() drift chunked a slow ~1.5px/frame pace into
+      // visibly uneven 1–2px jumps — that was the skippiness.
       if (!prev) prev = t;
       const dt = Math.min(0.05, (t - prev) / 1000);
       prev = t;
@@ -294,11 +297,13 @@ export default function Marquee({
       // reverse row can't pin against the browser's scrollLeft clamp)
       if (pos >= period) pos -= period;
       else if (pos < 1) pos += period;
-      const next = Math.round(pos);
-      if (next !== scroller.scrollLeft) {
-        expectScroll++;
-        scroller.scrollLeft = next;
-      }
+      scroller.scrollLeft = pos;
+      // remember what we asked for — do NOT read scrollLeft back. Reading it
+      // right after a write forces a synchronous layout recalc every frame
+      // (layout thrash), which is what was still making the strip stutter.
+      // The browser lands within a device pixel of pos, well inside the
+      // onScroll tolerance below.
+      lastWritten = pos;
     };
     const run = () => {
       if (!raf) {

@@ -49,18 +49,18 @@ export default function VideoSection({
   }, []);
 
   return (
-    <section id="video" className="relative z-[1] px-6 pb-[130px] pt-[60px]">
+    <section id="video" className="relative z-[1] px-4 pb-16 pt-10 md:px-6 md:pb-[130px] md:pt-[60px]">
       <SectionHeading
         eyebrow={content.eyebrow ?? ""}
         title={content.title ?? ""}
         sub={content.sub}
         glowDuration={19}
       />
-      <ScaleReveal className="relative mx-auto mt-[58px] max-w-[980px]">
+      <ScaleReveal className="relative mx-auto mt-8 max-w-[980px] md:mt-[58px]">
         <div
           ref={glowRef}
           aria-hidden
-          className="pointer-events-none absolute inset-x-[6%] -bottom-[6%] top-[8%] opacity-0 blur-[64px]"
+          className="pointer-events-none absolute inset-x-[6%] -bottom-[6%] top-[8%] opacity-0 blur-[64px] pointer-coarse:blur-[30px]"
           style={{
             background:
               "radial-gradient(ellipse at center,rgba(255,45,120,.32),rgba(139,43,232,.20) 55%,rgba(10,10,14,0) 78%)",
@@ -95,7 +95,10 @@ export default function VideoSection({
           <button
             aria-label="Play video"
             onClick={() => setPlayed(true)}
-            className={`bg-grad absolute left-1/2 top-1/2 flex h-[94px] w-[94px] -translate-x-1/2 -translate-y-1/2 animate-pulse-ring cursor-pointer items-center justify-center rounded-full border-none pl-2 text-[28px] text-white transition-opacity duration-400 ${
+            // pulse-ring animates box-shadow spread (a per-frame repaint) —
+            // fine on desktop, jank on iOS over the live canvas, so it's off
+            // on touch (the ▶ is obviously a play button without it)
+            className={`bg-grad absolute left-1/2 top-1/2 flex h-[94px] w-[94px] -translate-x-1/2 -translate-y-1/2 animate-pulse-ring pointer-coarse:animate-none cursor-pointer items-center justify-center rounded-full border-none pl-2 text-[28px] text-white transition-opacity duration-400 ${
               played ? "pointer-events-none opacity-0" : ""
             }`}
           >
@@ -106,7 +109,9 @@ export default function VideoSection({
           </div>
           <div
             aria-hidden
-            className={`pointer-events-none absolute inset-0 animate-scan bg-[repeating-linear-gradient(0deg,rgba(255,255,255,.04)_0px,rgba(255,255,255,.04)_1px,transparent_1px,transparent_4px)] transition-opacity duration-[600ms] ${
+            // scan animates background-position (a per-frame repaint); hold it
+            // static on touch — the lines stay, they just don't drift
+            className={`pointer-events-none absolute inset-0 animate-scan pointer-coarse:animate-none bg-[repeating-linear-gradient(0deg,rgba(255,255,255,.04)_0px,rgba(255,255,255,.04)_1px,transparent_1px,transparent_4px)] transition-opacity duration-[600ms] ${
               played ? "opacity-0" : "opacity-100"
             }`}
           />
