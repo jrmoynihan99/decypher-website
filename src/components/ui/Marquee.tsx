@@ -3,16 +3,22 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import { ensureScrollDrive, scrollVelocity } from "@/lib/scrollDrive";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 /**
- * Horizontal auto-scrolling marquee you can grab, drag, and throw. On release
- * the flick momentum decays back to the passive scroll speed. Children must be
- * duplicated an even number of times (e.g. `[...row, ...row]`) so the loop
- * wraps seamlessly at half the track width.
+ * Horizontal auto-scrolling marquee. Children must be duplicated an even
+ * number of times (e.g. `[...row, ...row]`) so the loop wraps seamlessly at
+ * half the track width.
  *
- * `curve` bows the strip into an arc (edges lifted, center dipped, items fanned).
- * `scrollDrive` lets page-scroll modulate the pace: scroll down speeds it up,
- * scroll up reverses it, and it eases back to the passive speed when you stop.
+ * Desktop: a transform-driven track you can grab, drag, and throw — on
+ * release the flick momentum decays back to the passive scroll speed.
+ * `curve` bows the strip into an arc (edges lifted, center dipped, items
+ * fanned); `scrollDrive` lets page-scroll modulate the pace.
+ *
+ * Mobile (< md): a NATIVE overflow-x scroller — the OS owns the gesture
+ * (drag, momentum, rubber-band). The passive drift is kept by advancing
+ * `scrollLeft` while the user is idle, pausing on touch and while momentum
+ * runs. Always flat: no curve, no scroll-drive.
  */
 export default function Marquee({
   children,
@@ -28,14 +34,18 @@ export default function Marquee({
   reverse?: boolean;
   /** Extra classes for the moving track (gap, padding). */
   className?: string;
-  /** Vertical arc amplitude in px; 0 = flat. Edges rise, center dips. */
+  /** Vertical arc amplitude in px; 0 = flat. Edges rise, center dips. Desktop only. */
   curve?: number;
-  /** Let window scroll speed up / reverse the marquee. */
+  /** Let window scroll speed up / reverse the marquee. Desktop only. */
   scrollDrive?: boolean;
 }) {
+  const mobile = useIsMobile();
   const trackRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
+  /* ── desktop: transform-driven track with drag/throw ── */
   useEffect(() => {
+    if (mobile) return;
     const track = trackRef.current;
     if (!track) return;
     const reduced = prefersReducedMotion();
@@ -85,6 +95,7 @@ export default function Marquee({
     let lastT = 0;
     let prevFrame = 0;
     let raf = 0;
+    let visible = true; // assume on-screen until the observer reports
 
     const wrap = (x: number) => {
       let m = x % period;
@@ -118,6 +129,12 @@ export default function Marquee({
     };
 
     const tick = (t: number) => {
+      // park while off-screen (drags keep it live — you can't grab what you
+      // can't see, but don't fight a pointer that's already captured)
+      if (!visible && !dragging) {
+        raf = 0;
+        return;
+      }
       if (!prevFrame) prevFrame = t;
       const dt = Math.min(0.05, (t - prevFrame) / 1000); // clamp tab-switch jumps
       prevFrame = t;
@@ -180,10 +197,23 @@ export default function Marquee({
     track.addEventListener("pointerup", onUp);
     track.addEventListener("pointercancel", onUp);
     track.addEventListener("dragstart", noDrag);
+    // pause the loop while the marquee is off-screen — a homepage carries
+    // several of these and they were all animating from load to unmount.
+    // rootMargin resumes it just before it scrolls into view, and the dt
+    // clamp in tick() already swallows the pause, so nothing jumps.
+    const io = new IntersectionObserver(
+      ([en]) => {
+        visible = en.isIntersecting;
+        if (visible) run();
+      },
+      { rootMargin: "160px" },
+    );
+    io.observe(track.parentElement ?? track);
     run();
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      io.disconnect();
       ro.disconnect();
       track.removeEventListener("pointerdown", onDown);
       track.removeEventListener("pointermove", onMove);
@@ -191,7 +221,126 @@ export default function Marquee({
       track.removeEventListener("pointercancel", onUp);
       track.removeEventListener("dragstart", noDrag);
     };
-  }, [duration, reverse, curve, scrollDrive]);
+  }, [duration, reverse, curve, scrollDrive, mobile]);
+
+  /* ── mobile: native scroller + idle drift ── */
+  useEffect(() => {
+    if (!mobile) return;
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+    // no drift under reduced motion — the strip is still natively scrollable
+    if (prefersReducedMotion()) return;
+
+    // scrollLeft grows as content moves left (the default direction)
+    const dir = reverse ? -1 : 1;
+
+    let period = 1;
+    const measure = () => {
+      period = track.scrollWidth / 2 || 1;
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(track);
+
+    // The OS owns the gesture. We only drift while the user is idle: any
+    // touch pauses it, and every scroll event we didn't cause ourselves
+    // (finger OR momentum) pushes the resume point out.
+    const IDLE_MS = 180;
+    let touching = false;
+    let idleAt = 0;
+    let expectScroll = 0; // our own scrollLeft writes also fire scroll events
+    let pos = -1; // float mirror of scrollLeft (integer writes would stall sub-px drift)
+    let raf = 0;
+    let prev = 0;
+    let visible = true;
+
+    const onTouchStart = () => {
+      touching = true;
+      pos = -1;
+    };
+    const onTouchEnd = () => {
+      touching = false;
+      idleAt = performance.now();
+    };
+    const onScroll = () => {
+      if (expectScroll > 0) {
+        expectScroll--;
+        return;
+      }
+      pos = -1; // user/momentum moved us — resync when drift resumes
+      idleAt = performance.now();
+    };
+
+    const tick = (t: number) => {
+      if (!visible) {
+        raf = 0;
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+      if (!prev) prev = t;
+      const dt = Math.min(0.05, (t - prev) / 1000);
+      prev = t;
+      if (touching || t - idleAt < IDLE_MS) return;
+      if (pos < 0) pos = scroller.scrollLeft;
+      pos += ((dir * period) / duration) * dt;
+      // seamless wrap — both halves of the track are identical, so jumping
+      // by exactly one period is invisible (kept off the hard 0 edge so a
+      // reverse row can't pin against the browser's scrollLeft clamp)
+      if (pos >= period) pos -= period;
+      else if (pos < 1) pos += period;
+      const next = Math.round(pos);
+      if (next !== scroller.scrollLeft) {
+        expectScroll++;
+        scroller.scrollLeft = next;
+      }
+    };
+    const run = () => {
+      if (!raf) {
+        prev = 0;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+
+    // park while off-screen, same as the desktop loop
+    const io = new IntersectionObserver(
+      ([en]) => {
+        visible = en.isIntersecting;
+        if (visible) run();
+      },
+      { rootMargin: "160px" },
+    );
+    io.observe(scroller);
+
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchend", onTouchEnd, { passive: true });
+    scroller.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    run();
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      io.disconnect();
+      ro.disconnect();
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchend", onTouchEnd);
+      scroller.removeEventListener("touchcancel", onTouchEnd);
+      scroller.removeEventListener("scroll", onScroll);
+    };
+  }, [duration, reverse, mobile]);
+
+  if (mobile) {
+    return (
+      <div
+        ref={scrollerRef}
+        className="scrollbar-none overflow-x-auto overscroll-x-contain"
+      >
+        <div ref={trackRef} className={`flex w-max ${className}`}>
+          {children}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

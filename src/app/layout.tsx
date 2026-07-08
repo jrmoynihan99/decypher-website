@@ -49,7 +49,14 @@ export default function RootLayout({
       data-page-transition="wipe"
       className={`${spaceGrotesk.variable} ${inter.variable} ${plexMono.variable}`}
     >
-      <body className="relative min-h-screen">{children}</body>
+      <body className="relative min-h-screen">
+        {/* decrypt headings ship blurred (.decrypt-pending) and rely on JS to
+            scramble + reveal — without JS, lift the blur so text is readable */}
+        <noscript>
+          <style>{`.decrypt-pending{filter:none !important}`}</style>
+        </noscript>
+        {children}
+      </body>
     </html>
   );
 }

@@ -30,7 +30,7 @@ export default function TestimonialsSection({
       />
       <Reveal
         amount={0.2}
-        className="mt-[54px] overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
+        className="mt-[54px] overflow-hidden md:[mask-image:linear-gradient(90deg,transparent,#000_7%,#000_93%,transparent)]"
       >
         <Marquee duration={58} className="gap-5 px-6 pt-2.5">
           {loopA.map((t, i) => (

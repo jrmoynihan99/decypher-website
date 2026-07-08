@@ -15,7 +15,7 @@ export default function TestimonialCard({ t }: { t: CmsTestimonial }) {
       ref={ref}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
-      className="group relative m-0 w-[400px] flex-none overflow-hidden rounded-[18px] border border-white/10 bg-gradient-to-b from-white/[0.09] to-white/[0.02] p-7 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)]"
+      className="group relative m-0 w-[85vw] max-w-[400px] flex-none overflow-hidden rounded-[18px] border border-white/10 bg-gradient-to-b from-white/[0.09] to-white/[0.02] p-7 backdrop-blur-xl transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)]"
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}
       <div
@@ -31,7 +31,7 @@ export default function TestimonialCard({ t }: { t: CmsTestimonial }) {
           &ldquo;{t.quote}&rdquo;
         </blockquote>
         <figcaption className="flex items-center gap-3.5">
-          <span className="flex h-16 w-16 flex-none items-center justify-center rounded-full border border-edge-bright bg-panel-2 font-mono text-sm tracking-[0.08em] text-muted">
+          <span className="flex h-12 w-12 flex-none items-center justify-center rounded-full border border-edge-bright bg-panel-2 font-mono text-sm tracking-[0.08em] text-muted sm:h-16 sm:w-16">
             {t.initials}
           </span>
           <span className="flex min-w-0 flex-col gap-[3px]">

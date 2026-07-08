@@ -2,8 +2,10 @@ import Image from "next/image";
 import fallbackLogo from "@/assets/decypher-mark.png";
 import type { SiteSettings } from "@/sanity/types";
 
+// py/-my pair pads the tap target into the surrounding gap-2.5 without
+// changing the visual spacing
 const footerLink =
-  "text-[14.5px] text-mist no-underline transition-colors hover:text-fog";
+  "py-[5px] -my-[5px] text-[14.5px] text-mist no-underline transition-colors hover:text-fog";
 const footerHeading =
   "m-0 mb-1 font-mono text-[11px] uppercase tracking-[0.22em] text-magenta";
 

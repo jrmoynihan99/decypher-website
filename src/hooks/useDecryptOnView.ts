@@ -24,8 +24,12 @@ export function useDecryptOnView<T extends HTMLElement>(
     const el = ref.current;
     if (!el || prefersReducedMotion()) return;
     let done = false;
+    // encryptCells / decryptCells paint their scrambled state (with inline
+    // blur) synchronously, so dropping the pre-hydration blur class in the
+    // same task never exposes the finished copy
     if (el.getBoundingClientRect().top > window.innerHeight) {
       encryptCells(el, text);
+      el.classList.remove("decrypt-pending");
     }
     const io = new IntersectionObserver(
       (entries) => {
@@ -33,6 +37,7 @@ export function useDecryptOnView<T extends HTMLElement>(
           if (en.isIntersecting && !done) {
             done = true;
             decryptCells(el, text, duration, () => armHover(el));
+            el.classList.remove("decrypt-pending");
             io.unobserve(el);
           }
         }

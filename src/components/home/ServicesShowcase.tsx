@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import ServicesAtlas from "@/components/home/services-variants/ServicesAtlas";
 import ServicesFlyover from "@/components/home/services-variants/ServicesFlyover";
+import ServicesMobile from "@/components/home/services-variants/ServicesMobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { CmsService, SectionHeadingContent } from "@/sanity/types";
 
 /**
@@ -32,6 +34,7 @@ export default function ServicesShowcase({
 }) {
   const [mode, setMode] = useState<"atlas" | "flyover">("atlas");
   const groupRef = useRef<HTMLDivElement>(null);
+  const mobile = useIsMobile();
 
   const toggle = (
     <div className="relative flex items-center justify-center gap-2.5 px-6 pb-16 pt-5">
@@ -54,6 +57,26 @@ export default function ServicesShowcase({
       ))}
     </div>
   );
+
+  // phones get the readable stacked cut — the neural map's world renders far
+  // too small below md (see ServicesMobile). The touch-reactive background
+  // web keeps the section (and the children below it) part of the mesh.
+  if (mobile) {
+    return (
+      <div className="relative z-[1]">
+        <NeuralWeb
+          style={{
+            WebkitMaskImage:
+              "linear-gradient(to bottom, transparent 0, #000 260px, #000 calc(100% - 220px), transparent 100%)",
+            maskImage:
+              "linear-gradient(to bottom, transparent 0, #000 260px, #000 calc(100% - 220px), transparent 100%)",
+          }}
+        />
+        <ServicesMobile content={content} services={services} />
+        {children}
+      </div>
+    );
+  }
 
   return mode === "atlas" ? (
     <div ref={groupRef} className="relative z-[1]">

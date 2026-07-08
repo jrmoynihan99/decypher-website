@@ -115,7 +115,7 @@ export default function LeadModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="lead-title"
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(6,4,10,0.72)] px-4 pb-6 pt-24 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(6,4,10,0.72)] px-4 pb-6 pt-10 backdrop-blur-sm sm:pt-24"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -130,7 +130,7 @@ export default function LeadModal({
         <button
           onClick={onClose}
           aria-label="Close"
-          className="float-right cursor-pointer border-none bg-transparent p-0 text-[22px] leading-none text-faint hover:text-fog"
+          className="float-right -mr-3 -mt-3 flex h-11 w-11 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-[22px] leading-none text-faint hover:text-fog"
         >
           ×
         </button>

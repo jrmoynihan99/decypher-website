@@ -7,6 +7,7 @@ import {
   useTransitionRouter,
 } from "next-view-transitions";
 import { markTransitionStart } from "@/lib/transition-timing";
+import { freezeCanvasLayers, unfreezeCanvasLayers } from "@/lib/canvas-freeze";
 import SmoothScroll from "@/components/layout/SmoothScroll";
 
 /**
@@ -106,8 +107,14 @@ function TransitionInterceptor() {
       document.documentElement.classList.add("vt-transitioning");
 
       e.preventDefault();
+      // Bake canvas layers into backgrounds so they survive the snapshot
+      // (must run before the transition captures the old page — see
+      // canvas-freeze). The leaving page unmounts, so unfreeze is just a
+      // safety net for anything that outlives the wipe.
+      freezeCanvasLayers();
       markTransitionStart();
       router.push(href, { scroll: false });
+      window.setTimeout(unfreezeCanvasLayers, 1000);
     };
 
     const onPopState = () => {
@@ -120,7 +127,9 @@ function TransitionInterceptor() {
       pendingScroll = scrollPositions.get(currentPath) ?? 0;
 
       document.documentElement.classList.add("vt-transitioning");
+      freezeCanvasLayers();
       markTransitionStart();
+      window.setTimeout(unfreezeCanvasLayers, 1000);
     };
 
     // ── Hover prefetch ──────────────────────────────────────

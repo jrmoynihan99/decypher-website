@@ -141,6 +141,13 @@
    Anchor links are smoothed by Lenis (`anchors: true` in SmoothScroll). */
 html {
   background: var(--color-night);
+  /* body's overflow-x clip doesn't catch layers whose containing block is
+     the viewport (fixed/sticky chrome) — without this the page can pan
+     sideways a few px on phones. Complements, not replaces, body's clip.
+     `hidden` first: engines without `clip` support (iOS < 16) drop that
+     declaration entirely and would otherwise fall back to visible. */
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -149,6 +156,8 @@ body {
   color: var(--color-fog);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  /* hidden = fallback for engines without `clip` (see html rule above) */
+  overflow-x: hidden;
   overflow-x: clip;
 }
 
@@ -157,9 +166,85 @@ body {
   color: var(--color-night);
 }
 
+/* No [data-glow] hue rule here on purpose: the scroll-driven hue shift is
+   written by ScrollHud as inline filters on the few orb elements, and the
+   canvas meshes rotate their palettes in-draw (lib/glowHue.ts). A --glow-hue
+   variable on <html> was tried and reverted — unregistered custom properties
+   inherit, so each change forced a whole-document style recalc (25-44ms/frame
+   while smooth-scrolling). */
+
+/* ── Scrollbar — minimal, matched to the dark cypher palette ──
+   Firefox reads scrollbar-width/color; WebKit/Blink use the
+   ::-webkit-scrollbar pseudo-elements. The track stays transparent so
+   the bar reads as a thin floating thumb; the transparent border +
+   padding-box clip shrinks the visible thumb to ~4px. Hover warms it
+   toward the brand magenta. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-faint) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-faint);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--color-magenta);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Scrollable box with no visible scrollbar (native mobile carousels).
+   Plain unlayered CSS on purpose — as a Tailwind @utility it lands in
+   @layer utilities, and the unlayered `* { scrollbar-width: thin }` above
+   beats every layered rule regardless of specificity. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
+  }
+}
+
+/* Pre-hydration resting state for decrypt headings: the server-rendered copy
+   ships already blurred (blur value = REVEAL_BLUR in lib/decrypt.ts) so the
+   finished text never flashes before the scramble takes over. The decrypt
+   effect removes this class in the same task that paints its own scrambled
+   state; no-JS visitors get it lifted by the <noscript> override in
+   layout.tsx, reduced-motion by the media query below. */
+.decrypt-pending {
+  filter: blur(5px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .decrypt-pending {
+    filter: none;
   }
 }
 

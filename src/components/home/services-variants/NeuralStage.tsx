@@ -234,8 +234,17 @@ export default function NeuralStage({
 
     let sw = 0;
     let sh = 0;
-    let ch = 0; // canvas height = bleedTop + sh + bottom bleed
+    let ch = 0; // full holder height = bleedTop + sh + bottom bleed
+    let wh = 0; // canvas window height (≤ ch)
+    let offY = 0; // window's offset down the holder
     let fit = 1;
+    // The unified bleed can run the canvas down behind several sections;
+    // clearing/compositing a page-height texture every frame is most of the
+    // cost, so the canvas is viewport-sized (+margin) and slides down the
+    // holder to track the visible band. With Lenis, scroll moves on the same
+    // rAF tick before ours, so the window never lags; the margin covers
+    // abrupt native jumps.
+    const MARGIN = 400;
     // ambient field stretches to cover both bleeds
     let fieldY0 = FIELD.y0;
     let fieldY1 = FIELD.y1;
@@ -251,6 +260,29 @@ export default function NeuralStage({
     const prX = new Array(N_PTS).fill(0);
     const prY = new Array(N_PTS).fill(0);
     const prD = new Array(N_PTS).fill(0);
+
+    // uniform grid for the ambient link pass — finds exactly the same pairs
+    // as an all-pairs scan (cell size = LINK, so a partner can only sit in
+    // the same or an adjacent cell) without the O(n²) distance checks
+    let gCols = 0;
+    let gRows = 0;
+    let gHead = new Int32Array(0);
+    let gNext = new Int32Array(0);
+    let gCellX = new Int32Array(0);
+    let gCellY = new Int32Array(0);
+
+    const linkPair = (a: Ambient, b: Ambient) => {
+      if (!a.in && !b.in) return;
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > LINK * LINK) return;
+      ctx.globalAlpha = (1 - Math.sqrt(d2) / LINK) * 0.24;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    };
 
     const t0 = target.current;
     const cam = { x: t0.x, y: t0.y, lz: Math.log(t0.z) };
@@ -307,10 +339,13 @@ export default function NeuralStage({
       ch = bleedTop + sh + Math.round(bleedPx);
       holder.style.top = `${-bleedTop}px`;
       holder.style.height = `${ch}px`;
+      // reduced motion draws one static frame — no loop to slide a window,
+      // so it keeps the full-height canvas
+      wh = reduce ? ch : Math.min(ch, window.innerHeight + MARGIN * 2);
       canvas.width = Math.max(1, Math.round(sw * dpr));
-      canvas.height = Math.max(1, Math.round(ch * dpr));
+      canvas.height = Math.max(1, Math.round(wh * dpr));
       canvas.style.width = `${sw}px`;
-      canvas.style.height = `${ch}px`;
+      canvas.style.height = `${wh}px`;
       // world-y the canvas top/bottom map to at birds-eye, plus margin
       const tyOverview = sh / 2 - (WORLD.h / 2) * fit;
       const newFieldY0 = Math.min(
@@ -341,11 +376,17 @@ export default function NeuralStage({
       pointer.cx = -1e5;
       pointer.cy = -1e5;
     };
-    const onDown = () => {
+    const onDown = (e: PointerEvent) => {
       held = true;
+      // a stationary touch never fires pointermove — seed the position here
+      // so tap-and-hold pulls the mesh toward the finger
+      pointer.cx = e.clientX;
+      pointer.cy = e.clientY;
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       held = false;
+      // touch has no hover: lifting the finger ends the interaction outright
+      if (e.pointerType !== "mouse") onLeave();
     };
 
     let last = 0;
@@ -384,13 +425,31 @@ export default function NeuralStage({
       world.style.transform = `matrix(${scale},0,0,${scale},${tx},${tyW})`;
       world.style.opacity = "1";
 
+      // slide the viewport-sized canvas window to the holder's visible band;
+      // the context transform compensates, so world content stays put. The
+      // holder itself is never transformed, so its rect doubles as the
+      // pointer-mapping origin (what the canvas rect used to be).
+      const rect = holder.getBoundingClientRect();
+      if (wh < ch) {
+        offY = Math.max(0, Math.min(ch - wh, -rect.top - MARGIN));
+        canvas.style.transform = `translate3d(0,${offY.toFixed(1)}px,0)`;
+      } else if (offY) {
+        offY = 0;
+        canvas.style.transform = "";
+      }
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, sw, ch);
-      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * tx, dpr * ty);
+      ctx.clearRect(0, 0, sw, wh);
+      ctx.setTransform(
+        dpr * scale,
+        0,
+        0,
+        dpr * scale,
+        dpr * tx,
+        dpr * (ty - offY),
+      );
       const px = 1.1 / scale; // ≈1 screen px regardless of zoom
 
-      const rect = canvas.getBoundingClientRect();
       const hasPtr = pointer.cx > -1e4;
 
       // cursor in world coords + its influence, fading out as the camera
@@ -401,12 +460,12 @@ export default function NeuralStage({
         ? Math.max(0, Math.min(1, (1.45 - z) / 0.45))
         : 0;
 
-      // visible world rect (padded) for culling — spans the full canvas,
-      // bleed included
+      // visible world rect (padded) for culling — the canvas WINDOW now,
+      // not the full bleed, so off-screen stretches skip their draw work
       const vx0 = -tx / scale - LINK;
-      const vy0 = -ty / scale - LINK;
+      const vy0 = (offY - ty) / scale - LINK;
       const vx1 = (sw - tx) / scale + LINK;
-      const vy1 = (ch - ty) / scale + LINK;
+      const vy1 = (offY + wh - ty) / scale + LINK;
 
       // ambient drift — nodes near the cursor get gently pulled toward it,
       // exactly like the background NeuralWeb
@@ -437,23 +496,57 @@ export default function NeuralStage({
         n.in = n.x > vx0 && n.x < vx1 && n.y > vy0 && n.y < vy1;
       }
 
-      // ambient mesh (violet, faint)
+      // ambient mesh (violet, faint) — neighbor search via the uniform grid
       ctx.strokeStyle = "#8B2BE8";
       ctx.lineWidth = px;
+      const cols = Math.max(1, Math.ceil((FIELD.x1 - FIELD.x0) / LINK));
+      const rows = Math.max(1, Math.ceil((fieldY1 - fieldY0) / LINK));
+      if (cols !== gCols || rows !== gRows || gNext.length < ambient.length) {
+        gCols = cols;
+        gRows = rows;
+        gHead = new Int32Array(cols * rows);
+        gNext = new Int32Array(Math.max(1, ambient.length));
+        gCellX = new Int32Array(Math.max(1, ambient.length));
+        gCellY = new Int32Array(Math.max(1, ambient.length));
+      }
+      gHead.fill(-1);
+      for (let i = 0; i < ambient.length; i++) {
+        const n = ambient[i];
+        // clamped to the edge cells — a pair within LINK of each other can
+        // never end up more than one cell apart even when clamped
+        let cx = ((n.x - FIELD.x0) / LINK) | 0;
+        let cy = ((n.y - fieldY0) / LINK) | 0;
+        if (cx < 0) cx = 0;
+        else if (cx >= cols) cx = cols - 1;
+        if (cy < 0) cy = 0;
+        else if (cy >= rows) cy = rows - 1;
+        gCellX[i] = cx;
+        gCellY[i] = cy;
+        const ci = cy * cols + cx;
+        gNext[i] = gHead[ci];
+        gHead[ci] = i;
+      }
       for (let i = 0; i < ambient.length; i++) {
         const a = ambient[i];
-        for (let j = i + 1; j < ambient.length; j++) {
-          const b = ambient[j];
-          if (!a.in && !b.in) continue;
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 > LINK * LINK) continue;
-          ctx.globalAlpha = (1 - Math.sqrt(d2) / LINK) * 0.24;
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
+        const cx = gCellX[i];
+        const cy = gCellY[i];
+        // rest of own cell's chain, then the four forward-neighbor cells —
+        // every in-range pair is visited exactly once
+        for (let j = gNext[i]; j !== -1; j = gNext[j]) linkPair(a, ambient[j]);
+        const right = cx + 1 < cols;
+        if (right)
+          for (let j = gHead[cy * cols + cx + 1]; j !== -1; j = gNext[j])
+            linkPair(a, ambient[j]);
+        if (cy + 1 < rows) {
+          const rowBase = (cy + 1) * cols;
+          if (cx > 0)
+            for (let j = gHead[rowBase + cx - 1]; j !== -1; j = gNext[j])
+              linkPair(a, ambient[j]);
+          for (let j = gHead[rowBase + cx]; j !== -1; j = gNext[j])
+            linkPair(a, ambient[j]);
+          if (right)
+            for (let j = gHead[rowBase + cx + 1]; j !== -1; j = gNext[j])
+              linkPair(a, ambient[j]);
         }
       }
 
@@ -461,6 +554,8 @@ export default function NeuralStage({
       for (const [ia, ib] of EDGES) {
         const a = HUBS[ia];
         const b = HUBS[ib];
+        // both ends past the same window edge → the segment can't cross it
+        if ((a.y < vy0 && b.y < vy0) || (a.y > vy1 && b.y > vy1)) continue;
         const e = Math.max(eng[ia] ?? 0, eng[ib] ?? 0);
         ctx.strokeStyle = "#8B2BE8";
         ctx.lineWidth = px;
@@ -488,6 +583,7 @@ export default function NeuralStage({
         if (e < 0.25) continue;
         const a = HUBS[ia];
         const b = HUBS[ib];
+        if ((a.y < vy0 && b.y < vy0) || (a.y > vy1 && b.y > vy1)) continue;
         // run pulses toward the hotter end
         const flip = (eng[ib] ?? 0) >= (eng[ia] ?? 0);
         for (let p = 0; p < 2; p++) {
@@ -505,6 +601,8 @@ export default function NeuralStage({
         const e = eng[hi] ?? 0;
         if (e < 0.03) continue;
         const h = HUBS[hi];
+        // strands reach at most STRAND_R from the hub
+        if (h.y + STRAND_R < vy0 || h.y - STRAND_R > vy1) continue;
         ctx.strokeStyle = HUB_COLORS[hi];
         ctx.lineWidth = px;
         for (const n of ambient) {
@@ -558,6 +656,8 @@ export default function NeuralStage({
       ctx.globalAlpha = 1;
       for (let hi = 0; hi < HUBS.length; hi++) {
         const h = HUBS[hi];
+        // glow radius tops out around 105 world units with the breathe
+        if (h.y + 130 < vy0 || h.y - 130 > vy1) continue;
         const e = eng[hi] ?? 0;
         const bloom = smooth((e - 0.15) / 0.85);
         const rgb = HUB_RGB[hi];
@@ -595,6 +695,9 @@ export default function NeuralStage({
         const bloom = smooth((e - 0.15) / 0.85);
         if (bloom < 0.02) continue;
         const h = HUBS[hi];
+        // max projected particle reach ≈ NEURON_R × max perspective ≈ 300;
+        // the tumble angle pauses off-window, which nothing can observe
+        if (h.y + 340 < vy0 || h.y - 340 > vy1) continue;
         const neu = neurons[hi];
         const R = (30 + 135 * bloom) * (NEURON_R / 165);
         // each cluster leans toward the cursor RELATIVE TO ITSELF, with the
@@ -776,7 +879,10 @@ export default function NeuralStage({
           maskImage: mask,
         }}
       >
-        <canvas ref={canvasRef} className="absolute left-0 top-0" />
+        <canvas
+          ref={canvasRef}
+          className="absolute left-0 top-0 will-change-transform"
+        />
       </div>
       {/* world layer, in its own clip box so a zoomed-in world never paints
           over neighboring sections; hidden until the first frame stamps a

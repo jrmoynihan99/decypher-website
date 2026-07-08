@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { setGlowHue } from "@/lib/glowHue";
 
 /**
  * Scroll-as-decryption HUD: a gradient progress bar pinned to the top and a
  * "DECRYPTING… NN%" chip in the corner. Also hue-rotates every GlowOrb on the
- * page as scroll progress advances.
+ * page as scroll progress advances — as inline filter writes on the
+ * `[data-glow]` elements (a handful of orbs; the canvas meshes rotate their
+ * palettes in-draw via the shared glowHue module instead). Inline writes on
+ * a few elements are the CHEAP option here: broadcasting one `--glow-hue`
+ * variable on <html> looks tidier but an unregistered custom property
+ * inherits, so every change invalidates the computed style of the ENTIRE
+ * document — profiled at 25-44ms of forced style recalc per frame during a
+ * smooth-scroll glide. The value is quantized to 0.5° so the orb layers only
+ * re-rasterize when it actually changes, not on every frame.
  */
 export default function ScrollHud() {
   const barRef = useRef<HTMLDivElement>(null);
@@ -13,6 +22,8 @@ export default function ScrollHud() {
 
   useEffect(() => {
     let raf = 0;
+    let lastPct = -1;
+    let lastHue = NaN;
     const tick = () => {
       raf = 0;
       const y = window.scrollY || 0;
@@ -21,8 +32,9 @@ export default function ScrollHud() {
       const p = doc > 0 ? Math.min(1, y / doc) : 0;
 
       if (barRef.current) barRef.current.style.width = `${(p * 100).toFixed(2)}%`;
-      if (chipRef.current) {
-        const pct = Math.round(p * 100);
+      const pct = Math.round(p * 100);
+      if (chipRef.current && pct !== lastPct) {
+        lastPct = pct;
         chipRef.current.textContent =
           pct >= 100
             ? "ACCESS GRANTED — 100%"
@@ -30,10 +42,16 @@ export default function ScrollHud() {
         chipRef.current.style.color = pct >= 100 ? "#3DD6C4" : "#9A93AB";
       }
 
-      const hue = `hue-rotate(${(p * 70 - 15).toFixed(1)}deg)`;
-      document
-        .querySelectorAll<HTMLElement>("[data-glow]")
-        .forEach((g) => (g.style.filter = hue));
+      const hue = p * 70 - 15;
+      setGlowHue(hue);
+      const q = Math.round(hue * 2) / 2;
+      if (q !== lastHue) {
+        lastHue = q;
+        const filter = `hue-rotate(${q}deg)`;
+        document
+          .querySelectorAll<HTMLElement>("[data-glow]")
+          .forEach((g) => (g.style.filter = filter));
+      }
     };
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(tick);
@@ -45,6 +63,8 @@ export default function ScrollHud() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       if (raf) cancelAnimationFrame(raf);
+      // don't leak the home page's hue onto pages without a ScrollHud
+      setGlowHue(0);
     };
   }, []);
 
@@ -56,7 +76,9 @@ export default function ScrollHud() {
           className="h-full w-0 bg-[linear-gradient(90deg,#FF5C2E,#FF2D78,#8B2BE8)] shadow-[0_0_14px_rgba(255,45,120,0.65)]"
         />
       </div>
-      <div className="fixed bottom-[18px] left-[18px] z-[200] flex items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 backdrop-blur-[8px]">
+      {/* corner chip crowds a phone screen — the top bar carries the concept
+          there on its own */}
+      <div className="fixed bottom-[18px] left-[18px] z-[200] hidden items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 backdrop-blur-[8px] sm:flex">
         <span
           ref={chipRef}
           className="font-mono text-[11px] tracking-[0.14em] text-[#9A93AB]"

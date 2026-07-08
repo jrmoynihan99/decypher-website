@@ -54,7 +54,7 @@ export default function ServicesSection() {
   return (
     <section id="services" className="relative z-[1]">
       <div ref={outerRef} className="relative h-[320vh]">
-        <div className="sticky top-0 flex h-screen items-center overflow-hidden">
+        <div className="sticky top-0 flex h-svh items-center overflow-hidden">
           <WaveField />
           <div className="mx-auto grid w-full max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-center gap-12 px-7 pt-[70px]">
             {/* left column */}
