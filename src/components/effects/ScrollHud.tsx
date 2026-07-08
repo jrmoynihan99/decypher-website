@@ -76,15 +76,16 @@ export default function ScrollHud() {
 
   return (
     <>
-      <div className="fixed inset-x-0 top-0 z-[200] h-[3px] bg-white/5">
+      {/* the visible HUD is desktop-only — on phones the bar crowds the
+          transparent nav and the chip crowds the screen; the hue rotation
+          above still runs everywhere since the orbs/canvases depend on it */}
+      <div className="fixed inset-x-0 top-0 z-[200] hidden h-[3px] bg-white/5 md:block">
         <div
           ref={barRef}
           className="h-full w-0 bg-[linear-gradient(90deg,#FF5C2E,#FF2D78,#8B2BE8)] shadow-[0_0_14px_rgba(255,45,120,0.65)]"
         />
       </div>
-      {/* corner chip crowds a phone screen — the top bar carries the concept
-          there on its own */}
-      <div className="fixed bottom-[18px] left-[18px] z-[200] hidden items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 backdrop-blur-[8px] sm:flex">
+      <div className="fixed bottom-[18px] left-[18px] z-[200] hidden items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 backdrop-blur-[8px] md:flex">
         <span
           ref={chipRef}
           className="font-mono text-[11px] tracking-[0.14em] text-[#9A93AB]"
