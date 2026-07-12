@@ -1,5 +1,5 @@
 import type { SchemaTypeDefinition } from "sanity";
-import { creator, service, teamMember, testimonial } from "./collections";
+import { creator, jobOpening, service, teamMember, testimonial } from "./collections";
 import {
   ctaBlock,
   faqItem,
@@ -10,6 +10,7 @@ import {
   statItem,
 } from "./objects";
 import {
+  careersPage,
   creatorsPage,
   homePage,
   schedulePage,
@@ -33,11 +34,13 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   creatorsPage,
   teamPage,
   schedulePage,
+  careersPage,
   // collections
   creator,
   testimonial,
   teamMember,
   service,
+  jobOpening,
   // singletons
   siteSettings,
 ];

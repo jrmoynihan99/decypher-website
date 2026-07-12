@@ -250,6 +250,7 @@ export const schedulePage = defineType({
   type: "document",
   groups: [
     { name: "hero", title: "Hero" },
+    { name: "confirmation", title: "Thank You" },
     { name: "proof", title: "Stats & Reviews" },
     { name: "meta", title: "Route & SEO" },
   ],
@@ -290,6 +291,43 @@ export const schedulePage = defineType({
       ],
     }),
     defineField({
+      name: "confirmation",
+      type: "object",
+      group: "confirmation",
+      description:
+        "The thank-you takeover shown after the form is submitted. The transmission-log panel (name, email, ref code) stays in code.",
+      fields: [
+        defineField({
+          name: "eyebrow",
+          type: "string",
+          description: 'Teal status line, e.g. "● CHANNEL OPEN".',
+        }),
+        defineField({ name: "title", type: "string" }),
+        defineField({ name: "body", type: "text", rows: 3 }),
+        defineField({
+          name: "nextSteps",
+          title: "What happens next",
+          type: "array",
+          description: "The numbered cards under the confirmation.",
+          of: [
+            {
+              type: "object",
+              fields: [
+                defineField({ name: "title", type: "string" }),
+                defineField({ name: "body", type: "text", rows: 2 }),
+              ],
+              preview: { select: { title: "title", subtitle: "body" } },
+            },
+          ],
+        }),
+        defineField({
+          name: "readout",
+          type: "string",
+          description: "Mono line at the bottom of the confirmation.",
+        }),
+      ],
+    }),
+    defineField({
       name: "statsSection",
       title: "Stats heading",
       type: "sectionHeadingBlock",
@@ -306,10 +344,78 @@ export const schedulePage = defineType({
   preview: { prepare: () => ({ title: "Book a Call" }) },
 });
 
+export const careersPage = defineType({
+  name: "careersPage",
+  title: "Careers",
+  type: "document",
+  groups: [
+    { name: "header", title: "Header" },
+    { name: "openings", title: "Openings" },
+    { name: "why", title: "Why DeCypher" },
+    { name: "cta", title: "CTA" },
+    { name: "meta", title: "Route & SEO" },
+  ],
+  fields: [
+    defineField({ name: "title", type: "string", initialValue: "Careers", group: "meta" }),
+    { ...slugField, group: "meta" },
+    { ...seoField, group: "meta" },
+    defineField({
+      name: "header",
+      type: "pageHeaderBlock",
+      group: "header",
+      description: "The role cards come from the Openings collection. {count} = open roles.",
+    }),
+    defineField({
+      name: "openingsSection",
+      title: "Openings heading",
+      type: "sectionHeadingBlock",
+      group: "openings",
+    }),
+    defineField({
+      name: "noOpenings",
+      title: "Empty state",
+      type: "text",
+      rows: 2,
+      group: "openings",
+      description: "Shown when the Openings collection is empty.",
+    }),
+    defineField({
+      name: "whySection",
+      title: "Why DeCypher heading",
+      type: "sectionHeadingBlock",
+      group: "why",
+    }),
+    defineField({
+      name: "perks",
+      type: "array",
+      group: "why",
+      description: "The reason cards under the Why DeCypher heading.",
+      of: [
+        {
+          type: "object",
+          fields: [
+            defineField({
+              name: "tag",
+              type: "string",
+              description: 'Mono node label on the card, e.g. "REMOTE_FIRST.ENV".',
+            }),
+            defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+            defineField({ name: "body", type: "text", rows: 3 }),
+          ],
+          preview: { select: { title: "title", subtitle: "tag" } },
+        },
+      ],
+    }),
+    defineField({ name: "cta", title: "Closing CTA", type: "ctaBlock", group: "cta" }),
+  ],
+  preview: { prepare: () => ({ title: "Careers" }) },
+});
+
 export const PAGE_TYPES = [
   "homePage",
   "servicesPage",
   "creatorsPage",
   "teamPage",
   "schedulePage",
+  "careersPage",
 ] as const;

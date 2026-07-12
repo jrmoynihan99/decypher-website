@@ -23,6 +23,8 @@ export interface CtaContent {
   title?: string;
   body?: string;
   ctaLabel?: string;
+  /** Optional main-button destination; empty falls back to the consult link. */
+  ctaHref?: string;
   secondaryCtaLabel?: string;
   secondaryCtaHref?: string;
   readout?: string;
@@ -155,8 +157,40 @@ export interface SchedulePageDoc extends PageBase {
     steps?: { title?: string; body?: string }[];
     readout?: string;
   };
+  confirmation?: BookingConfirmationContent;
   statsSection?: SectionHeadingContent;
   testimonialsSection?: SectionHeadingContent;
+}
+
+/** Copy for the post-submit thank-you takeover on Book a Call. */
+export interface BookingConfirmationContent {
+  eyebrow?: string;
+  title?: string;
+  body?: string;
+  nextSteps?: { title?: string; body?: string }[];
+  readout?: string;
+}
+
+export interface CareersPageDoc extends PageBase {
+  _type: "careersPage";
+  header?: PageHeaderContent;
+  openingsSection?: SectionHeadingContent;
+  noOpenings?: string;
+  whySection?: SectionHeadingContent;
+  perks?: { tag?: string; title?: string; body?: string }[];
+  cta?: CtaContent;
+}
+
+/** One careers-page role card. */
+export interface CmsJob {
+  title: string;
+  department: string;
+  location?: string;
+  type?: string;
+  comp?: string;
+  blurb: string;
+  tags?: string[];
+  applyHref: string;
 }
 
 export type PageDoc =
@@ -164,4 +198,5 @@ export type PageDoc =
   | ServicesPageDoc
   | CreatorsPageDoc
   | TeamPageDoc
-  | SchedulePageDoc;
+  | SchedulePageDoc
+  | CareersPageDoc;

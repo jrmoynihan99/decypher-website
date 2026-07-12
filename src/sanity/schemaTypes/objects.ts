@@ -63,6 +63,13 @@ export const ctaBlock = defineType({
       description: "Label on the main consultation button.",
     }),
     defineField({
+      name: "ctaHref",
+      title: "Button link",
+      type: "string",
+      description:
+        "Optional. Overrides where the main button points (e.g. mailto:careers@…). Empty uses the global consultation link.",
+    }),
+    defineField({
       name: "secondaryCtaLabel",
       title: "Secondary button label",
       type: "string",
