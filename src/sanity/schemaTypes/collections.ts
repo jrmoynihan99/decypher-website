@@ -238,6 +238,74 @@ export const teamMember = defineType({
   },
 });
 
+export const jobOpening = defineType({
+  name: "jobOpening",
+  title: "Job opening",
+  type: "document",
+  fields: [
+    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "department",
+      type: "string",
+      validation: (r) => r.required(),
+      description: "Chip on the card, e.g. Tax, Bookkeeping, Operations.",
+    }),
+    defineField({
+      name: "location",
+      type: "string",
+      description: 'e.g. "Remote — US".',
+    }),
+    defineField({
+      name: "type",
+      title: "Employment type",
+      type: "string",
+      options: {
+        list: ["Full-time", "Part-time", "Contract", "Internship"],
+      },
+      initialValue: "Full-time",
+    }),
+    defineField({
+      name: "comp",
+      title: "Compensation",
+      type: "string",
+      description: 'Optional, e.g. "$85k–$110k". Empty hides it.',
+    }),
+    defineField({
+      name: "blurb",
+      type: "text",
+      rows: 4,
+      validation: (r) => r.required(),
+      description: "Two or three sentences on the card — the pitch for the role.",
+    }),
+    defineField({
+      name: "tags",
+      type: "array",
+      of: [{ type: "string" }],
+      options: { layout: "tags" },
+      description: "Optional mono tags, e.g. QBO / 1120-S / STRATEGY.",
+    }),
+    defineField({
+      name: "applyHref",
+      title: "Apply link",
+      type: "string",
+      validation: (r) => r.required(),
+      description:
+        "Where the whole card links: a mailto: (mailto:careers@…?subject=Role) or a job-post URL.",
+    }),
+    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+  ],
+  orderings: [
+    {
+      title: "Site order",
+      name: "orderAsc",
+      by: [{ field: "order", direction: "asc" }],
+    },
+  ],
+  preview: {
+    select: { title: "title", subtitle: "department" },
+  },
+});
+
 export const service = defineType({
   name: "service",
   title: "Service",

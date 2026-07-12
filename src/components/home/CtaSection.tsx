@@ -32,7 +32,9 @@ export default function CtaSection({ content }: { content: CtaContent }) {
           </ParagraphReveal>
         )}
         <Reveal delay={0.4} className="relative mt-9">
-          <ConsultButton size="xl">{content.ctaLabel}</ConsultButton>
+          <ConsultButton size="xl" href={content.ctaHref || undefined}>
+            {content.ctaLabel}
+          </ConsultButton>
         </Reveal>
         {content.readout && (
           <SubheadingReveal delay={0.55} className="relative mt-[22px]">

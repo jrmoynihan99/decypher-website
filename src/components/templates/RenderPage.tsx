@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import CareersTemplate from "@/components/templates/CareersTemplate";
 import CreatorsTemplate from "@/components/templates/CreatorsTemplate";
 import HomeTemplate from "@/components/templates/HomeTemplate";
 import ScheduleTemplate from "@/components/templates/ScheduleTemplate";
@@ -6,6 +7,7 @@ import ServicesTemplate from "@/components/templates/ServicesTemplate";
 import TeamTemplate from "@/components/templates/TeamTemplate";
 import {
   getCreators,
+  getJobs,
   getPageBySlug,
   getServices,
   getSiteSettings,
@@ -64,6 +66,10 @@ export async function renderPage(page: PageDoc) {
           testimonials={testimonials}
         />
       );
+    }
+    case "careersPage": {
+      const jobs = await getJobs();
+      return <CareersTemplate page={page} jobs={jobs} />;
     }
   }
 }

@@ -2,6 +2,7 @@ import type { Creator } from "@/lib/creators";
 import { client } from "./client";
 import { urlFor } from "./image";
 import type {
+  CmsJob,
   CmsService,
   CmsTeamMember,
   CmsTestimonial,
@@ -16,6 +17,7 @@ export const PAGE_TYPES = [
   "creatorsPage",
   "teamPage",
   "schedulePage",
+  "careersPage",
 ] as const;
 
 /** "/" stays "/", "services" → "/services". */
@@ -119,6 +121,15 @@ export async function getServices(): Promise<CmsService[]> {
       img: s.image ? urlFor(s.image).width(1400).url() : undefined,
     }),
   );
+}
+
+export async function getJobs(): Promise<CmsJob[]> {
+  const rows: (CmsJob & { tags?: string[] })[] = await client.fetch(
+    `*[_type == "jobOpening"] | order(order asc){
+      title, department, location, type, comp, blurb, tags, applyHref
+    }`,
+  );
+  return rows.map((j) => ({ ...j, tags: j.tags ?? [] }));
 }
 
 const TESTIMONIAL_ACCENTS: Record<

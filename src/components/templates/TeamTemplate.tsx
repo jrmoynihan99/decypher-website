@@ -134,7 +134,9 @@ export default function TeamTemplate({
             </ParagraphReveal>
           )}
           <Reveal delay={0.4} className="relative mt-8">
-            <ConsultButton size="lg">{cta.ctaLabel}</ConsultButton>
+            <ConsultButton size="lg" href={cta.ctaHref || undefined}>
+              {cta.ctaLabel}
+            </ConsultButton>
           </Reveal>
           {cta.readout && (
             <SubheadingReveal delay={0.55} className="relative mt-[22px]">

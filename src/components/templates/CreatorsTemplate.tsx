@@ -72,7 +72,9 @@ export default function CreatorsTemplate({
             delay={0.4}
             className="relative mt-8 flex flex-wrap items-center justify-center gap-4"
           >
-            <ConsultButton size="lg">{cta.ctaLabel}</ConsultButton>
+            <ConsultButton size="lg" href={cta.ctaHref || undefined}>
+              {cta.ctaLabel}
+            </ConsultButton>
             {cta.secondaryCtaLabel && (
               <a
                 href={cta.secondaryCtaHref ?? "/services"}

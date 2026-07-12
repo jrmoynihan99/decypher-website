@@ -5,16 +5,18 @@ The entire site is content-driven from Sanity (project `076c9ywj`, dataset
 
 ## Architecture
 
-- **Pages** — five page documents (Home, Services, Our Creators, Our Team,
-  Book a Call), one per template. Section *layout and order live in code*
-  (the neural-web meshes span fixed groups of sections); every text string
-  and image in each section is editable in the page document. Each page's
-  `Route` (slug) field controls its URL via the catch-all route
+- **Pages** — six page documents (Home, Services, Our Creators, Our Team,
+  Book a Call, Careers), one per template. Section *layout and order live in
+  code* (the neural-web meshes span fixed groups of sections); every text
+  string and image in each section is editable in the page document. Each
+  page's `Route` (slug) field controls its URL via the catch-all route
   `src/app/(site)/[...slug]` (home is pinned to `/`). If you change a slug,
   update any links pointing at it in Site Settings.
-- **Collections** — Creators (111), Testimonials, Team, Services. Sorted by
-  their `order` field; the first 16 creators feed the home hero strip and
-  roster.
+- **Collections** — Creators (111), Testimonials, Team, Services, Job
+  Openings. Sorted by their `order` field; the first 16 creators feed the
+  home hero strip and roster. Job Openings are the role cards on Careers —
+  each card links to its `Apply link` (a mailto or job-post URL), and an
+  empty collection shows the page's editable empty state instead.
 - **Site Settings** — logo, navbar links, footer, stats, default SEO, and
   the global consultation button (label + link).
 
@@ -26,6 +28,10 @@ Content conventions:
 - The tax estimator is intentionally **not** CMS-driven — it encodes 2026
   tax law and legal disclaimers. Same for form field labels and the
   interaction hints inside the services animation.
+- The Book-a-Call **thank-you takeover** (shown after the form submits) is
+  editable under Book a Call → Thank You. The transmission-log panel that
+  echoes the visitor's own submission stays in code, and every field falls
+  back to a sensible default if left empty.
 - `/services-lab` is a dev playground and stays on static fixtures
   (`src/lib/lab-fixtures.ts`).
 
@@ -77,3 +83,9 @@ content (`src/lib/content.ts`, `src/data/*.json`, `/public/assets`). It
 uses deterministic document IDs, so it is idempotent — but **re-running it
 overwrites any edits made in the Studio** for those documents. Treat it as
 a one-time bootstrap.
+
+`node scripts/seed-careers.mjs` is the additive follow-up that seeded the
+Careers page, the three starter Job Openings, and the Book-a-Call thank-you
+copy. Unlike the migration it never overwrites: new documents use
+`createIfNotExists` and the schedule page is patched with `setIfMissing`,
+so it is safe to re-run at any time.
