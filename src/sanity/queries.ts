@@ -6,11 +6,14 @@ import type {
   CmsService,
   CmsTeamMember,
   CmsTestimonial,
+  CmsVideoTestimonial,
   PageDoc,
   SiteSettings,
   TestimonialAccent,
 } from "./types";
 
+// Keep in sync with the copy in schemaTypes/pages.ts — this one drives the GROQ
+// fetch, that one drives the schema. A type missing here 404s at the route.
 export const PAGE_TYPES = [
   "homePage",
   "servicesPage",
@@ -18,6 +21,7 @@ export const PAGE_TYPES = [
   "teamPage",
   "schedulePage",
   "careersPage",
+  "affiliatePage",
 ] as const;
 
 /** "/" stays "/", "services" → "/services". */
@@ -130,6 +134,16 @@ export async function getJobs(): Promise<CmsJob[]> {
     }`,
   );
   return rows.map((j) => ({ ...j, tags: j.tags ?? [] }));
+}
+
+export async function getVideoTestimonials(): Promise<CmsVideoTestimonial[]> {
+  const rows: { name: string; handle?: string; videoUrl: string }[] =
+    await client.fetch(
+      `*[_type == "videoTestimonial"] | order(order asc){
+        name, handle, videoUrl
+      }`,
+    );
+  return rows.map((v) => ({ ...v, handle: v.handle ?? "" }));
 }
 
 const TESTIMONIAL_ACCENTS: Record<

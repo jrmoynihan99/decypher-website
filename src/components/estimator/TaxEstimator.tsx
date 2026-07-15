@@ -5,15 +5,16 @@ import { prefersReducedMotion } from "@/lib/decrypt";
 import {
   ESTIMATOR_CONFIG,
   EntityType,
+  EstimateInputs,
+  EstimateResult,
   FilingStatus,
   STATE_NAMES,
-  TaxBreakdown,
-  computeStrategies,
-  computeTax,
+  buildEstimate,
   fmt,
-  stateHasTax,
 } from "@/lib/tax";
-import LeadModal, { Lead } from "./LeadModal";
+import { buildRecommendations } from "@/lib/estimator-recommendations";
+import type { Lead } from "@/lib/lead";
+import LeadModal from "./LeadModal";
 import {
   Eyebrow,
   FieldError,
@@ -45,33 +46,8 @@ function track(event: string, props: Record<string, unknown> = {}) {
 /* ===================== state / model ===================== */
 type SalaryMode = "unsure" | "nopayroll" | null;
 
-interface EstimateInputs {
-  status: FilingStatus;
-  state: string;
-  creator: number;
-  expenses: number;
-  w2: number;
-  other: number;
-  paid: number;
-  fulltime: boolean;
-  entity: EntityType | "unanswered";
-  sCorp: boolean;
-  sCorpSalary: number | null;
-  sCorpSalaryStatus: string;
-  sCorpNoPayroll: boolean;
-  solePropRisk: boolean;
-  needSCorp: boolean;
-}
-
-interface EstimateResult extends TaxBreakdown {
-  bizTax: number;
-  setAside: number;
-  effRate: number;
-  afterTax: number;
-  totalIncome: number;
-  savingsLow: number;
-  savingsHigh: number;
-}
+// EstimateInputs / EstimateResult / buildEstimate live in lib/tax so the lead
+// route can rebuild this same estimate server-side when it emails a copy.
 
 interface Snapshot {
   inputs: EstimateInputs;
@@ -122,6 +98,8 @@ export default function TaxEstimator() {
   const [modalOpen, setModalOpen] = useState(false);
   const [lead, setLead] = useState<Lead | null>(null);
   const [emailSent, setEmailSent] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailError, setEmailError] = useState(false);
   const started = useRef(false);
 
   const markStarted = () => {
@@ -168,49 +146,19 @@ export default function TaxEstimator() {
           ? salaryMode ?? (num(scorpSalary) > 0 ? "provided" : "unspecified")
           : "n/a",
       sCorpNoPayroll: entity === "scorp" && salaryMode === "nopayroll",
-      solePropRisk: false,
-      needSCorp: false,
     };
-    const r = computeTax(inputs);
 
-    // business-attributable tax (marginal on the creator income)
-    const rNoBiz = computeTax({ ...inputs, creator: 0, expenses: 0 });
-    const bizTax = Math.max(0, r.total - rNoBiz.total);
-    const setAside = r.netSE > 0 ? Math.min(60, (bizTax / r.netSE) * 100) : 0;
-
-    const totalIncome = r.netSE + inputs.w2 + inputs.other;
-    const effRate = totalIncome > 0 ? (r.total / totalIncome) * 100 : 0;
-    const afterTax = totalIncome - r.total;
-
-    // Already an S-corp? Don't count S-corp election as "potential" savings.
-    const strat = computeStrategies(inputs, r, inputs.sCorp);
-
-    inputs.solePropRisk = inputs.entity === "soleprop" && inputs.creator > 20000;
-    inputs.needSCorp =
-      r.netSE > 55000 &&
-      (inputs.entity === "soleprop" || inputs.entity === "smllc");
-
-    setSnapshot({
-      inputs,
-      result: {
-        ...r,
-        bizTax,
-        setAside,
-        effRate,
-        afterTax,
-        totalIncome,
-        savingsLow: strat.low,
-        savingsHigh: strat.high,
-      },
-    });
+    const result = buildEstimate(inputs);
+    setSnapshot({ inputs, result });
     setUnlocked(false);
     setEmailSent(false);
+    setEmailError(false);
     setScreen("results");
     track("tax_widget_completed", {
       state: inputs.state,
       status: inputs.status,
-      estimated_total: Math.round(r.total),
-      effective_rate: +effRate.toFixed(1),
+      estimated_total: Math.round(result.total),
+      effective_rate: +result.effRate.toFixed(1),
     });
     return true;
   };
@@ -247,57 +195,48 @@ export default function TaxEstimator() {
   }, [snapshot, screen]);
 
   /* ===================== lead + email ===================== */
-  const sendEstimateEmail = (l: Lead, snap: Snapshot) => {
-    if (ESTIMATOR_CONFIG.emailEstimateEndpoint.includes("REPLACE")) return;
+  /**
+   * Hand the lead to /api/lead, which files it, emails their estimate and
+   * notifies the team. Only the raw inputs go up — the server rebuilds the
+   * estimate itself.
+   *
+   * `resend` marks the "send it again" case so it only re-emails: without it a
+   * second click would file a duplicate lead and ping the team twice.
+   *
+   * Deliberately not awaited by the unlock: the recommendations are already
+   * computed on this machine and the visitor has no reason to watch a spinner
+   * while an email sends. But unlike the Zapier call this replaced, the result
+   * is inspected — a failure sets `emailError` and the confirmation line stops
+   * claiming an email is on its way.
+   */
+  const submitLead = async (l: Lead, snap: Snapshot, resend = false) => {
+    setEmailError(false);
     try {
-      fetch(ESTIMATOR_CONFIG.emailEstimateEndpoint, {
+      const res = await fetch("/api/lead", {
         method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          email: l.email,
-          name: l.name,
-          estimate: snap.result,
-          inputs: snap.inputs,
-        }),
-      }).catch(() => {});
-    } catch {}
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead: l, inputs: snap.inputs, resend }),
+      });
+      if (!res.ok) {
+        setEmailError(true);
+        return false;
+      }
+      return true;
+    } catch {
+      setEmailError(true);
+      return false;
+    }
   };
 
   const onLeadSubmit = (l: Lead) => {
     if (!snapshot) return;
     setLead(l);
-    const payload = {
-      submittedAt: new Date().toISOString(),
-      contact: l,
-      inputs: snapshot.inputs,
-      estimate: {
-        total: Math.round(snapshot.result.total),
-        seTax: Math.round(snapshot.result.seTax),
-        fed: Math.round(snapshot.result.fed),
-        state: Math.round(snapshot.result.stateTax),
-        effectiveRate: +snapshot.result.effRate.toFixed(1),
-        suggestedSetAside: Math.round(snapshot.result.setAside),
-        potentialSavingsLow: Math.round(snapshot.result.savingsLow || 0),
-        potentialSavingsHigh: Math.round(snapshot.result.savingsHigh || 0),
-      },
-    };
-    if (!ESTIMATOR_CONFIG.crmEndpoint.includes("REPLACE")) {
-      try {
-        fetch(ESTIMATOR_CONFIG.crmEndpoint, {
-          method: "POST",
-          mode: "no-cors",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
-      } catch {}
-    }
     track("tax_widget_lead_captured", {
       is_creator: l.isCreator,
       platform: l.platform,
       revenue_band: l.revenueBand,
     });
-    sendEstimateEmail(l, snapshot);
+    void submitLead(l, snapshot);
     setModalOpen(false);
     setUnlocked(true);
   };
@@ -600,120 +539,33 @@ export default function TaxEstimator() {
     const effLabel = `${r.effRate.toFixed(1).replace(/\.0$/, "")}%`;
     const showRange = r.savingsHigh - r.savingsLow >= 500;
     const balance = r.total - inputs.paid;
-    const expRatio = inputs.creator > 0 ? (inputs.expenses / inputs.creator) * 100 : 0;
 
-    const flags: React.ReactNode[] = [];
-    if (inputs.sCorpNoPayroll) {
-      flags.push(
-        <div
-          key="nopayroll"
-          className="rounded-[11px] border border-[rgba(255,107,122,0.42)] bg-[rgba(255,107,122,0.10)] px-3.5 py-3 text-left text-[13px] leading-normal text-[#FFB3BC]"
-        >
-          ⚠️ <b className="text-danger">Big red flag:</b> you&rsquo;re taxed as
-          an S-corp but told us you don&rsquo;t run payroll. S-corp owners must
-          pay themselves reasonable W-2 wages — no payroll is a leading audit
-          trigger, and back payroll taxes plus penalties add up fast. This is
-          the first thing to fix.
-        </div>,
-      );
-    }
-    if (inputs.solePropRisk) {
-      flags.push(
-        <div
-          key="soleprop"
-          className="rounded-[11px] border border-[rgba(255,107,122,0.42)] bg-[rgba(255,107,122,0.10)] px-3.5 py-3 text-left text-[13px] leading-normal text-[#FFB3BC]"
-        >
-          ⚠️ <b className="text-danger">Risk:</b> you&rsquo;re operating as a
-          sole proprietor with no LLC while earning over $20,000. That leaves
-          your personal assets exposed with no liability protection, and
-          you&rsquo;re likely leaving tax structure on the table. Forming an
-          LLC is usually the first move.
-        </div>,
-      );
-    }
-    if (inputs.needSCorp) {
-      const llcLine =
-        inputs.entity === "soleprop"
-          ? "You don't have an LLC yet, so that's step one — an S-corp election should never be made without forming the LLC first."
-          : "You already have the LLC in place, so the S-corp election could be the next step.";
-      flags.push(
-        <div
-          key="scorp"
-          className="rounded-[11px] border border-[rgba(255,45,120,0.4)] bg-[linear-gradient(120deg,rgba(255,45,120,0.12),rgba(45,212,167,0.12))] px-3.5 py-3 text-left text-[13px] leading-normal text-mist"
-        >
-          💡 <b className="text-fog">Tax strategy — the S-corp:</b> at over
-          $55,000 in net profit, you&rsquo;re in the range where an S-corp
-          election typically starts to save real money on self-employment tax.
-          Timing matters — done prematurely, the costs can outweigh the
-          savings. {llcLine} Getting the sequence and timing right is exactly
-          what a consultation covers.
-        </div>,
-      );
-    }
+    // The wording lives in lib/estimator-recommendations because the emailed
+    // copy renders the same items. Only the styling is decided here.
+    const recs = buildRecommendations(inputs, r);
 
-    const drivers: React.ReactNode[] = [
-      <li key="se">
-        <b className="font-semibold text-fog">{fmt(r.seTax)} self-employment tax.</b>{" "}
-        This is the 15.3% Social Security + Medicare tax. W-2 employees split
-        it with an employer; on your business profit you cover both halves.
-      </li>,
-      <li key="fed">
-        <b className="font-semibold text-fog">
-          {Math.round(r.fedMarginal * 100)}% federal bracket.
+    const flags = recs.flags.map((f) => (
+      <div
+        key={f.key}
+        className={
+          f.tone === "danger"
+            ? "rounded-[11px] border border-[rgba(255,107,122,0.42)] bg-[rgba(255,107,122,0.10)] px-3.5 py-3 text-left text-[13px] leading-normal text-[#FFB3BC]"
+            : "rounded-[11px] border border-[rgba(255,45,120,0.4)] bg-[linear-gradient(120deg,rgba(255,45,120,0.12),rgba(45,212,167,0.12))] px-3.5 py-3 text-left text-[13px] leading-normal text-mist"
+        }
+      >
+        {f.icon}{" "}
+        <b className={f.tone === "danger" ? "text-danger" : "text-fog"}>
+          {f.lead}
         </b>{" "}
-        Your estimated federal income tax is {fmt(r.fed)} after the standard
-        deduction and the 20% qualified business income deduction.
-      </li>,
-      stateHasTax(inputs.state) ? (
-        <li key="state">
-          <b className="font-semibold text-fog">
-            {fmt(r.stateTax)} to {inputs.state}.
-          </b>{" "}
-          State income tax on your business profit. Where you live can move
-          this number significantly.
-        </li>
-      ) : (
-        <li key="state">
-          <b className="font-semibold text-fog">
-            {inputs.state} has no state income tax.
-          </b>{" "}
-          One less layer on your creator income — that&rsquo;s already working
-          in your favor.
-        </li>
-      ),
-    ];
-    if (inputs.creator > 0 && expRatio < 20) {
-      drivers.push(
-        <li key="exp">
-          <b className="font-semibold text-fog">
-            Expenses are only {Math.round(expRatio)}% of revenue.
-          </b>{" "}
-          A low expense ratio usually means deductions are being left on the
-          table — one of the first things worth a closer look.
-        </li>,
-      );
-    }
-    drivers.push(
-      <li key="aside">
-        <b className="font-semibold text-fog">
-          Set aside about {Math.round(r.setAside)}% of every business dollar.
-        </b>{" "}
-        Moving that to a separate account as you get paid is the simplest way
-        to avoid an April surprise.
-      </li>,
-    );
-    if (r.savingsHigh > 0) {
-      drivers.push(
-        <li key="savings">
-          <b className="font-semibold text-fog">
-            {fmt(r.savingsLow)}–{fmt(r.savingsHigh)} in potential savings.
-          </b>{" "}
-          We&rsquo;ve run the strategies that could apply to a situation like
-          yours. Which ones fit — and how to put them in place — is exactly
-          what your consultation covers.
-        </li>,
-      );
-    }
+        {f.body}
+      </div>
+    ));
+
+    const drivers = recs.drivers.map((d) => (
+      <li key={d.key}>
+        <b className="font-semibold text-fog">{d.lead}</b> {d.body}
+      </li>
+    ));
 
     resultsScreen = (
       <section>
@@ -795,12 +647,18 @@ export default function TaxEstimator() {
               <ul className="m-0 list-none p-0 [&>li]:relative [&>li]:border-b [&>li]:border-white/10 [&>li]:py-[9px] [&>li]:pl-[22px] [&>li]:text-[14.5px] [&>li]:text-mist [&>li]:before:absolute [&>li]:before:left-0 [&>li]:before:top-4 [&>li]:before:h-2 [&>li]:before:w-2 [&>li]:before:rounded-sm [&>li]:before:bg-magenta [&>li]:before:content-[''] [&>li:last-child]:border-b-0">
                 {drivers}
               </ul>
-              {lead && (
-                <p className="mb-0 mt-4 text-[13.5px] text-teal">
-                  📩 We&rsquo;ve emailed a copy of this estimate and our
-                  recommendations to {lead.email}.
-                </p>
-              )}
+              {lead &&
+                (emailError ? (
+                  <p className="mb-0 mt-4 text-[13.5px] text-[#FFB3BC]">
+                    We couldn&rsquo;t email your copy just now — but your details
+                    reached our team, and everything above is yours to keep.
+                  </p>
+                ) : (
+                  <p className="mb-0 mt-4 text-[13.5px] text-teal">
+                    📩 We&rsquo;ve emailed a copy of this estimate and our
+                    recommendations to {lead.email}.
+                  </p>
+                ))}
               <div className="mt-4 flex flex-col gap-3">
                 <a
                   className={btnPrimaryCls}
@@ -813,13 +671,24 @@ export default function TaxEstimator() {
                 </a>
                 <button
                   className="cursor-pointer border-none bg-transparent p-1.5 font-body text-sm text-mist underline underline-offset-[3px] hover:text-fog disabled:cursor-default"
-                  disabled={emailSent}
-                  onClick={() => {
-                    if (lead && snapshot) sendEstimateEmail(lead, snapshot);
-                    setEmailSent(true);
+                  disabled={emailSent || emailSending}
+                  onClick={async () => {
+                    if (!lead || !snapshot) return;
+                    setEmailSending(true);
+                    const ok = await submitLead(lead, snapshot, true);
+                    setEmailSending(false);
+                    // Only claim "Sent" when it was. This button used to say so
+                    // unconditionally while sending nothing at all.
+                    if (ok) setEmailSent(true);
                   }}
                 >
-                  {emailSent ? "Sent ✓" : "Resend to my email"}
+                  {emailSent
+                    ? "Sent ✓"
+                    : emailSending
+                      ? "Sending…"
+                      : emailError
+                        ? "Try again"
+                        : "Resend to my email"}
                 </button>
               </div>
             </div>

@@ -132,19 +132,11 @@ export const homePage = defineType({
     }),
     defineField({
       name: "faqSection",
-      type: "object",
+      title: "FAQ heading",
+      type: "sectionHeadingBlock",
       group: "faq",
-      fields: [
-        defineField({ name: "eyebrow", type: "string" }),
-        defineField({ name: "title", type: "string" }),
-        defineField({ name: "sub", title: "Subline", type: "text", rows: 2 }),
-        defineField({
-          name: "items",
-          title: "Questions",
-          type: "array",
-          of: [{ type: "faqItem" }],
-        }),
-      ],
+      description:
+        "The questions themselves live in Site Settings → FAQ, because the affiliate pages show the same list. Editing them there updates every page at once.",
     }),
     defineField({ name: "cta", title: "Closing CTA", type: "ctaBlock", group: "cta" }),
   ],
@@ -267,27 +259,6 @@ export const schedulePage = defineType({
         defineField({ name: "eyebrow", type: "string" }),
         defineField({ name: "title", type: "string" }),
         defineField({ name: "body", type: "text", rows: 3 }),
-        defineField({
-          name: "steps",
-          title: "Call steps",
-          type: "array",
-          description: "What happens on the call — the numbered list next to the form.",
-          of: [
-            {
-              type: "object",
-              fields: [
-                defineField({ name: "title", type: "string" }),
-                defineField({ name: "body", type: "text", rows: 2 }),
-              ],
-              preview: { select: { title: "title", subtitle: "body" } },
-            },
-          ],
-        }),
-        defineField({
-          name: "readout",
-          type: "string",
-          description: "Mono line under the steps.",
-        }),
       ],
     }),
     defineField({
@@ -295,7 +266,7 @@ export const schedulePage = defineType({
       type: "object",
       group: "confirmation",
       description:
-        "The thank-you takeover shown after the form is submitted. The transmission-log panel (name, email, ref code) stays in code.",
+        "The thank-you takeover shown after the form is submitted: a short header, then the creator-video wall.",
       fields: [
         defineField({
           name: "eyebrow",
@@ -303,29 +274,21 @@ export const schedulePage = defineType({
           description: 'Teal status line, e.g. "● CHANNEL OPEN".',
         }),
         defineField({ name: "title", type: "string" }),
-        defineField({ name: "body", type: "text", rows: 3 }),
         defineField({
-          name: "nextSteps",
-          title: "What happens next",
-          type: "array",
-          description: "The numbered cards under the confirmation.",
-          of: [
-            {
-              type: "object",
-              fields: [
-                defineField({ name: "title", type: "string" }),
-                defineField({ name: "body", type: "text", rows: 2 }),
-              ],
-              preview: { select: { title: "title", subtitle: "body" } },
-            },
-          ],
-        }),
-        defineField({
-          name: "readout",
-          type: "string",
-          description: "Mono line at the bottom of the confirmation.",
+          name: "body",
+          type: "text",
+          rows: 3,
+          description: "Short line under the title — keep it brief so the videos stay above the fold on phones.",
         }),
       ],
+    }),
+    defineField({
+      name: "videoWallSection",
+      title: "Video wall heading",
+      type: "sectionHeadingBlock",
+      group: "confirmation",
+      description:
+        'The "but first" heading over the creator-video grid on the thank-you takeover. The videos come from the Video Testimonials collection.',
     }),
     defineField({
       name: "statsSection",
@@ -411,6 +374,251 @@ export const careersPage = defineType({
   preview: { prepare: () => ({ title: "Careers" }) },
 });
 
+/**
+ * Affiliate landing pages — the one page type with MANY documents.
+ *
+ * Every other page above is a singleton: one document, id fixed to the type
+ * name, listed by hand in structure.ts. These are different — the client makes
+ * a new one per partner from the Studio's "+ New" button, which is why
+ * affiliatePage is deliberately absent from SINGLETONS in sanity.config.ts.
+ *
+ * That freedom is also the risk. Slugs are root-level (/ugc-foundations, to
+ * match the links partners already have in circulation), so a new page slugged
+ * "services" would collide with the real Services page and one of them would
+ * win at random. Nothing else on the site can hit that, because fixed pages
+ * have fixed slugs. Hence the two guards on the slug field below.
+ *
+ * Only partner-specific content is editable here. The proof stats, the "what
+ * happens on the call" steps, the review carousel and the FAQ are all shared
+ * and live elsewhere — see AffiliateTemplate. Keeping them out of this form is
+ * the point: a new partner page should be a five-minute fill-in, not a rebuild.
+ */
+
+/** Routes that aren't Sanity pages but would still shadow (or be shadowed by) one. */
+const RESERVED_SLUGS = ["studio", "portal", "api", "schedule-team"];
+
+export const affiliatePage = defineType({
+  name: "affiliatePage",
+  title: "Affiliate Page",
+  type: "document",
+  groups: [
+    { name: "hero", title: "Hero" },
+    { name: "value", title: "Value Stack" },
+    { name: "quotes", title: "Partner Quotes" },
+    { name: "meta", title: "Route & SEO" },
+  ],
+  fields: [
+    defineField({
+      name: "partnerName",
+      title: "Partner name",
+      type: "string",
+      group: "meta",
+      validation: (r) => r.required(),
+      description:
+        'The creator or brand this page is for, e.g. "UGC Foundations". Used in the page chrome and to name this document.',
+    }),
+    defineField({
+      name: "slug",
+      title: "Route",
+      type: "slug",
+      group: "meta",
+      validation: (r) =>
+        r.required().custom((slug) => {
+          const value = slug?.current ?? "";
+          if (RESERVED_SLUGS.includes(value)) {
+            return `"${value}" is a reserved route and would shadow part of the site.`;
+          }
+          return true;
+        }),
+      description:
+        'URL path, e.g. "ugc-foundations" → wedecypher.co/ugc-foundations. Changing it breaks any link the partner has already shared.',
+      options: {
+        source: "partnerName",
+        // Guards the collision the singleton pages can't have: this checks every
+        // slugged document, so it catches both another affiliate page and a real
+        // page like /services.
+        isUnique: async (slug, context) => {
+          const { document, getClient } = context;
+          if (!document) return true;
+          const id = document._id.replace(/^drafts\./, "");
+          const taken = await getClient({ apiVersion: "2024-10-01" }).fetch<boolean>(
+            `defined(*[!(_id in [$draft, $published]) && slug.current == $slug][0]._id)`,
+            { draft: `drafts.${id}`, published: id, slug },
+          );
+          return !taken;
+        },
+      },
+    }),
+    { ...seoField, group: "meta" },
+    defineField({
+      name: "calendlyEvent",
+      title: "Calendly event (advanced)",
+      type: "string",
+      group: "meta",
+      description:
+        'Leave empty — every affiliate page books the shared "DeCypher Affiliate" call. Only set this if this partner gets their own Calendly event and you want their bookings tracked separately. Paste the event key, not the URL.',
+    }),
+    defineField({
+      name: "hero",
+      type: "object",
+      group: "hero",
+      fields: [
+        defineField({
+          name: "badge",
+          type: "string",
+          validation: (r) => r.required(),
+          description: 'Pill above the headline, e.g. "Included with your VIP membership".',
+        }),
+        defineField({
+          name: "headlineLine1",
+          title: "Headline line 1",
+          type: "string",
+          validation: (r) => r.required(),
+        }),
+        defineField({
+          name: "headlineLine2",
+          title: "Headline line 2 (gradient)",
+          type: "string",
+          validation: (r) => r.required(),
+          description: "Renders in the brand gradient, so put the punchline here.",
+        }),
+        defineField({
+          name: "body",
+          type: "text",
+          rows: 4,
+          validation: (r) => r.required(),
+          description: "The pitch, written for this partner's audience specifically.",
+        }),
+        defineField({ name: "ctaLabel", title: "Button label", type: "string" }),
+        defineField({
+          name: "ctaNote",
+          title: "Note under the button",
+          type: "string",
+          description: 'e.g. "Takes 30 seconds to book."',
+        }),
+        defineField({
+          name: "image",
+          title: "Partner image",
+          type: "image",
+          options: { hotspot: true },
+          description:
+            "The partner's founder or course art. Empty renders an on-brand placeholder frame.",
+        }),
+        defineField({
+          name: "quote",
+          title: "Quote over the image",
+          type: "object",
+          description: "The short pull-quote that sits on the image.",
+          options: { collapsible: true, collapsed: false },
+          fields: [
+            defineField({ name: "text", type: "text", rows: 3 }),
+            defineField({
+              name: "attribution",
+              type: "string",
+              description: 'e.g. "Baotran Tran — UGC Foundations".',
+            }),
+          ],
+        }),
+      ],
+    }),
+    defineField({
+      name: "valueStack",
+      title: "Value stack",
+      type: "object",
+      group: "value",
+      description:
+        "The itemized receipt. Prices are display strings — type them exactly as they should read.",
+      fields: [
+        defineField({ name: "eyebrow", type: "string" }),
+        defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+        defineField({
+          name: "items",
+          title: "Line items",
+          type: "array",
+          validation: (r) => r.min(1),
+          of: [
+            {
+              type: "object",
+              fields: [
+                defineField({ name: "label", type: "string", validation: (r) => r.required() }),
+                defineField({
+                  name: "sublabel",
+                  type: "string",
+                  description: "The one-liner under the item name.",
+                }),
+                defineField({
+                  name: "price",
+                  type: "string",
+                  validation: (r) => r.required(),
+                  description: 'e.g. "$500.00" — shown struck through.',
+                }),
+              ],
+              preview: { select: { title: "label", subtitle: "price" } },
+            },
+          ],
+        }),
+        defineField({
+          name: "subtotal",
+          type: "string",
+          description: 'The struck-through sum, e.g. "$947.00".',
+        }),
+        defineField({
+          name: "totalLabel",
+          type: "string",
+          description: 'e.g. "Total due — VIP members".',
+        }),
+        defineField({
+          name: "totalValue",
+          type: "string",
+          description: 'e.g. "$0.00".',
+        }),
+        defineField({
+          name: "footnote",
+          type: "string",
+          description: "Mono line under the total.",
+        }),
+      ],
+    }),
+    defineField({
+      name: "partnerQuotes",
+      title: "Partner quotes",
+      type: "object",
+      group: "quotes",
+      description:
+        "What the partner says about DeCypher, in their own words. Separate from the site-wide review carousel below it, which pulls from the Testimonials collection.",
+      fields: [
+        defineField({ name: "eyebrow", type: "string" }),
+        defineField({ name: "title", type: "string" }),
+        defineField({
+          name: "quotes",
+          type: "array",
+          of: [
+            {
+              type: "object",
+              fields: [
+                defineField({ name: "quote", type: "text", rows: 3, validation: (r) => r.required() }),
+                defineField({
+                  name: "attribution",
+                  type: "string",
+                  description: "Leave empty to keep the previous quote's speaker.",
+                }),
+              ],
+              preview: { select: { title: "quote", subtitle: "attribution" } },
+            },
+          ],
+        }),
+      ],
+    }),
+  ],
+  preview: {
+    select: { title: "partnerName", subtitle: "slug.current" },
+    prepare: ({ title, subtitle }) => ({
+      title: title ?? "Untitled partner",
+      subtitle: subtitle ? `/${subtitle}` : "no route set",
+    }),
+  },
+});
+
 export const PAGE_TYPES = [
   "homePage",
   "servicesPage",
@@ -418,4 +626,5 @@ export const PAGE_TYPES = [
   "teamPage",
   "schedulePage",
   "careersPage",
+  "affiliatePage",
 ] as const;

@@ -19,11 +19,7 @@ interface StateRule {
 
 export const ESTIMATOR_CONFIG = {
   firmName: "DeCypher Financials",
-  /** POST target for lead + estimate. */
-  crmEndpoint: "https://hooks.zapier.com/hooks/catch/19234912/42jhkid/",
   bookingUrl: "https://wedecypher.co/schedule-team",
-  /** Optional "email me this" endpoint. */
-  emailEstimateEndpoint: "REPLACE_WITH_EMAIL_ENDPOINT",
 };
 
 export const TAX = {
@@ -493,4 +489,76 @@ export function computeStrategies(
   high = Math.min(high, base.total * st.maxSavingsFraction); // keep the high end credible
   if (high < low) high = low;
   return { low: Math.round(low), high: Math.round(high) };
+}
+
+/* ===================== the full estimate ===================== */
+
+/**
+ * Net profit above which we *tell* someone the S-corp conversation is worth
+ * having. Deliberately below TAX.strat.scorpMinNet (the point where we start
+ * modelling S-corp savings into the range): the advice is "worth discussing",
+ * the modelling is "we'd put a number on it". A lead between the two sees the
+ * recommendation with no S-corp contribution in their savings range.
+ */
+export const SCORP_ADVICE_MIN_NET = 55000;
+
+/** Everything the estimator asks for. Extends the pure tax inputs. */
+export interface EstimateInputs extends TaxInputs {
+  paid: number;
+  fulltime: boolean;
+  entity: EntityType | "unanswered";
+  sCorp: boolean;
+  sCorpSalary: number | null;
+  sCorpSalaryStatus: string;
+  sCorpNoPayroll: boolean;
+}
+
+export interface EstimateResult extends TaxBreakdown {
+  bizTax: number;
+  setAside: number;
+  effRate: number;
+  afterTax: number;
+  totalIncome: number;
+  savingsLow: number;
+  savingsHigh: number;
+  /** Derived risk flags — drive the recommendations. */
+  solePropRisk: boolean;
+  needSCorp: boolean;
+}
+
+/**
+ * The estimate behind both the widget and the emailed copy. It lives here, not
+ * in the component, because the server rebuilds it from the same raw inputs
+ * when it sends the email: the browser's numbers are never trusted, and the
+ * email can't drift from what the visitor saw on screen.
+ */
+export function buildEstimate(inputs: EstimateInputs): EstimateResult {
+  const r = computeTax(inputs);
+
+  // business-attributable tax (marginal on the creator income)
+  const rNoBiz = computeTax({ ...inputs, creator: 0, expenses: 0 });
+  const bizTax = Math.max(0, r.total - rNoBiz.total);
+  const setAside = r.netSE > 0 ? Math.min(60, (bizTax / r.netSE) * 100) : 0;
+
+  const totalIncome = r.netSE + inputs.w2 + inputs.other;
+  const effRate = totalIncome > 0 ? (r.total / totalIncome) * 100 : 0;
+  const afterTax = totalIncome - r.total;
+
+  // Already an S-corp? Don't count S-corp election as "potential" savings.
+  const strat = computeStrategies(inputs, r, inputs.sCorp);
+
+  return {
+    ...r,
+    bizTax,
+    setAside,
+    effRate,
+    afterTax,
+    totalIncome,
+    savingsLow: strat.low,
+    savingsHigh: strat.high,
+    solePropRisk: inputs.entity === "soleprop" && inputs.creator > 20000,
+    needSCorp:
+      r.netSE > SCORP_ADVICE_MIN_NET &&
+      (inputs.entity === "soleprop" || inputs.entity === "smllc"),
+  };
 }

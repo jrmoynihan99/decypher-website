@@ -1,5 +1,7 @@
 /** Shapes returned by the fetch layer in src/sanity/queries.ts. */
 
+import type { SanityImageSource } from "@sanity/image-url";
+
 export interface SeoContent {
   title?: string;
   description?: string;
@@ -99,6 +101,8 @@ export interface SiteSettings {
   };
   stats?: StatContent[];
   statsDisclaimer?: string;
+  /** Shared across Home and every affiliate page — edited in one place. */
+  faqs?: FaqContent[];
 }
 
 interface PageBase {
@@ -123,7 +127,8 @@ export interface HomePageDoc extends PageBase {
   rosterSection?: SectionHeadingContent;
   servicesSection?: SectionHeadingContent;
   testimonialsSection?: SectionHeadingContent;
-  faqSection?: SectionHeadingContent & { items?: FaqContent[] };
+  /** Heading only — the questions come from Site Settings, shared with the affiliate pages. */
+  faqSection?: SectionHeadingContent;
   cta?: CtaContent;
 }
 
@@ -154,10 +159,9 @@ export interface SchedulePageDoc extends PageBase {
     eyebrow?: string;
     title?: string;
     body?: string;
-    steps?: { title?: string; body?: string }[];
-    readout?: string;
   };
   confirmation?: BookingConfirmationContent;
+  videoWallSection?: SectionHeadingContent;
   statsSection?: SectionHeadingContent;
   testimonialsSection?: SectionHeadingContent;
 }
@@ -167,8 +171,13 @@ export interface BookingConfirmationContent {
   eyebrow?: string;
   title?: string;
   body?: string;
-  nextSteps?: { title?: string; body?: string }[];
-  readout?: string;
+}
+
+/** One card on the thank-you video wall. */
+export interface CmsVideoTestimonial {
+  name: string;
+  handle: string;
+  videoUrl: string;
 }
 
 export interface CareersPageDoc extends PageBase {
@@ -193,10 +202,64 @@ export interface CmsJob {
   applyHref: string;
 }
 
+/** One line on the affiliate value-stack receipt. */
+export interface ValueStackItem {
+  label: string;
+  sublabel?: string;
+  /** Display string, struck through at render, e.g. "$500.00". */
+  price: string;
+}
+
+/** A partner's own words about DeCypher. */
+export interface PartnerQuote {
+  quote: string;
+  /** Empty means "same speaker as the quote above". */
+  attribution?: string;
+}
+
+/**
+ * A partner landing page. Unlike every other PageDoc this type has many
+ * documents — one per affiliate — so anything shared (stats, call steps, the
+ * review carousel, the FAQ) is deliberately absent here and resolved by the
+ * template instead.
+ */
+export interface AffiliatePageDoc extends PageBase {
+  _type: "affiliatePage";
+  partnerName?: string;
+  /** Allowlisted key, not a URI. Empty = the shared affiliate call. */
+  calendlyEvent?: string;
+  hero?: {
+    badge?: string;
+    headlineLine1?: string;
+    headlineLine2?: string;
+    body?: string;
+    ctaLabel?: string;
+    ctaNote?: string;
+    /** Raw Sanity image — the template gets a resolved URL, see RenderPage. */
+    image?: SanityImageSource;
+    quote?: { text?: string; attribution?: string };
+  };
+  valueStack?: {
+    eyebrow?: string;
+    title?: string;
+    items?: ValueStackItem[];
+    subtotal?: string;
+    totalLabel?: string;
+    totalValue?: string;
+    footnote?: string;
+  };
+  partnerQuotes?: {
+    eyebrow?: string;
+    title?: string;
+    quotes?: PartnerQuote[];
+  };
+}
+
 export type PageDoc =
   | HomePageDoc
   | ServicesPageDoc
   | CreatorsPageDoc
   | TeamPageDoc
   | SchedulePageDoc
-  | CareersPageDoc;
+  | CareersPageDoc
+  | AffiliatePageDoc;

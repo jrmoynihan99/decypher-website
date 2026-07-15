@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AffiliateTemplate from "@/components/templates/AffiliateTemplate";
 import CareersTemplate from "@/components/templates/CareersTemplate";
 import CreatorsTemplate from "@/components/templates/CreatorsTemplate";
 import HomeTemplate from "@/components/templates/HomeTemplate";
@@ -13,7 +14,9 @@ import {
   getSiteSettings,
   getTeam,
   getTestimonials,
+  getVideoTestimonials,
 } from "@/sanity/queries";
+import { urlFor } from "@/sanity/image";
 import type { PageDoc } from "@/sanity/types";
 
 /**
@@ -53,23 +56,45 @@ export async function renderPage(page: PageDoc) {
       return <TeamTemplate page={page} members={members} />;
     }
     case "schedulePage": {
-      const [settings, services, testimonials] = await Promise.all([
+      const [settings, testimonials, videos] = await Promise.all([
         getSiteSettings(),
-        getServices(),
         getTestimonials(),
+        getVideoTestimonials(),
       ]);
       return (
         <ScheduleTemplate
           page={page}
           settings={settings}
-          serviceTitles={services.map((s) => s.title)}
           testimonials={testimonials}
+          videos={videos}
         />
       );
     }
     case "careersPage": {
       const jobs = await getJobs();
       return <CareersTemplate page={page} jobs={jobs} />;
+    }
+    case "affiliatePage": {
+      const [settings, testimonials] = await Promise.all([
+        getSiteSettings(),
+        getTestimonials(),
+      ]);
+      // Page docs are fetched with a blanket `...` spread, so the hero image
+      // arrives as a raw asset ref rather than a URL — the collections resolve
+      // theirs inside their own queries, but there's no per-type projection to
+      // hang this on. Resolving here keeps getPageBySlug generic.
+      return (
+        <AffiliateTemplate
+          page={page}
+          settings={settings}
+          testimonials={testimonials}
+          heroImageUrl={
+            page.hero?.image
+              ? urlFor(page.hero.image).width(920).url()
+              : undefined
+          }
+        />
+      );
     }
   }
 }

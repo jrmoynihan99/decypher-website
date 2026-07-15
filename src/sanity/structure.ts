@@ -4,8 +4,11 @@ import type { StructureResolver } from "sanity/structure";
  * Studio sidebar:
  *
  *   Pages          → the six page documents (fixed IDs — one doc per template)
+ *   Affiliate Pages→ partner landing pages — a LIST, not fixed docs: the client
+ *                    adds one per affiliate from here
  *   Creators       → roster collection, in site order
  *   Testimonials   → reviews reel, grouped by marquee row
+ *   Video Testimonials → thank-you video wall, in site order
  *   Team           → personnel files, in site order
  *   Services       → the five service nodes
  *   Job Openings   → careers-page roles, in site order
@@ -23,8 +26,10 @@ const PAGES: Array<{ type: string; title: string }> = [
 
 const HANDLED = [
   ...PAGES.map((p) => p.type),
+  "affiliatePage",
   "creator",
   "testimonial",
+  "videoTestimonial",
   "teamMember",
   "service",
   "jobOpening",
@@ -49,6 +54,15 @@ export const structure: StructureResolver = (S) =>
               ),
             ),
         ),
+      // A document list, not fixed children: affiliate pages are the one page
+      // type the client creates more of.
+      S.listItem()
+        .title("Affiliate Pages")
+        .child(
+          S.documentTypeList("affiliatePage")
+            .title("Affiliate Pages")
+            .defaultOrdering([{ field: "partnerName", direction: "asc" }]),
+        ),
       S.divider(),
       S.listItem()
         .title("Creators")
@@ -66,6 +80,13 @@ export const structure: StructureResolver = (S) =>
               { field: "row", direction: "asc" },
               { field: "order", direction: "asc" },
             ]),
+        ),
+      S.listItem()
+        .title("Video Testimonials")
+        .child(
+          S.documentTypeList("videoTestimonial")
+            .title("Video Testimonials")
+            .defaultOrdering([{ field: "order", direction: "asc" }]),
         ),
       S.listItem()
         .title("Team")
