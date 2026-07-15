@@ -10,6 +10,7 @@ export const siteSettings = defineType({
     { name: "nav", title: "Navbar" },
     { name: "footer", title: "Footer" },
     { name: "stats", title: "Stats" },
+    { name: "faq", title: "FAQ" },
   ],
   fields: [
     defineField({
@@ -91,6 +92,15 @@ export const siteSettings = defineType({
       type: "string",
       group: "stats",
       description: "Mono line under the stat cards. Leave empty to hide.",
+    }),
+    defineField({
+      name: "faqs",
+      title: "Questions",
+      type: "array",
+      group: "faq",
+      of: [{ type: "faqItem" }],
+      description:
+        "Asked and answered once, shown on Home and on every affiliate page. Editing one here updates all of them.",
     }),
   ],
   preview: { prepare: () => ({ title: "Site Settings" }) },

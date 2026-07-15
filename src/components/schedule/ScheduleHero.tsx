@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import StatsGrid from "@/components/home/StatsGrid";
 import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
@@ -9,34 +10,44 @@ import BookingConfirmed from "@/components/schedule/BookingConfirmed";
 import ScheduleForm, { type Booking } from "@/components/schedule/ScheduleForm";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
-import Readout from "@/components/ui/Readout";
-import type { SchedulePageDoc } from "@/sanity/types";
+import type {
+  CmsVideoTestimonial,
+  SchedulePageDoc,
+  StatContent,
+} from "@/sanity/types";
 
 /**
  * Client shell for the schedule hero: renders the pitch + form grid until a
  * request goes through, then swaps the whole hero for the thank-you takeover
- * (BookingConfirmed). Swapping at this level — rather than inside the form
- * panel — lets the confirmation own the full stage while the proof sections
- * below stay put.
+ * (BookingConfirmed — header + creator-video wall). Swapping at this level —
+ * rather than inside the form panel — lets the confirmation own the full
+ * stage while the proof sections below stay put.
+ *
+ * The proof stats ride along under the pitch as a 2x2, but only once the grid
+ * splits at lg — stacked under the headline they'd push the form below the
+ * fold, so narrower widths get the standalone StatsSection down-page instead.
  */
 export default function ScheduleHero({
   hero,
   confirmation,
-  serviceTitles,
+  videoWall,
+  videos,
+  stats,
 }: {
   hero: NonNullable<SchedulePageDoc["hero"]>;
   confirmation: SchedulePageDoc["confirmation"];
-  serviceTitles: string[];
+  videoWall: SchedulePageDoc["videoWallSection"];
+  videos: CmsVideoTestimonial[];
+  stats: StatContent[];
 }) {
   const [booking, setBooking] = useState<Booking | null>(null);
-  const steps = hero.steps ?? [];
 
   if (booking) {
     return (
       <BookingConfirmed
-        booking={booking}
         content={confirmation}
-        onReset={() => setBooking(null)}
+        videoWall={videoWall}
+        videos={videos}
       />
     );
   }
@@ -75,41 +86,21 @@ export default function ScheduleHero({
             </ParagraphReveal>
           )}
 
-          <ol className="mx-auto mt-9 flex max-w-[420px] list-none flex-col gap-5 p-0 text-left lg:mx-0">
-            {steps.map((s, i) => (
-              <li key={i}>
-                <Reveal
-                  delay={0.5 + i * 0.12}
-                  className="flex items-start gap-4"
-                >
-                  <span className="mt-[3px] flex-none font-mono text-[12px] tracking-[0.14em] text-magenta">
-                    [{String(i + 1).padStart(2, "0")}]
-                  </span>
-                  <span>
-                    <b className="block font-display text-[16.5px] font-semibold tracking-[-0.01em] text-fog">
-                      {s.title}
-                    </b>
-                    <span className="mt-0.5 block text-[14px] leading-relaxed text-muted">
-                      {s.body}
-                    </span>
-                  </span>
-                </Reveal>
-              </li>
-            ))}
-          </ol>
-
-          {hero.readout && (
-            <SubheadingReveal delay={0.9} className="mt-9">
-              <p className="m-0 font-mono text-[11.5px] tracking-[0.16em] text-faint">
-                <Readout text={hero.readout} blink />
-              </p>
-            </SubheadingReveal>
+          {stats.length > 0 && (
+            <Reveal delay={0.5}>
+              {/* hairline cross between the four cells: right rule on the left
+                  column, bottom rule on the top row */}
+              <StatsGrid
+                stats={stats}
+                variant="bare"
+                className="mt-12 hidden max-w-[440px] grid-cols-2 border-t border-white/10 pt-6 lg:grid [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(2n+1)]:border-r [&>*:nth-child(2n+1)]:pl-0 [&>*]:border-white/10"
+              />
+            </Reveal>
           )}
         </div>
 
         <Reveal delay={0.35}>
           <ScheduleForm
-            serviceTitles={serviceTitles}
             onBooked={(b) => {
               setBooking(b);
               // the confirmation mounts at the top of the page — bring the

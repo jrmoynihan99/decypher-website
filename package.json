@@ -2,16 +2,22 @@
   "name": "decypher-website",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "portal:admin": "node scripts/portal-admin.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.1",
     "@sanity/image-url": "^2.1.1",
     "@sanity/vision": "^6.4.0",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^14.1.0",
     "framer-motion": "^12.42.2",
     "lenis": "^1.3.25",
     "next": "16.2.10",
@@ -19,7 +25,9 @@
     "next-view-transitions": "^0.3.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "sanity": "^6.4.0"
+    "resend": "^6.17.2",
+    "sanity": "^6.4.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@sanity/client": "^7.23.0",
@@ -29,6 +37,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "playwright": "^1.61.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

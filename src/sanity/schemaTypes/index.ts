@@ -1,5 +1,12 @@
 import type { SchemaTypeDefinition } from "sanity";
-import { creator, jobOpening, service, teamMember, testimonial } from "./collections";
+import {
+  creator,
+  jobOpening,
+  service,
+  teamMember,
+  testimonial,
+  videoTestimonial,
+} from "./collections";
 import {
   ctaBlock,
   faqItem,
@@ -10,6 +17,7 @@ import {
   statItem,
 } from "./objects";
 import {
+  affiliatePage,
   careersPage,
   creatorsPage,
   homePage,
@@ -35,9 +43,11 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   teamPage,
   schedulePage,
   careersPage,
+  affiliatePage,
   // collections
   creator,
   testimonial,
+  videoTestimonial,
   teamMember,
   service,
   jobOpening,

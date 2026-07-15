@@ -48,7 +48,10 @@ Gotchas:
 
 - `/schedule`: empty-submit → inline field errors; fill `#s-name` +
   `#s-email`, click "Request my call" → thank-you takeover replaces the hero
-  (transmission log, next steps, ref code), "// SEND ANOTHER TRANSMISSION"
-  restores a fresh form.
+  ("See you in our call." header + click-to-play creator-video wall from the
+  Video Testimonials collection; reviews reel then stats follow below). On
+  mobile (390×844) the first video card must sit above the fold. A
+  scroll-to-top button (`aria-label="Scroll back to top"`) appears bottom-right
+  past ~0.8 viewports and must be display:none at the top (iOS 26 rule).
 - `/careers`: header readout resolves `{count}`, job cards link to their
   `applyHref` (mailto), empty Openings collection shows the dashed empty state.

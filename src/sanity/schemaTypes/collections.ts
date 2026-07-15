@@ -184,6 +184,44 @@ export const testimonial = defineType({
   },
 });
 
+export const videoTestimonial = defineType({
+  name: "videoTestimonial",
+  title: "Video testimonial",
+  type: "document",
+  fields: [
+    defineField({
+      name: "name",
+      title: "Creator name",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
+    defineField({
+      name: "handle",
+      type: "string",
+      description: "e.g. @mayamakesup — shown next to the name under the video.",
+    }),
+    defineField({
+      name: "videoUrl",
+      title: "Video URL",
+      type: "url",
+      validation: (r) => r.required(),
+      description:
+        "YouTube link in any form (watch, share, or embed URL). Other embeddable players work too.",
+    }),
+    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+  ],
+  orderings: [
+    {
+      title: "Site order",
+      name: "orderAsc",
+      by: [{ field: "order", direction: "asc" }],
+    },
+  ],
+  preview: {
+    select: { title: "name", subtitle: "videoUrl" },
+  },
+});
+
 export const teamMember = defineType({
   name: "teamMember",
   title: "Team member",

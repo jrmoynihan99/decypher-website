@@ -1,4 +1,5 @@
 import JobCard from "@/components/careers/JobCard";
+import PerkCard from "@/components/careers/PerkCard";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import CtaSection from "@/components/home/CtaSection";
 import Reveal from "@/components/reveal/Reveal";
@@ -103,21 +104,7 @@ export default function CareersTemplate({
             >
               {perks.map((perk, i) => (
                 <Reveal key={i} delay={0.1 + i * 0.1}>
-                  <div className="h-full rounded-[18px] border border-edge bg-panel p-6 transition-colors duration-300 hover:border-edge-bright sm:p-7">
-                    {perk.tag && (
-                      <p className="m-0 font-mono text-[10px] tracking-[0.2em] text-teal">
-                        {perk.tag}
-                      </p>
-                    )}
-                    <b className="mt-3 block font-display text-[18px] font-semibold tracking-[-0.01em] text-fog">
-                      {perk.title}
-                    </b>
-                    {perk.body && (
-                      <p className="mb-0 mt-2 text-[14.5px] leading-relaxed text-muted">
-                        {perk.body}
-                      </p>
-                    )}
-                  </div>
+                  <PerkCard perk={perk} />
                 </Reveal>
               ))}
             </SectionReveal>

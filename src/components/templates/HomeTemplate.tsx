@@ -75,10 +75,9 @@ export default function HomeTemplate({
           creators={creators.slice(0, 16)}
         />
       </div>
-      {/* Services + everything below share one web: in Atlas mode the
-          stage's own mesh bleeds down behind Testimonials/FAQ/CTA (one
-          simulation, one canvas); in Flyover mode the classic background
-          web takes over below the pin. ServicesShowcase owns the wiring. */}
+      {/* Services + everything below share one web: the Atlas stage's own
+          mesh bleeds down behind Testimonials/FAQ/CTA (one simulation, one
+          canvas). ServicesShowcase owns the wiring. */}
       <ServicesShowcase
         content={page.servicesSection ?? {}}
         services={services.slice(0, 5)}
@@ -90,7 +89,7 @@ export default function HomeTemplate({
         />
         <FaqSection
           content={page.faqSection ?? {}}
-          faqs={page.faqSection?.items ?? []}
+          faqs={settings?.faqs ?? []}
         />
         <CtaSection content={page.cta ?? {}} />
       </ServicesShowcase>

@@ -1,0 +1,96 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
+import { getSession } from "@/lib/firebase/session";
+import { listStaff } from "@/lib/firebase/users";
+
+/**
+ * Staff roster. Admin-only, and re-checked here rather than trusted from the
+ * proxy or the calling page — a route handler is reachable directly over HTTP,
+ * so its own gate is the only one that counts.
+ */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function guard() {
+  if (!isConfigured()) {
+    return NextResponse.json(
+      { ok: false, message: "Server missing Firebase credentials" },
+      { status: 500 },
+    );
+  }
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ ok: false, message: "Not signed in" }, { status: 401 });
+  }
+  if (session.role !== "admin") {
+    return NextResponse.json({ ok: false, message: "Admins only" }, { status: 403 });
+  }
+  return session;
+}
+
+export async function GET() {
+  const session = await guard();
+  if (session instanceof NextResponse) return session;
+
+  return NextResponse.json({ ok: true, users: await listStaff() });
+}
+
+export async function POST(request: NextRequest) {
+  const session = await guard();
+  if (session instanceof NextResponse) return session;
+
+  let email = "";
+  let displayName = "";
+  let role: "admin" | "staff" = "staff";
+  try {
+    const body = await request.json();
+    email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    displayName = typeof body?.displayName === "string" ? body.displayName.trim() : "";
+    role = body?.role === "admin" ? "admin" : "staff";
+  } catch {
+    // falls through to validation below
+  }
+
+  if (!EMAIL_RE.test(email) || !displayName) {
+    return NextResponse.json(
+      { ok: false, message: "A name and a valid email are required" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    // No password is set here — deliberately. The account is created in a
+    // state nobody can sign into, and the invite link below is the only way to
+    // give it one. That means an admin never knows a colleague's password and
+    // there's no temporary credential to leak in a chat log.
+    const user = await adminAuth().createUser({ email, displayName, emailVerified: false });
+
+    await adminDb().collection("users").doc(user.uid).set({
+      email,
+      displayName,
+      role,
+      disabled: false,
+      createdAt: new Date(),
+      createdBy: session.email,
+    });
+
+    const link = await adminAuth().generatePasswordResetLink(email, {
+      url: `${request.nextUrl.origin}/portal/login`,
+      handleCodeInApp: false,
+    });
+
+    return NextResponse.json({ ok: true, uid: user.uid, inviteLink: link });
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "auth/email-already-exists") {
+      return NextResponse.json(
+        { ok: false, message: "That email already has an account" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json(
+      { ok: false, message: "Could not create the account" },
+      { status: 500 },
+    );
+  }
+}

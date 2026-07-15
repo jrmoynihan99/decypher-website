@@ -362,50 +362,25 @@ function pageDocs() {
         eyebrow: "[ schedule // free consultation ]",
         title: "Book your decryption call.",
         body: "Twenty minutes, zero jargon. We look at your numbers, tell you exactly what we’d do, and you decide if we’re your team.",
-        steps: withKeys([
-          {
-            title: "We scan your setup",
-            body: "Entity, books, filings — where you are today.",
-          },
-          {
-            title: "We name the savings",
-            body: "The strategies we'd run and what they're worth.",
-          },
-          {
-            title: "You decide",
-            body: "Work with us, or walk away with the plan. No pressure.",
-          },
-        ]),
-        readout: "// AVG RESPONSE TIME < 24 HOURS",
       },
       confirmation: {
         eyebrow: "● CHANNEL OPEN",
-        title: "Transmission received.",
-        body: "Your request is in the queue. A real human reads every transmission and replies within one business day to lock in your time.",
-        nextSteps: withKeys([
-          {
-            title: "We review your file",
-            body: "Your channel, revenue, and asks — before we ever reply.",
-          },
-          {
-            title: "You pick a time",
-            body: "We send a booking link with slots that fit your schedule.",
-          },
-          {
-            title: "We decrypt the savings",
-            body: "Twenty minutes, zero jargon — and you keep the plan either way.",
-          },
-        ]),
-        readout: "// AVG RESPONSE TIME < 24 HOURS — WATCH YOUR INBOX",
+        title: "See you in our call.",
+        body: "Request received — a real human reads every transmission and replies within one business day to lock in your time.",
       },
-      statsSection: {
-        eyebrow: "[ 01 // the proof ]",
-        title: "Receipts, decrypted.",
+      videoWallSection: {
+        eyebrow: "[ but first ]",
+        title: "Hear it from the creators.",
+        sub: "// REAL CLIENTS. REAL RESULTS. TAP A VIDEO TO PLAY.",
       },
       testimonialsSection: {
-        eyebrow: "[ 02 // reviews ]",
+        eyebrow: "[ 01 // reviews ]",
         title: "Creators who cracked the code.",
         sub: "// grab and throw the reel",
+      },
+      statsSection: {
+        eyebrow: "[ 02 // the proof ]",
+        title: "Receipts, decrypted.",
       },
     },
     {

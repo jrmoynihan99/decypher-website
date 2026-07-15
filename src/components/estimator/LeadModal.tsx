@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CONSENT_TEXT, type Lead } from "@/lib/lead";
 import {
   Eyebrow,
   FieldError,
@@ -11,25 +12,17 @@ import {
   fieldLabelCls,
 } from "./fields";
 
-export const CONSENT_TEXT =
-  "I understand this is an estimate, not tax advice, and agree to be contacted by DeCypher Financials about my taxes.";
-
-export interface Lead {
-  name: string;
-  email: string;
-  phone: string;
-  isCreator: boolean;
-  platform: string;
-  username: string;
-  revenueBand: string;
-  consent: true;
-  consentText: string;
-}
-
 /**
  * Lead-capture modal gating the recommendations. Creator-specific fields
  * (channel / handle / revenue band) only appear once a creator has entered a
  * complete phone number.
+ *
+ * That reveal and the validation below are load-bearing on each other: the
+ * creator fields are only *required* when they're visible, which is safe only
+ * because a submit already demands a complete phone, and a complete phone is
+ * exactly what reveals them. Loosen the phone rule or retime the reveal and the
+ * three fields that qualify a lead — channel, handle, revenue — quietly stop
+ * being required, with nothing failing to say so.
  */
 export default function LeadModal({
   open,
