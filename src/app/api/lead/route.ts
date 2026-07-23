@@ -41,7 +41,10 @@ interface LeadRequest {
   resend?: boolean;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// `<>|` excluded on top of whitespace: the email is wrapped in Slack's
+// <mailto:…> link syntax, and those characters could break out to inject a
+// `<!channel>` broadcast. Validate here — the mailto target isn't escaped.
+const EMAIL_RE = /^[^\s@<>|]+@[^\s@<>|]+\.[^\s@<>|]+$/;
 
 /** Narrows the request to a Lead, or explains what's wrong with it. */
 function parseLead(l: Partial<Lead> | undefined): { lead: Lead } | { error: string } {

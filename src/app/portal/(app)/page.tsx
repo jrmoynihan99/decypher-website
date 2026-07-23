@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/firebase/session";
 import { Eyebrow } from "@/components/estimator/fields";
-import { NavIcon, PORTAL_WIDGETS } from "@/components/portal/nav-items";
+import { NavIcon, PORTAL_INBOX, PORTAL_WIDGETS } from "@/components/portal/nav-items";
 
 export default async function PortalDashboard() {
   const session = await requireSession();
   const firstName = session.displayName.split(" ")[0] || "there";
+
+  // Same filter as the sidebar: a tile you can't open is just a tease.
+  const can = new Set(session.permissions);
+  const widgets = [...PORTAL_INBOX, ...PORTAL_WIDGETS].filter((w) =>
+    can.has(w.permission),
+  );
 
   return (
     <>
@@ -14,12 +20,11 @@ export default async function PortalDashboard() {
         Welcome back, {firstName}.
       </h1>
       <p className="mt-2 max-w-xl text-sm text-muted">
-        The scaffolding is live — auth, sessions and staff accounts. The tools
-        below are next.
+        Leads and applications are live below. The tools are next.
       </p>
 
       <div className="mt-9 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {PORTAL_WIDGETS.map((widget) => (
+        {widgets.map((widget) => (
           <Link
             key={widget.href}
             href={widget.href}
@@ -35,8 +40,14 @@ export default async function PortalDashboard() {
                   {widget.name}
                 </h2>
               </div>
-              <span className="flex-none rounded-full border border-white/10 px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[1.2px] text-dusk">
-                Planned
+              <span
+                className={`flex-none rounded-full border px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[1.2px] ${
+                  widget.live
+                    ? "border-teal/40 text-teal"
+                    : "border-white/10 text-dusk"
+                }`}
+              >
+                {widget.live ? "Live" : "Planned"}
               </span>
             </div>
             <p className="mt-2.5 text-sm text-mist">{widget.blurb}</p>
@@ -46,6 +57,13 @@ export default async function PortalDashboard() {
           </Link>
         ))}
       </div>
+
+      {widgets.length === 0 ? (
+        <div className="mt-9 rounded-[18px] border border-dashed border-white/12 bg-white/[0.02] px-6 py-14 text-center text-sm text-dusk">
+          Your account doesn&rsquo;t have any tabs enabled yet — ask an admin to
+          grant you access.
+        </div>
+      ) : null}
     </>
   );
 }

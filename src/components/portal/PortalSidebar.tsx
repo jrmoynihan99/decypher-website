@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { PermissionKey } from "@/lib/permissions";
 import {
   DASHBOARD_ITEM,
   NavIcon,
+  PORTAL_INBOX,
   PORTAL_WIDGETS,
   STAFF_ITEM,
 } from "@/components/portal/nav-items";
@@ -14,8 +16,9 @@ import {
  * scrollable strip under the header on phones — the rail would eat half a
  * phone screen, and a hidden nav is worse than a scrolling one.
  *
- * The Staff link is hidden for non-admins as tidiness only; the page and its
- * API routes each enforce the role themselves.
+ * Tabs are filtered to the session's permission grants, and the Staff link is
+ * hidden for non-admins — both as tidiness only; every page and API route
+ * enforces its own gate, so nothing here is load-bearing.
  */
 
 function useIsActive() {
@@ -24,25 +27,57 @@ function useIsActive() {
     href === "/portal" ? pathname === "/portal" : pathname.startsWith(href);
 }
 
-export function SidebarRail({ isAdmin }: { isAdmin: boolean }) {
+const allowed = (permissions: PermissionKey[]) => {
+  const can = new Set(permissions);
+  return {
+    tools: PORTAL_WIDGETS.filter((w) => can.has(w.permission)),
+    inbox: PORTAL_INBOX.filter((w) => can.has(w.permission)),
+  };
+};
+
+function RailHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-5 mb-1 px-3 font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
+      {children}
+    </div>
+  );
+}
+
+export function SidebarRail({
+  isAdmin,
+  permissions,
+}: {
+  isAdmin: boolean;
+  permissions: PermissionKey[];
+}) {
   const isActive = useIsActive();
+  const { tools, inbox } = allowed(permissions);
 
   return (
     <nav className="flex flex-col gap-1 p-3">
       <RailLink item={DASHBOARD_ITEM} active={isActive(DASHBOARD_ITEM.href)} />
 
-      <div className="mt-5 mb-1 px-3 font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
-        Tools
-      </div>
-      {PORTAL_WIDGETS.map((w) => (
-        <RailLink key={w.href} item={w} active={isActive(w.href)} />
-      ))}
+      {tools.length ? (
+        <>
+          <RailHeading>Tools</RailHeading>
+          {tools.map((w) => (
+            <RailLink key={w.href} item={w} active={isActive(w.href)} />
+          ))}
+        </>
+      ) : null}
+
+      {inbox.length ? (
+        <>
+          <RailHeading>Inbox</RailHeading>
+          {inbox.map((w) => (
+            <RailLink key={w.href} item={w} active={isActive(w.href)} />
+          ))}
+        </>
+      ) : null}
 
       {isAdmin ? (
         <>
-          <div className="mt-5 mb-1 px-3 font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
-            Admin
-          </div>
+          <RailHeading>Admin</RailHeading>
           <RailLink item={STAFF_ITEM} active={isActive(STAFF_ITEM.href)} />
         </>
       ) : null}
@@ -80,11 +115,19 @@ function RailLink({
   );
 }
 
-export function SidebarStrip({ isAdmin }: { isAdmin: boolean }) {
+export function SidebarStrip({
+  isAdmin,
+  permissions,
+}: {
+  isAdmin: boolean;
+  permissions: PermissionKey[];
+}) {
   const isActive = useIsActive();
+  const { tools, inbox } = allowed(permissions);
   const items = [
     DASHBOARD_ITEM,
-    ...PORTAL_WIDGETS,
+    ...tools,
+    ...inbox,
     ...(isAdmin ? [STAFF_ITEM] : []),
   ];
 

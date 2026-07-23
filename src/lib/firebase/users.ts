@@ -2,6 +2,7 @@ import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
 import type { StaffUser } from "@/lib/firebase/session";
+import { parsePermissions } from "@/lib/permissions";
 
 /** The staff roster, read straight from Firestore. Shared by the admin page
  *  (which calls it server-side) and GET /api/portal/users (which the client
@@ -18,6 +19,8 @@ export async function listStaff(): Promise<StaffUser[]> {
       role: d.role === "admin" ? "admin" : "staff",
       disabled: Boolean(d.disabled),
       createdAt: d.createdAt?.toDate?.()?.toISOString() ?? null,
+      // null = pre-permissions doc; resolves to full access everywhere.
+      permissions: parsePermissions(d.permissions),
     };
   });
 }

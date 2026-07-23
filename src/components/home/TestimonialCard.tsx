@@ -36,9 +36,19 @@ export default function TestimonialCard({ t }: { t: CmsTestimonial }) {
           &ldquo;{t.quote}&rdquo;
         </blockquote>
         <figcaption className="flex items-center gap-3.5">
-          <span className="flex h-12 w-12 flex-none items-center justify-center rounded-full border border-edge-bright bg-panel-2 font-mono text-sm tracking-[0.08em] text-muted sm:h-16 sm:w-16">
-            {t.initials}
-          </span>
+          {t.img ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={t.img}
+              alt=""
+              loading="lazy"
+              className="h-12 w-12 flex-none rounded-full border border-edge-bright object-cover sm:h-16 sm:w-16"
+            />
+          ) : (
+            <span className="flex h-12 w-12 flex-none items-center justify-center rounded-full border border-edge-bright bg-panel-2 font-mono text-sm tracking-[0.08em] text-muted sm:h-16 sm:w-16">
+              {t.initials}
+            </span>
+          )}
           <span className="flex min-w-0 flex-col gap-[3px]">
             <b className="font-display text-[15px] font-semibold text-fog">
               {t.name}

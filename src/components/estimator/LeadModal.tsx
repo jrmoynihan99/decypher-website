@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CONSENT_TEXT, type Lead } from "@/lib/lead";
 import {
   Eyebrow,
@@ -70,6 +71,10 @@ export default function LeadModal({
     };
   }, [open, onClose]);
 
+  // Portaled to <body>: the estimator sits inside a <Reveal> whose
+  // will-change/transform makes it the containing block for fixed-position
+  // descendants — rendered in place, this overlay pins to the estimator card
+  // (and scrolls inside it) instead of the viewport.
   if (!open) return null;
 
   const clearErr = (field: string) =>
@@ -103,12 +108,12 @@ export default function LeadModal({
     });
   };
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="lead-title"
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(6,4,10,0.72)] px-4 pb-6 pt-10 backdrop-blur-sm sm:pt-24"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(6,4,10,0.72)] px-4 py-6 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -119,7 +124,10 @@ export default function LeadModal({
         }
       }}
     >
-      <div className="mx-auto w-full max-w-[460px] rounded-[20px] border border-white/15 bg-panel p-7 shadow-[0_0_60px_-10px_rgba(255,45,120,0.4)]">
+      {/* m-auto: vertically centers while the card fits; when the revealed
+          creator fields make it taller than the viewport, auto margins
+          collapse to 0 so it top-aligns and the overlay scrolls cleanly. */}
+      <div className="m-auto w-full max-w-[460px] rounded-[20px] border border-white/15 bg-panel p-6 shadow-[0_0_60px_-10px_rgba(255,45,120,0.4)]">
         <button
           onClick={onClose}
           aria-label="Close"
@@ -134,7 +142,7 @@ export default function LeadModal({
         >
           We will email you your recommendations
         </h2>
-        <p className="mb-[22px] mt-0 text-sm text-mist">
+        <p className="mb-4 mt-0 text-sm text-mist">
           Enter your details and we&rsquo;ll reveal what&rsquo;s driving your
           number, the strategies that could reduce it, and email you a copy.
         </p>
@@ -227,50 +235,54 @@ export default function LeadModal({
 
         {creatorFieldsVisible && (
           <>
-            <div className="mb-4">
-              <label className={fieldLabelCls} htmlFor="l-platform">
-                Primary channel
-              </label>
-              <Select
-                id="l-platform"
-                value={platform}
-                invalid={!!errors.platform}
-                onChange={(e) => {
-                  setPlatform(e.target.value);
-                  clearErr("platform");
-                }}
-              >
-                <option value="" disabled>
-                  Select one
-                </option>
-                <option>YouTube</option>
-                <option>TikTok</option>
-                <option>Instagram</option>
-                <option>Twitch</option>
-                <option>Service-based</option>
-              </Select>
-              <FieldError show={!!errors.platform}>
-                Please choose your primary channel.
-              </FieldError>
-            </div>
-            <div className="mb-4">
-              <label className={fieldLabelCls} htmlFor="l-username">
-                Username / handle
-              </label>
-              <TextInput
-                id="l-username"
-                type="text"
-                placeholder="@yourhandle"
-                value={username}
-                invalid={!!errors.username}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  clearErr("username");
-                }}
-              />
-              <FieldError show={!!errors.username}>
-                Please enter your username.
-              </FieldError>
+            {/* paired columns keep the revealed state short enough to fit
+                on-screen — the modal must never grow into a scroll */}
+            <div className="mb-4 grid grid-cols-2 gap-2.5">
+              <div>
+                <label className={fieldLabelCls} htmlFor="l-platform">
+                  Primary channel
+                </label>
+                <Select
+                  id="l-platform"
+                  value={platform}
+                  invalid={!!errors.platform}
+                  onChange={(e) => {
+                    setPlatform(e.target.value);
+                    clearErr("platform");
+                  }}
+                >
+                  <option value="" disabled>
+                    Select one
+                  </option>
+                  <option>YouTube</option>
+                  <option>TikTok</option>
+                  <option>Instagram</option>
+                  <option>Twitch</option>
+                  <option>Service-based</option>
+                </Select>
+                <FieldError show={!!errors.platform}>
+                  Please choose your primary channel.
+                </FieldError>
+              </div>
+              <div>
+                <label className={fieldLabelCls} htmlFor="l-username">
+                  Username / handle
+                </label>
+                <TextInput
+                  id="l-username"
+                  type="text"
+                  placeholder="@yourhandle"
+                  value={username}
+                  invalid={!!errors.username}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    clearErr("username");
+                  }}
+                />
+                <FieldError show={!!errors.username}>
+                  Please enter your username.
+                </FieldError>
+              </div>
             </div>
             <div className="mb-4">
               <label className={fieldLabelCls} htmlFor="l-band">
@@ -328,6 +340,7 @@ export default function LeadModal({
           Show me my breakdown →
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -1,160 +1,122 @@
 import { chromium } from "playwright";
 
-const OUT =
-  "C:/Users/moyni/AppData/Local/Temp/claude/c--Users-moyni-Documents-Github-decypher-website/faa08589-d4b3-4f60-b503-dc64e8d83ad0/scratchpad";
-const URL = "http://localhost:3100/schedule";
-
-// the hero 2x2 is the only grid whose cells carry a right-rule via the
-// nth-child arbitrary variant — tag it off the section instead of a class probe
-const HERO_GRID = "section:first-of-type div[class*='nth-child']";
-
+const BASE = "http://localhost:3100";
+const OUT = process.env.SHOT_DIR;
 const browser = await chromium.launch();
+const errors = [];
+const track = (page, label) => {
+  page.on("pageerror", (e) => errors.push(`[${label}] ${e.message}`));
+};
 
-// fail loudly if any stylesheet 404s — a stale server serves an unstyled page
-// and every layout assertion below silently becomes meaningless
-function watchAssets(page, label) {
-  const bad = [];
-  page.on("response", (r) => {
-    if (r.status() >= 400 && /\.(css|js)$/.test(new URL(r.url()).pathname))
-      bad.push(`${r.status()} ${new URL(r.url()).pathname}`);
-  });
-  return () => {
-    if (bad.length) console.log(`!! ${label} FAILED ASSETS:`, bad);
-    else console.log(`   ${label}: all css/js 200`);
-  };
-}
+// ── desktop ─────────────────────────────────────────────────────────
+const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
+track(page, "desktop");
+await page.goto(`${BASE}/careers/senior-tax-accountant`, { waitUntil: "networkidle" });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: `${OUT}/20-header.png` });
 
-for (const width of [1024, 1280, 1600]) {
-  const page = await browser.newPage({ viewport: { width, height: 950 } });
-  const report = watchAssets(page, `@${width}`);
-  await page.goto(URL, { waitUntil: "networkidle" });
-  await page.waitForTimeout(3000);
-  report();
+// role file: sidebar + tabs + VSL
+await page.locator("#role-file").scrollIntoViewIfNeeded();
+await page.waitForTimeout(1800);
+await page.screenshot({ path: `${OUT}/21-role-file.png` });
 
-  await page.screenshot({ path: `${OUT}/hero-${width}.png` });
+// sticky check: scroll deep, sidebar card should pin at ~96px
+await page.evaluate(() => window.scrollBy(0, 900));
+await page.waitForTimeout(900);
+const stickyTop = await page.evaluate(() => {
+  const el = document.querySelector("#role-file .lg\\:sticky");
+  return el ? Math.round(el.getBoundingClientRect().top) : null;
+});
+console.log("sticky sidebar top after deep scroll (expect ~96):", stickyTop);
+await page.screenshot({ path: `${OUT}/22-sticky-mid-scroll.png` });
 
-  const cells = await page.evaluate((sel) => {
-    const grid = document.querySelector(sel);
-    if (!grid) return "NO HERO GRID";
-    const gr = grid.getBoundingClientRect();
-    return {
-      gridW: Math.round(gr.width),
-      visible: gr.height > 0,
-      cells: [...grid.children].map((c) => {
-        const num = c.querySelector("number-flow-react");
-        const label = c.querySelector("span.font-mono");
-        return {
-          numText: num?.textContent.trim(),
-          numW: num ? Math.round(num.getBoundingClientRect().width) : null,
-          cellInnerW: Math.round(c.clientWidth),
-          labelLines: label
-            ? Math.round(
-                label.getBoundingClientRect().height /
-                  parseFloat(getComputedStyle(label).lineHeight),
-              )
-            : null,
-          overflows: c.scrollWidth > c.clientWidth + 1,
-        };
-      }),
-    };
-  }, HERO_GRID);
-  console.log(`=== ${width} hero 2x2 ===`);
-  console.log(JSON.stringify(cells, null, 1));
+// switch to APPLICATION tab via the tab rail
+await page.locator('[role="tab"]', { hasText: "APPLICATION" }).click();
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${OUT}/23-application-tab.png` });
 
-  const standalone = await page.evaluate(() => {
-    const s = document.querySelector("#proof");
-    if (!s) return "not in DOM";
-    return {
-      wrapDisplay: getComputedStyle(s.parentElement).display,
-      renderedHeight: Math.round(s.getBoundingClientRect().height),
-    };
-  });
-  console.log(`standalone #proof @${width} (want display:none, h=0):`, JSON.stringify(standalone));
+// empty submit → inline errors, no network round trip
+await page.locator("button", { hasText: "Submit application" }).click();
+await page.waitForTimeout(400);
+const errCount = await page.locator("text=Please enter").count();
+console.log("validation errors on empty submit (expect 3):", errCount);
+await page.screenshot({ path: `${OUT}/24-application-errors.png` });
 
-  const closing = await page.evaluate(() => {
-    const secs = [...document.querySelectorAll("main section")].filter(
-      (s) => s.getBoundingClientRect().height > 0,
-    );
-    const last = secs[secs.length - 1];
-    return last?.querySelector("h2,h1")?.textContent?.trim() ?? "(no heading)";
-  });
-  console.log(`closing section @${width}:`, JSON.stringify(closing), "\n");
+// back to overview, then hero apply should flip the tab AND scroll down
+await page.locator('[role="tab"]', { hasText: "OVERVIEW" }).click();
+await page.waitForTimeout(400);
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.waitForTimeout(600);
+await page.locator("header button", { hasText: "Apply for this role" }).click();
+await page.waitForTimeout(1600);
+const state = await page.evaluate(() => ({
+  scrollY: Math.round(window.scrollY),
+  formVisible: !!document.querySelector("#ap-name"),
+}));
+console.log("hero apply → scrolled:", state.scrollY > 200, "| form shown:", state.formVisible);
+await page.screenshot({ path: `${OUT}/25-hero-apply-jump.png` });
 
-  await page.close();
-}
+// VSL click-to-play mounts the iframe
+await page.goto(`${BASE}/careers/senior-tax-accountant`, { waitUntil: "networkidle" });
+await page.waitForTimeout(2500);
+await page.locator('button[aria-label^="Play:"]').scrollIntoViewIfNeeded();
+await page.waitForTimeout(1200);
+await page.locator('button[aria-label^="Play:"]').click();
+await page.waitForTimeout(1200);
+console.log("vsl iframe mounted:", (await page.locator("#role-file iframe").count()) === 1);
+await page.close();
 
-// ── mobile ──────────────────────────────────────────────────────
-const m = await browser.newPage({
+// ── no-VSL role: player absent ──────────────────────────────────────
+const p2 = await browser.newPage({ viewport: { width: 1440, height: 950 } });
+track(p2, "no-vsl");
+await p2.goto(`${BASE}/careers/staff-bookkeeper`, { waitUntil: "networkidle" });
+await p2.waitForTimeout(2200);
+console.log(
+  "no-VSL role hides player:",
+  (await p2.locator('button[aria-label^="Play:"]').count()) === 0,
+);
+await p2.close();
+
+// ── mobile ──────────────────────────────────────────────────────────
+const mob = await browser.newPage({
   viewport: { width: 390, height: 844 },
   isMobile: true,
   hasTouch: true,
 });
-const mReport = watchAssets(m, "@390");
-await m.goto(URL, { waitUntil: "networkidle" });
-await m.waitForTimeout(3000);
-mReport();
-await m.screenshot({ path: `${OUT}/hero-390-top.png` });
-
-console.log("=== 390 ===");
+track(mob, "mobile");
+await mob.goto(`${BASE}/careers/senior-tax-accountant`, { waitUntil: "networkidle" });
+await mob.waitForTimeout(2800);
 console.log(
-  "hero 2x2 rendered (want false):",
-  await m.evaluate((sel) => {
-    const g = document.querySelector(sel);
-    return g ? getComputedStyle(g).display !== "none" : "not in DOM";
-  }, HERO_GRID),
-);
-console.log(
-  "no horizontal overflow (want true):",
-  await m.evaluate(
-    () =>
-      document.documentElement.scrollWidth <=
-      document.documentElement.clientWidth,
+  "mobile no horizontal overflow:",
+  await mob.evaluate(
+    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
   ),
 );
-
-await m.locator("#proof").scrollIntoViewIfNeeded();
-await m.waitForTimeout(2200);
-await m.screenshot({ path: `${OUT}/hero-390-stats.png` });
-console.log(
-  "standalone #proof @390:",
-  JSON.stringify(
-    await m.evaluate(() => {
-      const s = document.querySelector("#proof");
-      return {
-        h: Math.round(s.getBoundingClientRect().height),
-        nums: [...s.querySelectorAll("number-flow-react")].map((n) =>
-          n.textContent.trim(),
-        ),
-      };
-    }),
-  ),
-);
-
-await m.close();
-
-// ── home stats: the `block` numeral fix lands on the card variant too ──
-const h = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-const hReport = watchAssets(h, "home@1440");
-await h.goto("http://localhost:3100/", { waitUntil: "networkidle" });
-await h.waitForTimeout(2500);
-hReport();
-await h.locator("#proof").scrollIntoViewIfNeeded();
-await h.waitForTimeout(2200);
-await h.screenshot({ path: `${OUT}/home-stats-1440.png` });
-console.log(
-  "\nhome #proof cards:",
-  JSON.stringify(
-    await h.evaluate(() => {
-      const g = document.querySelector("#proof div[class*='auto-fit']");
-      return [...(g?.children ?? [])].map((c) => ({
-        h: Math.round(c.getBoundingClientRect().height),
-        labelInlineWithNum:
-          c.querySelector("span.font-mono")?.getBoundingClientRect().top <
-          c.querySelector("number-flow-react")?.getBoundingClientRect().bottom,
-      }));
-    }),
-  ),
-);
-await h.close();
+await mob.locator("#role-file").scrollIntoViewIfNeeded();
+await mob.waitForTimeout(1600);
+await mob.screenshot({ path: `${OUT}/26-mobile-role-file.png` });
+// panel should come before the sidebar on mobile
+const order = await mob.evaluate(() => {
+  const grid = document.querySelector("#role-file .grid");
+  const kids = grid ? [...grid.children] : [];
+  const idx = (sel) => kids.findIndex((k) => k.querySelector(sel));
+  return {
+    tabsFirst:
+      kids[0]?.getBoundingClientRect().top <= kids[1]?.getBoundingClientRect().top &&
+      idx('[role="tablist"]') >= 0,
+    tablistY: Math.round(
+      document.querySelector('[role="tablist"]')?.getBoundingClientRect().top ?? -1,
+    ),
+    sidebarY: Math.round(
+      document.querySelector("dl")?.getBoundingClientRect().top ?? -1,
+    ),
+  };
+});
+console.log("mobile order (tabs above sidebar):", order.tablistY < order.sidebarY);
+await mob.locator('[role="tab"]', { hasText: "APPLICATION" }).tap();
+await mob.waitForTimeout(800);
+await mob.screenshot({ path: `${OUT}/27-mobile-application.png` });
+await mob.close();
 
 await browser.close();
+console.log(errors.length ? `ERRORS:\n${errors.join("\n")}` : "no page errors");

@@ -1,10 +1,16 @@
+import type { PermissionKey } from "@/lib/permissions";
+
 /**
  * Single source of truth for the portal's tools. The sidebar, the dashboard
  * tiles and each tool's own page header all read from here, so adding a tool is
  * one entry rather than four edits that drift apart.
  *
+ * `permission` ties the entry to the per-user tab grants in lib/permissions —
+ * the sidebar and dashboard filter on it, and each page enforces it with
+ * requirePermission(). Every widget must carry one; an ungated tab is a bug.
+ *
  * `icon` is an SVG path `d` drawn on a 24×24 stroke grid — cheaper than pulling
- * in an icon dependency for five glyphs.
+ * in an icon dependency for a handful of glyphs.
  */
 
 export type PortalWidget = {
@@ -13,6 +19,9 @@ export type PortalWidget = {
   blurb: string;
   note: string;
   icon: string;
+  permission: PermissionKey;
+  /** Actually built, vs a placeholder page. Drives the dashboard badge. */
+  live?: boolean;
 };
 
 export const PORTAL_WIDGETS: PortalWidget[] = [
@@ -22,6 +31,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     blurb: "Model strategies against a client's numbers and save the scenarios.",
     note: "Builds on the public estimator in lib/tax.ts",
     icon: "M3 3v18h18M7 15l3.5-4 3 2.5L21 7",
+    permission: "tax-strategy",
   },
   {
     href: "/portal/receipts",
@@ -29,6 +39,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     blurb: "Drop a PDF, pull out the line items, categorise them for filing.",
     note: "Needs file storage + a parsing pass",
     icon: "M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21zM9 8h6M9 12h6",
+    permission: "receipts",
   },
   {
     href: "/portal/sales-flow",
@@ -36,6 +47,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     blurb: "Visualise the pipeline from first touch to booked call.",
     note: "Calendly integration",
     icon: "M5 6h6M5 12h14M5 18h9M17 3l3 3-3 3M17 15l3 3-3 3",
+    permission: "sales-flow",
   },
   {
     href: "/portal/creator-finances",
@@ -43,6 +55,32 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     blurb: "Per-creator revenue, expenses and payout history in one place.",
     note: "QuickBooks integration",
     icon: "M12 2v20M17 6H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
+    permission: "creator-finances",
+  },
+];
+
+/**
+ * The "Inbox" group: things people send us, mirrored from Firestore. These are
+ * live pages, not placeholders — the same records whose arrival pings Slack.
+ */
+export const PORTAL_INBOX: PortalWidget[] = [
+  {
+    href: "/portal/leads",
+    name: "Leads",
+    blurb: "Every estimator lead — the same numbers and flags that post to #leads.",
+    note: "Mirrors the #leads Slack channel",
+    icon: "M21 4H3l7 8.5V19l4 2v-8.5L21 4z",
+    permission: "leads",
+    live: true,
+  },
+  {
+    href: "/portal/applications",
+    name: "Applications",
+    blurb: "Job applications from the careers page, as they arrive.",
+    note: "Mirrors the #recruiting Slack channel",
+    icon: "M3 8h18v12H3zM9 8V6a2 2 0 012-2h2a2 2 0 012 2v2M3 13h18",
+    permission: "applications",
+    live: true,
   },
 ];
 

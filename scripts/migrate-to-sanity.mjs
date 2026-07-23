@@ -531,6 +531,11 @@ function settingsDoc(logoAssetId) {
       { _type: "statItem", value: "600+", label: "Tax strategies set" },
     ]),
     statsDisclaimer: "// placeholder figures — swap in your real numbers",
+    leadEmail: {
+      fromName: "DeCypher Financials",
+      fromAddress: "otavio@wedecypher.co",
+      replyTo: "otavio@wedecypher.co",
+    },
   };
 }
 

@@ -71,9 +71,14 @@ interface RawImageDoc {
 }
 
 export async function getCreators(): Promise<Creator[]> {
+  // category/group are references to taxonomy docs; coalesce keeps legacy
+  // string values working until migrate-creator-taxonomies.mjs has run
   const rows = await client.fetch(
     `*[_type == "creator"] | order(order asc){
-      name, category, group, description, links[]{ "plat": platform, url }, image
+      name,
+      "category": coalesce(category->title, category),
+      "group": coalesce(group->title, group),
+      description, links[]{ "plat": platform, url }, image
     }`,
   );
   return rows.map(
@@ -128,12 +133,30 @@ export async function getServices(): Promise<CmsService[]> {
 }
 
 export async function getJobs(): Promise<CmsJob[]> {
-  const rows: (CmsJob & { tags?: string[] })[] = await client.fetch(
+  const rows: (CmsJob & { slug?: string; tags?: string[] })[] = await client.fetch(
     `*[_type == "jobOpening"] | order(order asc){
-      title, department, location, type, comp, blurb, tags, applyHref
+      title, "slug": slug.current, department, location, type, comp, blurb, tags, applyHref
     }`,
   );
-  return rows.map((j) => ({ ...j, tags: j.tags ?? [] }));
+  return rows.map((j) => ({ ...j, slug: j.slug ?? "", tags: j.tags ?? [] }));
+}
+
+/** Full job document — the detail page's fetch, including the rich description. */
+export async function getJobBySlug(slug: string): Promise<CmsJob | null> {
+  const row: (CmsJob & { tags?: string[] }) | null = await client.fetch(
+    `*[_type == "jobOpening" && slug.current == $slug][0]{
+      title, "slug": slug.current, department, location, type, comp,
+      blurb, tags, videoUrl, description, applyHref
+    }`,
+    { slug },
+  );
+  return row ? { ...row, tags: row.tags ?? [] } : null;
+}
+
+export async function getAllJobSlugs(): Promise<string[]> {
+  return client.fetch(
+    `*[_type == "jobOpening" && defined(slug.current)].slug.current`,
+  );
 }
 
 export async function getVideoTestimonials(): Promise<CmsVideoTestimonial[]> {
@@ -171,13 +194,14 @@ export async function getTestimonials(): Promise<{
     quote: string;
     name: string;
     handle?: string;
+    image?: object;
     followers?: string;
     category?: string;
     accent?: TestimonialAccent;
     row: "a" | "b";
   }[] = await client.fetch(
     `*[_type == "testimonial"] | order(order asc){
-      quote, name, handle, followers, category, accent, row
+      quote, name, handle, image, followers, category, accent, row
     }`,
   );
   const toCard = (t: (typeof rows)[number]): CmsTestimonial => ({
@@ -187,6 +211,8 @@ export async function getTestimonials(): Promise<{
     followers: t.followers ?? "",
     cat: t.category ?? "",
     initials: initialsOf(t.name),
+    // the avatar circle renders at 64px; 160 covers 2x screens with crop room
+    img: t.image ? urlFor(t.image).width(160).height(160).url() : undefined,
     ...TESTIMONIAL_ACCENTS[t.accent ?? "magenta"],
   });
   return {

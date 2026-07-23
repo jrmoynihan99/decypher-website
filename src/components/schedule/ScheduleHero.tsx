@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import StatsGrid from "@/components/home/StatsGrid";
 import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
@@ -41,8 +41,17 @@ export default function ScheduleHero({
   stats: StatContent[];
 }) {
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [preview, setPreview] = useState(false);
 
-  if (booking) {
+  // /schedule?confirmed shows the thank-you takeover without booking a real
+  // call — for Studio editors checking copy and for Playwright screenshots.
+  // An effect (not a state initializer) so server and first client render agree.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("confirmed"))
+      setPreview(true);
+  }, []);
+
+  if (booking || preview) {
     return (
       <BookingConfirmed
         content={confirmation}

@@ -90,8 +90,39 @@ Admins can't demote, suspend or delete themselves — that could leave the porta
 with no admin and no way in but the CLI. The UI hides those controls and the API
 rejects them.
 
+## Tab permissions
+
+Each sidebar tab is a permission key (`src/lib/permissions.ts` — the single
+isomorphic source of truth). Grants are picked per staff member at invite time
+and edited later from the same Staff page (**Access** on the row). Semantics:
+
+- **Admins hold every key**, always — the checkboxes don't apply to them.
+- A `users/{uid}` doc **without** a `permissions` field predates the feature and
+  is grandfathered to full access, so shipping the feature locked nobody out.
+  New accounts always store the array explicitly.
+- An explicit array means exactly that set; `[]` is a valid "no tabs" state.
+
+`getSession()` resolves the grants once (admin/legacy → all keys), so consumers
+just call `session.permissions.includes(key)`. The sidebar and dashboard filter
+on it as tidiness; the real gates are `requirePermission(key)` on every tool
+page and the same check inside `/api/portal/leads` + `/api/portal/applications`.
+Grant changes take effect on the user's next request — no re-invite, no new
+cookie — because permissions live in Firestore, not in the session cookie, same
+as `role`.
+
+## Inbox tabs
+
+**Leads** (`/portal/leads`) reads `leadMagnetLeads` via `listLeads()` in
+`src/lib/lead-store.ts`; **Applications** (`/portal/applications`) reads
+`jobApplications` via `listApplications()` in `src/lib/application-store.ts`.
+Both show the same fields and qualification flags their Slack messages carry
+(#leads / #recruiting) — the portal is the copy that can't scroll away. Reads
+are capped at the newest 200 and go through the Admin SDK server-side; nothing
+opens the collections to the browser.
+
 ## Data model
 
 `users/{uid}` — `email`, `displayName`, `role: "admin" | "staff"`, `disabled`,
+`permissions: PermissionKey[]` (absent on pre-permissions docs = full access),
 `createdAt`, `createdBy`. Authoritative for access; the Firebase Auth record is
 only the password store.

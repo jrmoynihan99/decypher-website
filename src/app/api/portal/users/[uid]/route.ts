@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
 import { getSession } from "@/lib/firebase/session";
+import { parsePermissions, type PermissionKey } from "@/lib/permissions";
 
 /**
  * Mutations on a single staff member: change role, suspend/restore, delete, and
@@ -42,11 +43,19 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     );
   }
 
-  const patch: { role?: "admin" | "staff"; disabled?: boolean } = {};
+  const patch: {
+    role?: "admin" | "staff";
+    disabled?: boolean;
+    permissions?: PermissionKey[];
+  } = {};
   try {
     const body = await request.json();
     if (body?.role === "admin" || body?.role === "staff") patch.role = body.role;
     if (typeof body?.disabled === "boolean") patch.disabled = body.disabled;
+    // parsePermissions returns null when the field wasn't sent (leave alone)
+    // and an array — possibly empty, that's "no tabs" — when it was.
+    const perms = parsePermissions(body?.permissions);
+    if (perms !== null) patch.permissions = perms;
   } catch {
     // falls through to the empty-patch check
   }

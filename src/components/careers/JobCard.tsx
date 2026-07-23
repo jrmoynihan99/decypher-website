@@ -1,14 +1,24 @@
 "use client";
 
+import Link from "next/link";
+import { useState } from "react";
 import { useSpotlight } from "@/hooks/useSpotlight";
 import type { CmsJob } from "@/sanity/types";
+import ApplicationModal from "./ApplicationModal";
 
 /**
- * One role on the Careers page — a dossier row. The whole card links to the
- * opening's apply target (mailto or job post). Department chips cycle the
- * brand accent trio by position, same palette as the testimonial badges.
- * Hover carries a cursor-tracking spotlight and lift, matching the team and
- * creator cards.
+ * One role on the Careers page — a dossier row. The card is a link to the
+ * role's detail page (/careers/<slug>), where the full posting and the apply
+ * modal live. Department chips cycle the brand accent trio by position, same
+ * palette as the testimonial badges. Hover carries a cursor-tracking spotlight
+ * and lift, matching the team and creator cards.
+ *
+ * Docs that predate the slug field fall back to the old behavior: the card is
+ * a div and clicking it opens the application modal directly.
+ *
+ * `job.applyHref` is no longer used here — the form replaced the mailto. It's
+ * left on the schema for now; repurpose it as an external-listing override or
+ * drop it in a later pass.
  */
 
 const ACCENTS = [
@@ -17,19 +27,18 @@ const ACCENTS = [
   { color: "#FF7A4D", border: "rgba(255,92,46,.45)", bg: "rgba(255,92,46,.10)" },
 ];
 
+const cardCls =
+  "group relative block cursor-pointer overflow-hidden rounded-[20px] border border-edge bg-panel p-6 no-underline transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-magenta/45 hover:shadow-[0_26px_60px_-26px_rgba(255,45,120,0.5)] sm:p-7";
+
 export default function JobCard({ job, index }: { job: CmsJob; index: number }) {
   const accent = ACCENTS[index % ACCENTS.length];
   const meta = [job.location, job.type].filter(Boolean).join(" · ");
-  const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLAnchorElement>();
+  const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLElement>();
+  const [open, setOpen] = useState(false);
+  const href = job.slug ? `/careers/${job.slug}` : undefined;
 
-  return (
-    <a
-      ref={ref}
-      onMouseMove={onMouseMove}
-      onMouseLeave={onMouseLeave}
-      href={job.applyHref}
-      className="group relative block overflow-hidden rounded-[20px] border border-edge bg-panel p-6 no-underline transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-magenta/45 hover:shadow-[0_26px_60px_-26px_rgba(255,45,120,0.5)] sm:p-7"
-    >
+  const inner = (
+    <>
       {/* accent hairline, revealed on hover */}
       <div
         aria-hidden
@@ -92,7 +101,7 @@ export default function JobCard({ job, index }: { job: CmsJob; index: number }) 
             </span>
           ))}
           <span className="ml-auto inline-flex items-center gap-2 font-mono text-[11.5px] tracking-[0.16em] text-mist transition-colors group-hover:text-magenta">
-            APPLY
+            {href ? "VIEW ROLE" : "APPLY"}
             <span
               aria-hidden
               className="transition-transform duration-300 group-hover:translate-x-1"
@@ -102,6 +111,42 @@ export default function JobCard({ job, index }: { job: CmsJob; index: number }) 
           </span>
         </div>
       </div>
-    </a>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        ref={ref as React.Ref<HTMLAnchorElement>}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
+        className={cardCls}
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <div
+      ref={ref as React.Ref<HTMLDivElement>}
+      role="button"
+      tabIndex={0}
+      aria-label={`Apply for ${job.title}`}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      onClick={() => setOpen(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setOpen(true);
+        }
+      }}
+      className={cardCls}
+    >
+      {inner}
+      <ApplicationModal job={job} open={open} onClose={() => setOpen(false)} />
+    </div>
   );
 }
