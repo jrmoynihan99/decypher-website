@@ -15,10 +15,6 @@ import ApplicationModal from "./ApplicationModal";
  *
  * Docs that predate the slug field fall back to the old behavior: the card is
  * a div and clicking it opens the application modal directly.
- *
- * `job.applyHref` is no longer used here — the form replaced the mailto. It's
- * left on the schema for now; repurpose it as an external-listing override or
- * drop it in a later pass.
  */
 
 const ACCENTS = [

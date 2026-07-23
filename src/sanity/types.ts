@@ -223,7 +223,6 @@ export interface CmsJob {
   videoUrl?: string;
   /** Rich-text posting on the detail page; empty falls back to the blurb. */
   description?: PortableTextBlock[];
-  applyHref: string;
 }
 
 /** One line on the affiliate value-stack receipt. */
