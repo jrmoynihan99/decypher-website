@@ -36,8 +36,9 @@ export default function ScheduleTemplate({
         />
 
         {/* hero: pitch + form until the request sends, then the thank-you
-            takeover (header + video wall) — the swap lives in ScheduleHero
-            (client). At lg+ the proof stats sit under the pitch. */}
+            takeover (header + pre-call hero video + creator wall) — the swap
+            lives in ScheduleHero (client). At lg+ the proof stats sit under
+            the pitch. */}
         <ScheduleHero
           hero={page.hero ?? {}}
           confirmation={page.confirmation}

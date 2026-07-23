@@ -1,6 +1,7 @@
 /** Shapes returned by the fetch layer in src/sanity/queries.ts. */
 
 import type { SanityImageSource } from "@sanity/image-url";
+import type { PortableTextBlock } from "next-sanity";
 
 export interface SeoContent {
   title?: string;
@@ -72,6 +73,8 @@ export interface CmsTestimonial {
   followers: string;
   cat: string;
   initials: string;
+  /** CDN avatar URL; absent falls back to initials. */
+  img?: string;
   accent: string;
   accentBorder: string;
 }
@@ -103,6 +106,15 @@ export interface SiteSettings {
   statsDisclaimer?: string;
   /** Shared across Home and every affiliate page — edited in one place. */
   faqs?: FaqContent[];
+  /** Envelope for the estimator's lead email; env vars are the fallback. */
+  leadEmail?: LeadEmailSettings;
+}
+
+/** CMS-editable sender for the estimate email (see lib/lead-email.ts). */
+export interface LeadEmailSettings {
+  fromName?: string;
+  fromAddress?: string;
+  replyTo?: string;
 }
 
 interface PageBase {
@@ -171,6 +183,12 @@ export interface BookingConfirmationContent {
   eyebrow?: string;
   title?: string;
   body?: string;
+  /** The big "but first" pre-call video under the header. */
+  video?: {
+    eyebrow?: string;
+    title?: string;
+    videoUrl?: string;
+  };
 }
 
 /** One card on the thank-you video wall. */
@@ -193,12 +211,18 @@ export interface CareersPageDoc extends PageBase {
 /** One careers-page role card. */
 export interface CmsJob {
   title: string;
+  /** URL segment of the detail page (/careers/<slug>); "" on docs that predate it. */
+  slug: string;
   department: string;
   location?: string;
   type?: string;
   comp?: string;
   blurb: string;
   tags?: string[];
+  /** Optional VSL above the posting on the detail page (YouTube URL). */
+  videoUrl?: string;
+  /** Rich-text posting on the detail page; empty falls back to the blurb. */
+  description?: PortableTextBlock[];
   applyHref: string;
 }
 

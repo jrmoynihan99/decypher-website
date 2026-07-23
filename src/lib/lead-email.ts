@@ -1,5 +1,7 @@
 import "server-only";
 import { Resend } from "resend";
+import { client as sanity } from "@/sanity/client";
+import type { LeadEmailSettings } from "@/sanity/types";
 import type { Lead } from "./lead";
 import {
   Recommendations,
@@ -194,6 +196,46 @@ function renderText(lead: Lead, r: EstimateResult, recs: Recommendations): strin
   return lines.join("\n");
 }
 
+// A bare address, no display name. Same character set the lead route enforces;
+// anything looser from the CMS falls back to env rather than failing the send.
+const ADDRESS_RE = /^[^\s@<>|]+@[^\s@<>|]+\.[^\s@<>|]+$/;
+
+/**
+ * Who the estimate email comes from, and where replies land.
+ *
+ * Sanity (Site Settings → Email) wins so the client can change the sender
+ * without a deploy; RESEND_FROM / RESEND_REPLY_TO are the fallback and the
+ * safety net — a malformed CMS address or a Sanity outage degrades to env
+ * instead of dropping the email a visitor was just promised.
+ */
+async function resolveEnvelope(): Promise<{ from: string; replyTo?: string }> {
+  let cms: LeadEmailSettings | null = null;
+  try {
+    cms = await sanity.fetch(`*[_type == "siteSettings"][0].leadEmail`);
+  } catch (e) {
+    console.error("[lead-email] Sanity envelope fetch failed, using env:", e);
+  }
+
+  let from: string | undefined;
+  if (cms?.fromAddress && ADDRESS_RE.test(cms.fromAddress)) {
+    // Angle brackets in the name would terminate the address early — strip
+    // rather than reject, a name is decoration.
+    const name = cms.fromName?.replace(/[<>"]/g, "").trim();
+    from = name ? `${name} <${cms.fromAddress}>` : cms.fromAddress;
+  }
+  from ||= process.env.RESEND_FROM;
+  if (!from) throw new EmailError("No sender: Site Settings → Email is empty and RESEND_FROM is not set");
+
+  // Replies are a warm lead. Without this they land on the From address,
+  // which may be a send-only mailbox nobody reads.
+  const replyTo =
+    cms?.replyTo && ADDRESS_RE.test(cms.replyTo)
+      ? cms.replyTo
+      : process.env.RESEND_REPLY_TO || undefined;
+
+  return { from, replyTo };
+}
+
 /**
  * Send the lead their estimate. Throws EmailError; the caller decides what the
  * visitor sees.
@@ -206,8 +248,7 @@ export async function sendLeadEmail(
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new EmailError("RESEND_API_KEY is not set");
 
-  const from = process.env.RESEND_FROM;
-  if (!from) throw new EmailError("RESEND_FROM is not set");
+  const { from, replyTo } = await resolveEnvelope();
 
   const recs = buildRecommendations(inputs, r);
   const resend = new Resend(apiKey);
@@ -215,9 +256,7 @@ export async function sendLeadEmail(
   const { data, error } = await resend.emails.send({
     from,
     to: lead.email,
-    // Replies are a warm lead. Without this they land on whatever RESEND_FROM
-    // is, which may be a send-only address nobody reads.
-    replyTo: process.env.RESEND_REPLY_TO || undefined,
+    replyTo,
     subject: `${lead.name}, your estimated tax bill is ${fmt(r.total)}`,
     html: renderHtml(lead, r, recs),
     text: renderText(lead, r, recs),

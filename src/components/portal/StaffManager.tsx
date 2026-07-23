@@ -3,6 +3,11 @@
 import { useState } from "react";
 import type { StaffUser } from "@/lib/firebase/session";
 import {
+  PERMISSION_KEYS,
+  PERMISSION_LABELS,
+  type PermissionKey,
+} from "@/lib/permissions";
+import {
   FieldError,
   Select,
   TextInput,
@@ -16,6 +21,10 @@ import {
  * passwordless Firebase account plus a one-time set-password link, which is
  * handed back here for the admin to copy into Slack. Nobody types anybody
  * else's password, and there's no signup route for outsiders to find.
+ *
+ * Tab access is picked at invite time and editable per row afterwards. The
+ * checkboxes only matter for the staff role — admins hold every tab by
+ * definition, so their rows don't offer the editor.
  */
 export default function StaffManager({
   initialStaff,
@@ -29,10 +38,12 @@ export default function StaffManager({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "staff">("staff");
+  const [perms, setPerms] = useState<PermissionKey[]>([...PERMISSION_KEYS]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [busyUid, setBusyUid] = useState("");
+  const [accessUid, setAccessUid] = useState("");
   const [invite, setInvite] = useState<{ email: string; link: string } | null>(null);
 
   const clearErr = (field: string) =>
@@ -58,7 +69,12 @@ export default function StaffManager({
     const res = await fetch("/api/portal/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ displayName: name.trim(), email: email.trim(), role }),
+      body: JSON.stringify({
+        displayName: name.trim(),
+        email: email.trim(),
+        role,
+        permissions: perms,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setSubmitting(false);
@@ -72,6 +88,7 @@ export default function StaffManager({
     setName("");
     setEmail("");
     setRole("staff");
+    setPerms([...PERMISSION_KEYS]);
     setAdding(false);
     await refresh();
   };
@@ -117,6 +134,9 @@ export default function StaffManager({
         {staff.map((user, i) => {
           const isSelf = user.uid === currentUid;
           const busy = busyUid === user.uid;
+          // null = pre-permissions doc — resolves to everything, so show that.
+          const granted = user.permissions ?? [...PERMISSION_KEYS];
+          const accessOpen = accessUid === user.uid && user.role === "staff";
           return (
             <div
               key={user.uid}
@@ -159,6 +179,14 @@ export default function StaffManager({
                   there's no reason to offer a button that only ever errors. */}
               {isSelf ? null : (
                 <div className="flex items-center gap-2">
+                  {user.role === "staff" ? (
+                    <RowButton
+                      disabled={busy}
+                      onClick={() => setAccessUid(accessOpen ? "" : user.uid)}
+                    >
+                      Access · {granted.length}/{PERMISSION_KEYS.length}
+                    </RowButton>
+                  ) : null}
                   <RowButton disabled={busy} onClick={() => reinvite(user)}>
                     Re-invite
                   </RowButton>
@@ -173,6 +201,22 @@ export default function StaffManager({
                   </RowButton>
                 </div>
               )}
+
+              {accessOpen && !isSelf ? (
+                <div className="basis-full rounded-[14px] border border-white/[0.08] bg-white/[0.02] p-4">
+                  <div className="mb-3 font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
+                    Tabs {user.displayName.split(" ")[0] || user.email} can see
+                  </div>
+                  <PermissionPicker
+                    value={granted}
+                    disabled={busy}
+                    onChange={(next) => patch(user.uid, { permissions: next })}
+                  />
+                  <p className="mt-3 text-[11.5px] text-dusk">
+                    Applies from their next page load — no re-invite needed.
+                  </p>
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -230,6 +274,17 @@ export default function StaffManager({
             </Select>
           </div>
 
+          <div className="mt-4">
+            <div className={fieldLabelCls}>Tab access</div>
+            {role === "admin" ? (
+              <p className="text-[12.5px] text-dusk">
+                Admins see every tab — nothing to pick.
+              </p>
+            ) : (
+              <PermissionPicker value={perms} onChange={setPerms} />
+            )}
+          </div>
+
           {formError ? (
             <div className="mt-4 rounded-[11px] border border-danger/40 bg-danger/10 px-3 py-2.5 text-sm text-danger">
               {formError}
@@ -262,6 +317,49 @@ export default function StaffManager({
         </button>
       )}
     </>
+  );
+}
+
+/**
+ * The tab-grant checkboxes, shared by the invite form (local state) and the
+ * per-row editor (each toggle PATCHes the new full set). Toggling on rebuilds
+ * from PERMISSION_KEYS so the array stays in canonical order however it's
+ * clicked together.
+ */
+function PermissionPicker({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: PermissionKey[];
+  onChange: (next: PermissionKey[]) => void;
+  disabled?: boolean;
+}) {
+  const toggle = (key: PermissionKey) => {
+    const has = value.includes(key);
+    onChange(PERMISSION_KEYS.filter((k) => (k === key ? !has : value.includes(k))));
+  };
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {PERMISSION_KEYS.map((key) => (
+        <label
+          key={key}
+          className={`flex items-center gap-2.5 rounded-[11px] border border-white/10 px-3 py-2 font-body text-[13px] text-mist transition-colors duration-150 ${
+            disabled ? "opacity-60" : "cursor-pointer hover:border-white/20"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={value.includes(key)}
+            disabled={disabled}
+            onChange={() => toggle(key)}
+            className="h-4 w-4 flex-none accent-magenta"
+          />
+          {PERMISSION_LABELS[key]}
+        </label>
+      ))}
+    </div>
   );
 }
 

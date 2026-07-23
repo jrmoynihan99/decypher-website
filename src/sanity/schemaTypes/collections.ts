@@ -1,44 +1,31 @@
 import { defineField, defineType } from "sanity";
 
-/** Categories drive the accent color on badges — the palette lives in code (src/lib/creators.ts). */
-const CREATOR_CATEGORIES = [
-  "Lifestyle",
-  "Beauty",
-  "Gaming",
-  "UGC",
-  "Comedy",
-  "Coaching",
-  "Food",
-  "Finance",
-  "Fashion",
-  "Music",
-  "Sports",
-  "Mixology",
-  "Editor",
-  "TikTok Shop",
-  "Tech",
-  "Management Company",
-  "Podcast",
-  "Storytelling",
-  "Fitness",
-  "Travel",
-  "Trickshots",
-];
+/**
+ * Tiny taxonomy documents behind the Creator category/group pickers.
+ * Reference fields give editors the existing options AND a "Create new"
+ * button right in the field — the old hardcoded dropdowns couldn't grow.
+ * Deliberately absent from the Studio sidebar (see structure.ts); existing
+ * string values were converted by scripts/migrate-creator-taxonomies.mjs.
+ */
+export const creatorCategory = defineType({
+  name: "creatorCategory",
+  title: "Creator category",
+  type: "document",
+  fields: [
+    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+  ],
+  preview: { select: { title: "title" } },
+});
 
-/** Filter tabs on the Creators page group by this coarser bucket. */
-const CREATOR_GROUPS = [
-  "Lifestyle",
-  "Beauty",
-  "Coaching",
-  "Comedy",
-  "UGC",
-  "Food",
-  "Finance",
-  "Gaming",
-  "Fashion",
-  "Music",
-  "Other",
-];
+export const creatorGroup = defineType({
+  name: "creatorGroup",
+  title: "Creator group (filter tab)",
+  type: "document",
+  fields: [
+    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+  ],
+  preview: { select: { title: "title" } },
+});
 
 export const creator = defineType({
   name: "creator",
@@ -48,17 +35,19 @@ export const creator = defineType({
     defineField({ name: "name", type: "string", validation: (r) => r.required() }),
     defineField({
       name: "category",
-      type: "string",
-      options: { list: CREATOR_CATEGORIES },
+      type: "reference",
+      to: [{ type: "creatorCategory" }],
       validation: (r) => r.required(),
-      description: "Shown on the card badge; sets its accent color.",
+      description:
+        'Shown on the card badge; sets its accent color (known names use the brand palette, new ones fall back to neutral). Pick from the list or hit "Create new" right here.',
     }),
     defineField({
       name: "group",
-      type: "string",
-      options: { list: CREATOR_GROUPS },
+      type: "reference",
+      to: [{ type: "creatorGroup" }],
       validation: (r) => r.required(),
-      description: "Which filter tab the creator appears under on Our Creators.",
+      description:
+        'Which filter tab the creator appears under on Our Creators. Pick from the list or "Create new".',
     }),
     defineField({ name: "description", type: "text", rows: 2 }),
     defineField({
@@ -110,7 +99,7 @@ export const creator = defineType({
     },
   ],
   preview: {
-    select: { title: "name", subtitle: "category", media: "image" },
+    select: { title: "name", subtitle: "category.title", media: "image" },
   },
 });
 
@@ -125,6 +114,14 @@ export const testimonial = defineType({
       name: "handle",
       type: "string",
       description: "e.g. @mayamakesup",
+    }),
+    defineField({
+      name: "image",
+      title: "Photo",
+      type: "image",
+      options: { hotspot: true },
+      description:
+        "Avatar on the review card. Empty falls back to the person's initials.",
     }),
     defineField({
       name: "followers",
@@ -180,7 +177,7 @@ export const testimonial = defineType({
     },
   ],
   preview: {
-    select: { title: "name", subtitle: "quote" },
+    select: { title: "name", subtitle: "quote", media: "image" },
   },
 });
 
@@ -283,6 +280,14 @@ export const jobOpening = defineType({
   fields: [
     defineField({ name: "title", type: "string", validation: (r) => r.required() }),
     defineField({
+      name: "slug",
+      type: "slug",
+      options: { source: "title", maxLength: 96 },
+      validation: (r) => r.required(),
+      description:
+        "URL of the role's detail page: /careers/<slug>. Hit Generate after typing the title.",
+    }),
+    defineField({
       name: "department",
       type: "string",
       validation: (r) => r.required(),
@@ -314,6 +319,66 @@ export const jobOpening = defineType({
       rows: 4,
       validation: (r) => r.required(),
       description: "Two or three sentences on the card — the pitch for the role.",
+    }),
+    defineField({
+      name: "videoUrl",
+      title: "Video (VSL) URL",
+      type: "url",
+      description:
+        "Optional video at the top of the role's detail page — YouTube link in any form (watch, share, or embed). Empty hides the player.",
+    }),
+    defineField({
+      name: "description",
+      title: "Full description",
+      type: "array",
+      description:
+        "The complete posting on the role's detail page — responsibilities, requirements, benefits. Empty falls back to the card blurb.",
+      of: [
+        {
+          type: "block",
+          styles: [
+            { title: "Normal", value: "normal" },
+            { title: "H1", value: "h1" },
+            { title: "H2", value: "h2" },
+            { title: "H3", value: "h3" },
+            { title: "H4", value: "h4" },
+            { title: "H5 (mono label)", value: "h5" },
+            { title: "H6 (mono label)", value: "h6" },
+            { title: "Quote", value: "blockquote" },
+          ],
+          lists: [
+            { title: "Bullet", value: "bullet" },
+            { title: "Numbered", value: "number" },
+          ],
+          marks: {
+            decorators: [
+              { title: "Bold", value: "strong" },
+              { title: "Italic", value: "em" },
+              { title: "Underline", value: "underline" },
+              { title: "Code", value: "code" },
+            ],
+            annotations: [
+              {
+                name: "link",
+                type: "object",
+                title: "Link",
+                fields: [
+                  defineField({
+                    name: "href",
+                    title: "URL",
+                    type: "url",
+                    validation: (r) =>
+                      r.uri({
+                        allowRelative: true,
+                        scheme: ["http", "https", "mailto", "tel"],
+                      }),
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      ],
     }),
     defineField({
       name: "tags",

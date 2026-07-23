@@ -11,6 +11,7 @@ export const siteSettings = defineType({
     { name: "footer", title: "Footer" },
     { name: "stats", title: "Stats" },
     { name: "faq", title: "FAQ" },
+    { name: "email", title: "Email" },
   ],
   fields: [
     defineField({
@@ -92,6 +93,47 @@ export const siteSettings = defineType({
       type: "string",
       group: "stats",
       description: "Mono line under the stat cards. Leave empty to hide.",
+    }),
+    defineField({
+      name: "leadEmail",
+      title: "Estimate email sender",
+      type: "object",
+      group: "email",
+      description:
+        "Envelope for the estimator's emailed estimate. Addresses must be on the Resend-verified domain (wedecypher.co) or sends will fail. Empty falls back to the server's environment config.",
+      fields: [
+        defineField({
+          name: "fromName",
+          title: "From name",
+          type: "string",
+          description: "The display name in the recipient's inbox.",
+          initialValue: "DeCypher Financials",
+        }),
+        defineField({
+          name: "fromAddress",
+          title: "From address",
+          type: "string",
+          description:
+            "e.g. otavio@wedecypher.co — the mailbox does not have to exist to send, but replies bounce if it can't receive.",
+          validation: (r) =>
+            r.regex(/^[^\s@<>|]+@[^\s@<>|]+\.[^\s@<>|]+$/, {
+              name: "email address",
+              invert: false,
+            }),
+        }),
+        defineField({
+          name: "replyTo",
+          title: "Reply-to address",
+          type: "string",
+          description:
+            "Where replies actually land — a real, monitored inbox. Empty means replies go to the From address.",
+          validation: (r) =>
+            r.regex(/^[^\s@<>|]+@[^\s@<>|]+\.[^\s@<>|]+$/, {
+              name: "email address",
+              invert: false,
+            }),
+        }),
+      ],
     }),
     defineField({
       name: "faqs",

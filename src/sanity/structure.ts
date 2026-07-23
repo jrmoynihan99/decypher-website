@@ -28,6 +28,10 @@ const HANDLED = [
   ...PAGES.map((p) => p.type),
   "affiliatePage",
   "creator",
+  // taxonomy docs picked (and created inline) via reference fields on
+  // Creator — deliberately kept out of the sidebar
+  "creatorCategory",
+  "creatorGroup",
   "testimonial",
   "videoTestimonial",
   "teamMember",

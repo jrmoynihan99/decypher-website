@@ -1,6 +1,8 @@
 import type { SchemaTypeDefinition } from "sanity";
 import {
   creator,
+  creatorCategory,
+  creatorGroup,
   jobOpening,
   service,
   teamMember,
@@ -46,6 +48,8 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   affiliatePage,
   // collections
   creator,
+  creatorCategory,
+  creatorGroup,
   testimonial,
   videoTestimonial,
   teamMember,

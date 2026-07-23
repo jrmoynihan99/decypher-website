@@ -10,6 +10,7 @@
  */
 import { createClient } from "@sanity/client";
 import { readFileSync } from "node:fs";
+import { JOB_DESCRIPTIONS, slugify } from "./job-descriptions.mjs";
 
 // ── env (.env.local, no dotenv dep) ─────────────────────────────────
 const env = {};
@@ -55,7 +56,7 @@ const careersPage = {
   openingsSection: {
     eyebrow: "[ 01 // open roles ]",
     title: "Open roles",
-    sub: "// every role is remote-first — tap a card to apply",
+    sub: "// every role is remote-first — tap a card for the full brief",
   },
   noOpenings:
     "No open roles right now — but sharp people always get a reply. Pitch us below and tell us what you’re deadliest at.",
@@ -132,6 +133,8 @@ const jobs = [
   _id: `jobOpening-${j.order}`,
   _type: "jobOpening",
   ...j,
+  slug: { _type: "slug", current: slugify(j.title) },
+  description: JOB_DESCRIPTIONS[j.title],
   applyHref: `mailto:${CAREERS_EMAIL}?subject=${encodeURIComponent(j.title)}`,
 }));
 

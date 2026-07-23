@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
 import { getSession } from "@/lib/firebase/session";
 import { listStaff } from "@/lib/firebase/users";
+import { PERMISSION_KEYS, parsePermissions, type PermissionKey } from "@/lib/permissions";
 
 /**
  * Staff roster. Admin-only, and re-checked here rather than trusted from the
@@ -42,11 +43,13 @@ export async function POST(request: NextRequest) {
   let email = "";
   let displayName = "";
   let role: "admin" | "staff" = "staff";
+  let permissions: PermissionKey[] | null = null;
   try {
     const body = await request.json();
     email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
     displayName = typeof body?.displayName === "string" ? body.displayName.trim() : "";
     role = body?.role === "admin" ? "admin" : "staff";
+    permissions = parsePermissions(body?.permissions);
   } catch {
     // falls through to validation below
   }
@@ -69,6 +72,10 @@ export async function POST(request: NextRequest) {
       email,
       displayName,
       role,
+      // Always stored explicitly on new accounts — the absent-field state is
+      // reserved for docs that predate permissions (it means "everything").
+      // A request without the field defaults to everything, not nothing.
+      permissions: permissions ?? [...PERMISSION_KEYS],
       disabled: false,
       createdAt: new Date(),
       createdBy: session.email,

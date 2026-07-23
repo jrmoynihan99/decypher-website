@@ -4,6 +4,11 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
+import {
+  parsePermissions,
+  resolvePermissions,
+  type PermissionKey,
+} from "@/lib/permissions";
 
 /**
  * The single gate every protected surface goes through. Nothing in the portal
@@ -35,6 +40,8 @@ export type StaffUser = {
   role: StaffRole;
   disabled: boolean;
   createdAt: string | null;
+  /** Explicit tab grants, or null when the doc predates permissions (= full access). */
+  permissions: PermissionKey[] | null;
 };
 
 export type StaffSession = {
@@ -42,6 +49,8 @@ export type StaffSession = {
   email: string;
   displayName: string;
   role: StaffRole;
+  /** Already resolved: admins and legacy docs hold every key. Check with .includes(). */
+  permissions: PermissionKey[];
 };
 
 function userDoc(uid: string) {
@@ -69,11 +78,13 @@ export const getSession = cache(async (): Promise<StaffSession | null> => {
     // Revoked in Firestore but the cookie hasn't been torn down yet — deny.
     if (!data || data.disabled) return null;
 
+    const role: StaffRole = data.role === "admin" ? "admin" : "staff";
     return {
       uid: decoded.uid,
       email: data.email ?? decoded.email ?? "",
       displayName: data.displayName ?? "",
-      role: data.role === "admin" ? "admin" : "staff",
+      role,
+      permissions: resolvePermissions(role, parsePermissions(data.permissions)),
     };
   } catch {
     // Expired, revoked, malformed, or Firebase is unreachable. All of these
@@ -93,5 +104,17 @@ export async function requireSession(): Promise<StaffSession> {
 export async function requireAdmin(): Promise<StaffSession> {
   const session = await requireSession();
   if (session.role !== "admin") redirect("/portal");
+  return session;
+}
+
+/**
+ * For pages/layouts: resolve a session that holds the given tab permission, or
+ * bounce to the dashboard. The sidebar hiding a tab is tidiness; this is the
+ * gate. session.permissions is pre-resolved, so a plain includes() is the whole
+ * check — admins and grandfathered accounts already hold every key.
+ */
+export async function requirePermission(key: PermissionKey): Promise<StaffSession> {
+  const session = await requireSession();
+  if (!session.permissions.includes(key)) redirect("/portal");
   return session;
 }

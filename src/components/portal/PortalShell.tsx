@@ -47,7 +47,7 @@ export default function PortalShell({
         </div>
 
         <div className="border-t border-edge-soft md:hidden">
-          <SidebarStrip isAdmin={isAdmin} />
+          <SidebarStrip isAdmin={isAdmin} permissions={session.permissions} />
         </div>
       </header>
 
@@ -55,7 +55,7 @@ export default function PortalShell({
         <aside className="sticky top-16 hidden h-[calc(100svh-4rem)] w-[228px] flex-none flex-col border-r border-edge-soft md:flex">
           {/* nav scrolls if it outgrows the rail; the user block never does */}
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <SidebarRail isAdmin={isAdmin} />
+            <SidebarRail isAdmin={isAdmin} permissions={session.permissions} />
           </div>
           <div className="flex-none border-t border-edge-soft">
             <SidebarUser session={session} />

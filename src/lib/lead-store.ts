@@ -94,6 +94,91 @@ export async function saveLead(
 }
 
 /**
+ * One lead as the portal's Leads tab consumes it: flattened, serialisable, and
+ * defensive about missing fields — these documents arrived over the wire across
+ * schema versions, so nothing here trusts a field to exist. `entity`, `state`,
+ * `revenue` and `sCorpNoPayroll` are lifted out of the raw inputs blob because
+ * they're what Slack shows and what the table sorts a glance by.
+ */
+export type LeadRow = {
+  id: string;
+  createdAt: string | null;
+  name: string;
+  email: string;
+  phone: string;
+  isCreator: boolean;
+  platform: string;
+  username: string;
+  revenueBand: string;
+  entity: string;
+  state: string;
+  revenue: number;
+  sCorpNoPayroll: boolean;
+  estimate: {
+    total: number;
+    netSE: number;
+    seTax: number;
+    fed: number;
+    stateTax: number;
+    effRate: number;
+    setAside: number;
+    savingsLow: number;
+    savingsHigh: number;
+    solePropRisk: boolean;
+    needSCorp: boolean;
+  };
+  emailed: boolean | null;
+  notified: boolean | null;
+};
+
+/** Newest first. The portal reads this; nothing else should. */
+export async function listLeads(limit = 200): Promise<LeadRow[]> {
+  if (!isConfigured()) return [];
+
+  const snap = await adminDb()
+    .collection(COLLECTION)
+    .orderBy("createdAt", "desc")
+    .limit(limit)
+    .get();
+
+  return snap.docs.map((doc) => {
+    const d = doc.data();
+    const e = d.estimate ?? {};
+    const inputs = d.inputs ?? {};
+    return {
+      id: doc.id,
+      createdAt: d.createdAt?.toDate?.()?.toISOString() ?? null,
+      name: d.name ?? "",
+      email: d.email ?? "",
+      phone: d.phone ?? "",
+      isCreator: Boolean(d.isCreator),
+      platform: d.platform ?? "",
+      username: d.username ?? "",
+      revenueBand: d.revenueBand ?? "",
+      entity: inputs.entity ?? "unanswered",
+      state: inputs.state ?? "",
+      revenue: Number(inputs.creator) || 0,
+      sCorpNoPayroll: Boolean(inputs.sCorpNoPayroll),
+      estimate: {
+        total: Number(e.total) || 0,
+        netSE: Number(e.netSE) || 0,
+        seTax: Number(e.seTax) || 0,
+        fed: Number(e.fed) || 0,
+        stateTax: Number(e.stateTax) || 0,
+        effRate: Number(e.effRate) || 0,
+        setAside: Number(e.setAside) || 0,
+        savingsLow: Number(e.savingsLow) || 0,
+        savingsHigh: Number(e.savingsHigh) || 0,
+        solePropRisk: Boolean(e.solePropRisk),
+        needSCorp: Boolean(e.needSCorp),
+      },
+      emailed: typeof d.emailed === "boolean" ? d.emailed : null,
+      notified: typeof d.notified === "boolean" ? d.notified : null,
+    };
+  });
+}
+
+/**
  * Stamp how the deliveries actually went. Best-effort by design: the lead is
  * already saved, and losing this annotation is not worth failing a request over.
  * An `emailed: false` here is the trail for "why didn't this person hear back".

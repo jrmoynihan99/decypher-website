@@ -266,7 +266,7 @@ export const schedulePage = defineType({
       type: "object",
       group: "confirmation",
       description:
-        "The thank-you takeover shown after the form is submitted: a short header, then the creator-video wall.",
+        "The thank-you takeover shown after the form is submitted: a short header, the big pre-call hero video, then the creator-video wall.",
       fields: [
         defineField({
           name: "eyebrow",
@@ -278,7 +278,33 @@ export const schedulePage = defineType({
           name: "body",
           type: "text",
           rows: 3,
-          description: "Short line under the title — keep it brief so the videos stay above the fold on phones.",
+          description: "Short line under the title — keep it brief so the hero video stays above the fold on phones.",
+        }),
+        defineField({
+          name: "video",
+          title: "Hero video",
+          type: "object",
+          description:
+            'The big pre-call video right under the header — the "But first…" body line trails straight into it. An on-brand placeholder frame shows until the URL is set.',
+          fields: [
+            defineField({
+              name: "eyebrow",
+              type: "string",
+              description:
+                "Optional kicker over the video — leave empty to let the body line above do the introducing.",
+            }),
+            defineField({
+              name: "title",
+              type: "string",
+              description: "Optional heading over the video — usually empty.",
+            }),
+            defineField({
+              name: "videoUrl",
+              title: "YouTube URL",
+              type: "url",
+              description: "Any YouTube link works — watch, share, or unlisted.",
+            }),
+          ],
         }),
       ],
     }),
@@ -288,7 +314,7 @@ export const schedulePage = defineType({
       type: "sectionHeadingBlock",
       group: "confirmation",
       description:
-        'The "but first" heading over the creator-video grid on the thank-you takeover. The videos come from the Video Testimonials collection.',
+        "The heading over the creator-video grid, beneath the hero video. The videos come from the Video Testimonials collection.",
     }),
     defineField({
       name: "statsSection",
