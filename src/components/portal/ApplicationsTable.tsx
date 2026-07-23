@@ -4,9 +4,14 @@ import { Fragment, useState } from "react";
 import type { ApplicationRow } from "@/lib/application-store";
 
 /**
- * The Applications tab: careers-page submissions, newest first — the portal
- * copy of what pings #recruiting. Rows with a cover note expand to show it;
- * the link opens in a new tab since it's the actual application.
+ * The Applications tab: careers-page submissions, newest first. Slack only
+ * gets a doorbell ping — THIS is where the full application lives, so an
+ * expanded row shows everything the form collected: contact, role fit, tools,
+ * the culture answers, logistics, compliance flags, and the resume (served by
+ * /api/portal/applications/[id]/resume out of Firestore).
+ *
+ * Rows from before the long form (name/email/link/note only) still render:
+ * empty facts show as "—", empty groups don't render at all.
  */
 
 function when(iso: string | null): { day: string; time: string } {
@@ -22,8 +27,91 @@ function when(iso: string | null): { day: string; time: string } {
   };
 }
 
+// The form stores option slugs; show the human labels it displayed. Unknown
+// values (or free text from older rows) fall through untouched.
+const OPTION_LABELS: Record<string, string> = {
+  referral: "Referral",
+  social: "Social media",
+  "job-board": "Job board",
+  other: "Other",
+  "full-time": "Full-time",
+  "part-time": "Part-time",
+  contractor: "Contractor",
+  "<1": "Less than 1 year",
+  "1-2": "1–2 years",
+  "3-5": "3–5 years",
+  "6-9": "6–9 years",
+  "10+": "10+ years",
+};
+const pretty = (v: string) => OPTION_LABELS[v] ?? v;
+
+const prettyBytes = (n: number) =>
+  n >= 1024 * 1024
+    ? `${(n / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(n / 1024))} KB`;
+
 const thCls =
   "whitespace-nowrap px-4 py-3 text-left font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint";
+const groupLabelCls =
+  "font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint";
+
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className={groupLabelCls}>{label}</div>
+      <div className="mt-0.5 font-body text-[13px] text-mist">
+        {value || "—"}
+      </div>
+    </div>
+  );
+}
+
+function YesNoChip({ label, value }: { label: string; value: boolean | null }) {
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-1 font-body text-[11.5px] ${
+        value === null
+          ? "border-white/10 text-dusk"
+          : value
+            ? "border-teal/30 bg-teal/10 text-teal"
+            : "border-danger/30 bg-danger/10 text-danger"
+      }`}
+    >
+      {label}: {value === null ? "—" : value ? "Yes" : "No"}
+    </span>
+  );
+}
+
+function Essay({ label, text }: { label: string; text: string }) {
+  if (!text.trim()) return null;
+  return (
+    <div>
+      <div className={groupLabelCls}>{label}</div>
+      <p className="mt-1 max-w-prose whitespace-pre-wrap font-body text-[13px] leading-relaxed text-mist">
+        {text.trim()}
+      </p>
+    </div>
+  );
+}
+
+function Pills({ label, items }: { label: string; items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div>
+      <div className={groupLabelCls}>{label}</div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {items.map((t) => (
+          <span
+            key={t}
+            className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-body text-[11.5px] text-mist"
+          >
+            {t}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ApplicationsTable({
   initialApplications,
@@ -83,8 +171,8 @@ export default function ApplicationsTable({
                   <th className={thCls}>Received</th>
                   <th className={thCls}>Role</th>
                   <th className={thCls}>Applicant</th>
-                  <th className={thCls}>Link</th>
-                  <th className={thCls}>Note</th>
+                  <th className={thCls}>Location</th>
+                  <th className={thCls}>Resume</th>
                   <th className={thCls} aria-label="Details" />
                 </tr>
               </thead>
@@ -92,7 +180,7 @@ export default function ApplicationsTable({
                 {applications.map((a) => {
                   const isOpen = open === a.id;
                   const t = when(a.createdAt);
-                  const note = a.message.trim();
+                  const resumeHref = `/api/portal/applications/${a.id}/resume`;
                   return (
                     <Fragment key={a.id}>
                       <tr
@@ -128,10 +216,13 @@ export default function ApplicationsTable({
                             {a.email}
                           </a>
                         </td>
+                        <td className="px-4 py-3.5 font-body text-[13px] text-mist">
+                          {a.location || "—"}
+                        </td>
                         <td className="px-4 py-3.5 font-body text-[13px]">
-                          {a.link ? (
+                          {a.resume ? (
                             <a
-                              href={a.link}
+                              href={resumeHref}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
@@ -139,12 +230,19 @@ export default function ApplicationsTable({
                             >
                               Open ↗
                             </a>
+                          ) : a.linkedin ? (
+                            <a
+                              href={a.linkedin}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal"
+                            >
+                              Link ↗
+                            </a>
                           ) : (
                             <span className="text-dusk">—</span>
                           )}
-                        </td>
-                        <td className="px-4 py-3.5 font-body text-[12px] text-dusk">
-                          {note ? "Yes" : "—"}
                         </td>
                         <td className="px-4 py-3.5 text-right">
                           <svg
@@ -167,33 +265,119 @@ export default function ApplicationsTable({
                       {isOpen ? (
                         <tr className="border-b border-white/[0.05] bg-white/[0.02] last:border-b-0">
                           <td colSpan={6} className="px-4 py-5 sm:px-6">
-                            <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
-                              <div>
-                                <div className="font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
-                                  Cover note
-                                </div>
-                                <p className="mt-1 max-w-prose whitespace-pre-wrap font-body text-[13px] leading-relaxed text-mist">
-                                  {note || "No note left."}
-                                </p>
+                            {/* contact + fit facts */}
+                            <div className="grid gap-x-8 gap-y-4 sm:grid-cols-3">
+                              <Fact label="Phone" value={a.phone} />
+                              <Fact
+                                label="LinkedIn / link"
+                                value={
+                                  a.linkedin ? (
+                                    <a
+                                      href={a.linkedin}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="break-all text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal"
+                                    >
+                                      {a.linkedin}
+                                    </a>
+                                  ) : (
+                                    ""
+                                  )
+                                }
+                              />
+                              <Fact
+                                label="Heard about us"
+                                value={pretty(a.heardAbout)}
+                              />
+                              <Fact
+                                label="Employment type"
+                                value={pretty(a.employmentType)}
+                              />
+                              <Fact
+                                label="Experience"
+                                value={pretty(a.experience)}
+                              />
+                              <Fact label="Current role" value={a.currentRole} />
+                              <Fact label="Desired comp" value={a.desiredComp} />
+                              <Fact label="Earliest start" value={a.startDate} />
+                              <Fact label="Availability" value={a.availability} />
+                            </div>
+
+                            {/* compliance + logistics flags */}
+                            <div className="mt-5 flex flex-wrap gap-1.5">
+                              <YesNoChip label="US work auth" value={a.workAuth} />
+                              <YesNoChip
+                                label="Needs sponsorship"
+                                value={a.needsSponsorship}
+                              />
+                              <YesNoChip
+                                label="Background check + NDA"
+                                value={a.backgroundCheck}
+                              />
+                              <YesNoChip
+                                label="Cameras on"
+                                value={a.remoteCameras}
+                              />
+                              <YesNoChip
+                                label="Reliable internet"
+                                value={a.internet}
+                              />
+                            </div>
+
+                            {/* tools + end-to-end experience */}
+                            {(a.tools.length || a.handled.length) ? (
+                              <div className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                                <Pills label="Tools used" items={a.tools} />
+                                <Pills
+                                  label="Handled end to end"
+                                  items={a.handled}
+                                />
                               </div>
-                              <div>
-                                <div className="font-mono text-[9.5px] font-bold uppercase tracking-[1.4px] text-faint">
-                                  Delivery
-                                </div>
-                                <div className="mt-1 font-body text-[13px] text-mist">
-                                  Slack{" "}
-                                  {a.notified === null
-                                    ? "no report"
-                                    : a.notified
-                                      ? "posted"
-                                      : "failed"}
-                                </div>
-                                {a.link ? (
-                                  <div className="mt-3 break-all font-mono text-[11px] text-dusk">
-                                    {a.link}
-                                  </div>
-                                ) : null}
-                              </div>
+                            ) : null}
+
+                            {/* the written answers */}
+                            <div className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                              <Essay label="Why DeCypher" text={a.whyUs} />
+                              <Essay
+                                label="Ownership story"
+                                text={a.ownershipStory}
+                              />
+                              <Essay
+                                label="“Do the boring work”"
+                                text={a.boringWork}
+                              />
+                              <Essay
+                                label="Possible conflicts"
+                                text={a.conflicts}
+                              />
+                              <Essay label="Note" text={a.message} />
+                            </div>
+
+                            {/* resume + delivery */}
+                            <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-white/[0.06] pt-4">
+                              {a.resume ? (
+                                <a
+                                  href={resumeHref}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-body text-[13px] text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal"
+                                >
+                                  {a.resume.filename} (
+                                  {prettyBytes(a.resume.size)}) ↗
+                                </a>
+                              ) : (
+                                <span className="font-body text-[13px] text-dusk">
+                                  No resume on file
+                                </span>
+                              )}
+                              <span className="font-body text-[12px] text-dusk">
+                                Slack{" "}
+                                {a.notified === null
+                                  ? "no report"
+                                  : a.notified
+                                    ? "posted"
+                                    : "failed"}
+                              </span>
                             </div>
                           </td>
                         </tr>

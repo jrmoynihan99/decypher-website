@@ -92,9 +92,17 @@ export default function JobDetail({ job }: { job: CmsJob }) {
           >
             <SectionReveal amount={0.05}>
               <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-8">
-                <Reveal delay={0.1} className="order-2 lg:order-1">
-                  <JobMetaSidebar job={job} />
-                </Reveal>
+                {/* sticky sits OUTSIDE Reveal: the motion wrapper's persistent
+                    will-change:transform makes it a containing block that
+                    defeats position:sticky (cousin of the fixed-modal trap),
+                    so the card animates inside the sticky box instead */}
+                <div className="order-2 lg:order-1">
+                  <div className="lg:sticky lg:top-24">
+                    <Reveal delay={0.1}>
+                      <JobMetaSidebar job={job} />
+                    </Reveal>
+                  </div>
+                </div>
                 <Reveal delay={0.18} className="order-1 lg:order-2">
                   <JobTabPanel job={job} overview={overview} />
                 </Reveal>

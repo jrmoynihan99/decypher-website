@@ -135,7 +135,6 @@ const jobs = [
   ...j,
   slug: { _type: "slug", current: slugify(j.title) },
   description: JOB_DESCRIPTIONS[j.title],
-  applyHref: `mailto:${CAREERS_EMAIL}?subject=${encodeURIComponent(j.title)}`,
 }));
 
 const scheduleConfirmation = {

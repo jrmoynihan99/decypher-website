@@ -561,7 +561,6 @@ async function main() {
       _id: `jobOpening-${j.order}`,
       _type: "jobOpening",
       ...j,
-      applyHref: `mailto:careers@wedecypher.com?subject=${encodeURIComponent(j.title)}`,
     })),
     ...TESTIMONIALS.a.concat(TESTIMONIALS.b).map((t, i) => ({
       _id: `testimonial-${i < 3 ? "a" : "b"}-${(i % 3) + 1}`,

@@ -53,5 +53,11 @@ Gotchas:
   mobile (390×844) the first video card must sit above the fold. A
   scroll-to-top button (`aria-label="Scroll back to top"`) appears bottom-right
   past ~0.8 viewports and must be display:none at the top (iOS 26 rule).
-- `/careers`: header readout resolves `{count}`, job cards link to their
-  `applyHref` (mailto), empty Openings collection shows the dashed empty state.
+- `/careers`: header readout resolves `{count}`, job cards link to
+  `/careers/<slug>` (VIEW ROLE →), empty Openings collection shows the dashed
+  empty state.
+- `/careers/<slug>`: sticky meta rail on desktop (scroll deep, card pins at
+  ~96px), `[ 01 // OVERVIEW ]` / `[ 02 // APPLICATION ]` tabs swap the panel
+  in place (no modal), optional VSL click-to-play at the top of Overview,
+  empty-submit on the application form shows three inline errors without a
+  network call.

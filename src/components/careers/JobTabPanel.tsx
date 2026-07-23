@@ -54,7 +54,7 @@ export default function JobTabPanel({
               role="tab"
               aria-selected={active}
               onClick={() => setTab(t.key)}
-              className={`relative -mb-px cursor-pointer border-none bg-transparent p-0 pb-3 pt-1 font-mono text-[11px] tracking-[0.16em] transition-colors ${
+              className={`relative -mb-px cursor-pointer whitespace-nowrap border-none bg-transparent p-0 pb-3 pt-1 font-mono text-[11px] tracking-[0.16em] transition-colors ${
                 active ? "text-magenta" : "text-faint hover:text-mist"
               }`}
             >

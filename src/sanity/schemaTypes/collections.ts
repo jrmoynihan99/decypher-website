@@ -387,14 +387,6 @@ export const jobOpening = defineType({
       options: { layout: "tags" },
       description: "Optional mono tags, e.g. QBO / 1120-S / STRATEGY.",
     }),
-    defineField({
-      name: "applyHref",
-      title: "Apply link",
-      type: "string",
-      validation: (r) => r.required(),
-      description:
-        "Where the whole card links: a mailto: (mailto:careers@…?subject=Role) or a job-post URL.",
-    }),
     defineField({ name: "order", type: "number", validation: (r) => r.required() }),
   ],
   orderings: [

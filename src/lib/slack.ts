@@ -167,13 +167,44 @@ export async function postLeadToSlack(
 }
 
 /**
- * A job application to the #recruiting channel. Add a field to the Application
- * and want it here? Add a `field(...)` row below — the section holds up to 10.
+ * Where the portal lives, for deep links out of Slack. SITE_URL wins when set;
+ * otherwise Vercel's own production-domain variable covers deployed builds.
+ * Null (local dev, misconfig) just drops the link — never the notification.
+ */
+function portalApplicationsUrl(): string | null {
+  const base =
+    process.env.SITE_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null);
+  return base ? `${base.replace(/\/$/, "")}/portal/applications` : null;
+}
+
+/**
+ * A job application to the #recruiting channel. Deliberately a heads-up, not a
+ * dossier: name, role, how to reach them, and a button into the portal's
+ * Applications tab — which holds the full form and the resume. The portal is
+ * the record; this is the doorbell.
  */
 export async function postApplicationToSlack(
   a: Application,
+  hasResume: boolean,
 ): Promise<SlackOutcome> {
   const roleLine = a.department ? `${esc(a.role)} · ${esc(a.department)}` : esc(a.role);
+  const portal = portalApplicationsUrl();
+
+  const roleSection: Record<string, unknown> = {
+    type: "section",
+    text: { type: "mrkdwn", text: `*Role*\n${roleLine}` },
+  };
+  if (portal) {
+    // A link button needs no Slack interactivity setup — safe from a webhook.
+    roleSection.accessory = {
+      type: "button",
+      text: { type: "plain_text", text: "View in portal" },
+      url: portal,
+    };
+  }
 
   const blocks: unknown[] = [
     {
@@ -182,26 +213,24 @@ export async function postApplicationToSlack(
       type: "header",
       text: { type: "plain_text", text: `New application: ${a.name}`, emoji: true },
     },
-    { type: "section", text: { type: "mrkdwn", text: `*Role*\n${roleLine}` } },
+    roleSection,
     {
       type: "section",
       fields: [
-        field("Name", esc(a.name)),
         emailField(a.email),
-        // Wrapped as a Slack link. Safe unescaped only because the route's
-        // URL_RE forbids `<>|` — without that, a crafted link could inject
-        // `<!channel>`. Escaping instead would corrupt `&` in query strings.
-        field("Link", a.link ? `<${a.link}>` : "—"),
+        field("Phone", esc(a.phone) || "—"),
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `${hasResume ? "Resume attached" : "No resume"} · full application in the portal's Applications tab`,
+        },
       ],
     },
   ];
-
-  if (a.message.trim()) {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `*Note*\n${esc(a.message.trim())}` },
-    });
-  }
 
   return postToChannel(
     process.env.SLACK_RECRUITING_WEBHOOK_URL,

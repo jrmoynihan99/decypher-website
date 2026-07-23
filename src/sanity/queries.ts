@@ -135,7 +135,7 @@ export async function getServices(): Promise<CmsService[]> {
 export async function getJobs(): Promise<CmsJob[]> {
   const rows: (CmsJob & { slug?: string; tags?: string[] })[] = await client.fetch(
     `*[_type == "jobOpening"] | order(order asc){
-      title, "slug": slug.current, department, location, type, comp, blurb, tags, applyHref
+      title, "slug": slug.current, department, location, type, comp, blurb, tags
     }`,
   );
   return rows.map((j) => ({ ...j, slug: j.slug ?? "", tags: j.tags ?? [] }));
@@ -146,7 +146,7 @@ export async function getJobBySlug(slug: string): Promise<CmsJob | null> {
   const row: (CmsJob & { tags?: string[] }) | null = await client.fetch(
     `*[_type == "jobOpening" && slug.current == $slug][0]{
       title, "slug": slug.current, department, location, type, comp,
-      blurb, tags, videoUrl, description, applyHref
+      blurb, tags, videoUrl, description
     }`,
     { slug },
   );
