@@ -237,7 +237,9 @@ export default function ApplicationForm({
   // Mirror of `f` for the async autofill path — by the time a PDF has been
   // parsed, the closure's `f` is stale.
   const fRef = useRef(f);
-  fRef.current = f;
+  useEffect(() => {
+    fRef.current = f;
+  }, [f]);
 
   const panel = variant === "panel";
   const idPrefix = panel ? "ap" : "am";
@@ -298,6 +300,13 @@ export default function ApplicationForm({
       for (const k of fillable(prev)) {
         next[k] = k === "phone" ? formatPhoneString(guess[k]!).out : guess[k]!;
       }
+      return next;
+    });
+    // A field autofill just populated shouldn't keep wearing the red border
+    // from an earlier empty-submit.
+    setErrors((e) => {
+      const next = { ...e };
+      for (const k of filled) next[k] = false;
       return next;
     });
     setAutofillNote(
