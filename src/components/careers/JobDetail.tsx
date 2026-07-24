@@ -124,8 +124,9 @@ export default function JobDetail({ job }: { job: CmsJob }) {
               delay={0.2}
               className="relative mx-auto mt-[22px] max-w-[44ch] text-[17px] leading-relaxed text-mist"
             >
-              Four fields, five minutes, no cover letter. A real human reads every
-              application — if the fit is there, you&rsquo;ll hear back within the week.
+              Ten minutes, no cover letter — your resume fills in half of it.
+              A real human reads every application — if the fit is there,
+              you&rsquo;ll hear back within the week.
             </ParagraphReveal>
             <Reveal delay={0.4} className="relative mt-9">
               <ApplyCta size="xl">{`Apply — ${job.title}`}</ApplyCta>

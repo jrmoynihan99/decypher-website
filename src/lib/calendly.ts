@@ -93,14 +93,16 @@ const EVENT_TYPES = {
   /** creator-support1/creator-discovery-call-1-2 — the 📞 call, $50k and up. */
   qualified: `${API}/event_types/e1c21fab-de02-49e6-b255-e104b1a0e01d`,
   /**
-   * creator-support1/decypher-affiliate-1 — 30 min, Zoom, asks only for social
-   * links. What the affiliate landing pages book.
+   * "Referral Discovery Call 📱" (creator-support1/creator-discovery-call-clone)
+   * — 30 min. What the affiliate landing pages book. Jason redirected this here
+   * 2026-07-24; before that it was "DeCypher Affiliate" (decypher-affiliate-1,
+   * c704e39c-6243-4427-9e5d-23d6a86eff1c), which still exists in Calendly.
    *
    * Deliberately outside the income-band routing: a partner's VIP has already
    * paid for the full consultation, so banding them would demote someone under
    * $50k to the short ☎️ call. Being unbanded is the point, not an oversight.
    */
-  affiliate: `${API}/event_types/c704e39c-6243-4427-9e5d-23d6a86eff1c`,
+  affiliate: `${API}/event_types/58960ea7-46ed-467c-adca-2be5059234e3`,
 };
 
 /**
@@ -191,26 +193,71 @@ export async function getEventType(uri: string): Promise<EventTypeInfo> {
 }
 
 /**
- * Bookable slots. Calendly rejects a start_time in the past, so the window
- * always opens slightly ahead of now. `days` past the event type's own rolling
- * window just returns the same slots — these events open ~14 days out.
+ * Bookable slots over the next `days` days (Calendly rejects a start_time in
+ * the past, so the horizon opens slightly ahead of now).
+ *
+ * The endpoint only honours a range of up to 7 days — ask for more and it
+ * quietly answers as if you'd asked for a week (verified live: a 14-day
+ * request and a 7-day request return identical collections). So the horizon
+ * is covered in week-sized windows fetched in parallel and merged. How much
+ * of the horizon has slots is then purely the event type's own scheduling
+ * window, set in Calendly ("invitees can schedule N days into the future") —
+ * widen it there and the picker's month arrows light up with no code change.
+ * They have already re-cut that window at least once (~14 days at launch,
+ * ~7 days as of 2026-07); don't assume it.
  */
 export async function getAvailableTimes(
   eventTypeUri: string,
-  days = 14,
+  days = 60,
 ): Promise<Slot[]> {
-  const start = new Date(Date.now() + 60_000).toISOString();
-  const end = new Date(Date.now() + days * 86_400_000).toISOString();
-  const { collection } = await api<{ collection: SlotResource[] }>(
-    `/event_type_available_times?event_type=${encodeURIComponent(eventTypeUri)}` +
-      `&start_time=${encodeURIComponent(start)}&end_time=${encodeURIComponent(end)}`,
+  const WEEK = 7 * 86_400_000;
+  const from = Date.now() + 60_000;
+  const to = from + days * 86_400_000;
+
+  const windows: { start: string; end: string }[] = [];
+  for (let t = from; t < to; t += WEEK) {
+    windows.push({
+      start: new Date(t).toISOString(),
+      end: new Date(Math.min(t + WEEK, to)).toISOString(),
+    });
+  }
+
+  // One flaky window shouldn't blank the whole picker: keep what resolved,
+  // fail only when nothing did. A missing mid-horizon week shows as "no times
+  // that week", which self-heals on the next load.
+  const results = await Promise.allSettled(
+    windows.map((w) =>
+      api<{ collection: SlotResource[] }>(
+        `/event_type_available_times?event_type=${encodeURIComponent(eventTypeUri)}` +
+          `&start_time=${encodeURIComponent(w.start)}&end_time=${encodeURIComponent(w.end)}`,
+      ),
+    ),
   );
-  return collection
-    .filter((s) => s.status === "available")
-    .map((s) => ({
-      startTime: s.start_time,
-      inviteesRemaining: s.invitees_remaining,
-    }));
+  const fulfilled = results.filter((r) => r.status === "fulfilled");
+  if (!fulfilled.length && results.length) {
+    throw (results[0] as PromiseRejectedResult).reason;
+  }
+  if (fulfilled.length < results.length) {
+    console.warn(
+      `[calendly] ${results.length - fulfilled.length}/${results.length} availability windows failed — showing partial availability`,
+    );
+  }
+
+  // Windows meet at exact boundary instants, so a slot can land in two
+  // responses — dedupe by start. ISO-Z strings sort chronologically.
+  const seen = new Set<string>();
+  const slots: Slot[] = [];
+  for (const r of fulfilled) {
+    for (const s of r.value.collection) {
+      if (s.status !== "available" || seen.has(s.start_time)) continue;
+      seen.add(s.start_time);
+      slots.push({
+        startTime: s.start_time,
+        inviteesRemaining: s.invitees_remaining,
+      });
+    }
+  }
+  return slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
 }
 
 /* ===================== write ===================== */
