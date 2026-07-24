@@ -50,8 +50,34 @@ export const PLATFORM_LABEL: Record<string, string> = {
   website: "WEB",
 };
 
+/**
+ * Vibrant palette for auto-assigning an accent to categories that aren't in
+ * ACCENT — i.e. new ones added in Sanity. Deduped ACCENT values minus the one
+ * neutral grey (Management Company), so a brand-new category never renders
+ * greyscale. See accentFor().
+ */
+const ACCENT_POOL = Array.from(new Set(Object.values(ACCENT))).filter(
+  (c) => c !== ACCENT["Management Company"],
+);
+
+/**
+ * Stable FNV-1a hash so a given category name always maps to the same pool
+ * color — deterministic across SSR/hydration and every visit (no flicker, no
+ * hydration mismatch), which a per-render Math.random() would break.
+ */
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 export function accentFor(cat: string): string {
-  return ACCENT[cat] ?? "#B8B3C6";
+  if (ACCENT[cat]) return ACCENT[cat];
+  if (!cat) return "#B8B3C6";
+  return ACCENT_POOL[hashString(cat) % ACCENT_POOL.length];
 }
 
 export function hexToRgba(hex: string, a: number): string {

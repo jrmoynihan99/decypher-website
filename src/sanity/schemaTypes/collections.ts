@@ -39,7 +39,7 @@ export const creator = defineType({
       to: [{ type: "creatorCategory" }],
       validation: (r) => r.required(),
       description:
-        'Shown on the card badge; sets its accent color (known names use the brand palette, new ones fall back to neutral). Pick from the list or hit "Create new" right here.',
+        'Shown on the card badge; sets its accent color (known names use their brand color, new ones are auto-assigned a color from the palette). Pick from the list or hit "Create new" right here.',
     }),
     defineField({
       name: "group",
