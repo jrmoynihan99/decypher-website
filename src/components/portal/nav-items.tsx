@@ -37,7 +37,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
   },
   {
     href: "/portal/refund-calculator",
-    name: "Refund Calculator",
+    name: "Service Ledger",
     blurb:
       "Pro-rated cancellation refunds, with the plain-English version to read out.",
     note: "Plan pricing is set in the tool",

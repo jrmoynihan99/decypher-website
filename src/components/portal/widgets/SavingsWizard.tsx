@@ -773,8 +773,8 @@ export default function SavingsWizard() {
                       Estimate only, for a single tax year, calculated as of
                       today. Assumes the balance went unpaid from the original
                       deadline. State penalties and any prior payments or
-                      withholding aren&rsquo;t included — always verify against
-                      the actual IRS notices.
+                      withholding aren&rsquo;t included — we confirm the exact
+                      figure against your IRS notices before we file.
                     </Note>
                   </>
                 )}
@@ -1298,9 +1298,9 @@ export default function SavingsWizard() {
 
             <p className="mt-6 text-[11.5px] leading-relaxed text-faint">
               Estimates use 2026 figures and are intentionally conservative —
-              actual results depend on the full return. Not tax advice; final
-              numbers are confirmed once we prepare it. State brackets are
-              current-year approximations pending verification.
+              your actual result depends on the full return. Not tax advice;
+              final numbers are confirmed when we prepare it. State brackets are
+              current-year approximations.
             </p>
           </div>
 

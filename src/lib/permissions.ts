@@ -28,7 +28,7 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "tax-strategy": "Tax Strategy",
-  "refund-calculator": "Refund Calculator",
+  "refund-calculator": "Service Ledger",
   receipts: "Receipt Analyzer",
   "sales-flow": "Sales Flow",
   "creator-finances": "Creator Finances",

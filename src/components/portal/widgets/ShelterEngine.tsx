@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * Shelter Engine — how much can a client legally shelter this year?
+ * Shelter Engine — how much can you legally shelter this year?
  *
- * Five vehicles (Solo 401(k), SEP-IRA, Traditional IRA, Roth IRA, HSA), each
- * with its own contribution room and its own answer to "what does that save?"
- * The marginal rate is derived from the brackets rather than asked for, so
- * staff can't accidentally model a 37% saving on a 22% client.
+ * Client-facing: this is screen-shared on the call, so every string speaks to
+ * the creator. Five vehicles (Solo 401(k), SEP-IRA, Traditional IRA, Roth IRA,
+ * HSA), each with its own contribution room and its own answer to "what does
+ * that save?" The marginal rate is derived from the brackets rather than asked
+ * for, so nobody can accidentally model a 37% saving on a 22% earner.
  *
  * Two mutual exclusions are enforced in the UI, because both are easy to get
  * wrong and expensive to get wrong: Solo 401(k) and SEP share the
@@ -518,10 +519,11 @@ export default function ShelterEngine() {
         </div>
       </div>
 
-      {/* ── editable caps — staff setup, hence the drawer ── */}
+      {/* ── editable caps — setup, not part of the client story, hence the
+          drawer: the label stays neutral because this is on screen too ── */}
       <div className="mt-5">
         <Drawer
-          title="Staff setup — 2026 contribution caps (verify before client use)"
+          title="2026 contribution limits — advanced"
           icon={<CogIcon />}
           open={capsOpen}
           onToggle={setCapsOpen}
@@ -552,15 +554,13 @@ export default function ShelterEngine() {
               Reset to defaults
             </button>
             <Note>
-              Defaults reflect <b className="text-mist">2026</b> figures to the
-              best of current knowledge — confirm against the IRS release. The
-              marginal rate comes from the 2026 federal brackets
+              Defaults are the <b className="text-mist">2026</b> IRS figures.
+              The marginal rate comes from the 2026 federal brackets
               (10/12/22/24/32/35/37%), federal only. SEP-IRAs allow{" "}
               <b className="text-mist">no</b> catch-up. For sole props, plan
               contributions are computed on net SE earnings (profit less ½ SE
-              tax); for S-corps, on W-2 wages. The Roth MAGI phase-out is built
-              in for 2026 — verify and edit in lib/widget-tax.ts if the IRS
-              figures shift.
+              tax); for S-corps, on W-2 wages. The Roth MAGI phase-out for 2026
+              is built in.
             </Note>
           </div>
         </Drawer>
@@ -572,13 +572,12 @@ export default function ShelterEngine() {
         (federal only — no state tax is modeled), based on estimated taxable
         income. &ldquo;Tax saved&rdquo; is the deductible contribution times that
         single marginal rate — a simplification that slightly overstates the
-        benefit when a large contribution spans more than one bracket. Watch
-        three things in particular: a Traditional IRA deduction phases out at
-        higher income when the taxpayer or spouse is covered by a workplace
-        plan; an HSA requires an HDHP for the months contributed; and you
-        generally can&rsquo;t fund both a Solo 401(k) and a SEP on the same
-        earnings. A licensed preparer should confirm eligibility and every figure
-        before a client acts.
+        benefit when a large contribution spans more than one bracket. Three
+        things to keep in mind: a Traditional IRA deduction phases out at
+        higher income when you or your spouse are covered by a workplace plan;
+        an HSA requires an HDHP for the months contributed; and you generally
+        can&rsquo;t fund both a Solo 401(k) and a SEP on the same earnings. Your
+        DeCypher preparer confirms eligibility and every figure before you act.
       </Disclaimer>
     </div>
   );

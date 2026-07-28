@@ -1,7 +1,7 @@
 import Link from "next/link";
 import ApplyCta from "@/components/careers/ApplyCta";
 import JobMetaSidebar from "@/components/careers/JobMetaSidebar";
-import JobRichText from "@/components/careers/JobRichText";
+import RichText from "@/components/RichText";
 import JobTabPanel from "@/components/careers/JobTabPanel";
 import { JobTabsProvider } from "@/components/careers/JobTabs";
 import NeuralWeb from "@/components/effects/NeuralWeb";
@@ -46,7 +46,7 @@ export default function JobDetail({ job }: { job: CmsJob }) {
         </div>
       )}
       {job.description?.length ? (
-        <JobRichText value={job.description} />
+        <RichText value={job.description} />
       ) : (
         <p className="m-0 text-[15.5px] leading-relaxed text-mist">{job.blurb}</p>
       )}

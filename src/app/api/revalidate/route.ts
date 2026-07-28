@@ -34,6 +34,15 @@ function revalidateForDoc(doc: {
     return { strategy: "surgical", type, path };
   }
 
+  // Legal pages route under /legal/, so slugToPath would send "privacy" to
+  // "/privacy" and purge nothing that exists.
+  if (type === "legalPage" && typeof slug === "string" && slug) {
+    const path = `/legal/${slug}`;
+    revalidatePath(path);
+    revalidatePath("/legal/[slug]", "page");
+    return { strategy: "surgical", type, path };
+  }
+
   revalidatePath("/", "layout");
   return { strategy: "full-purge", type: type ?? null };
 }

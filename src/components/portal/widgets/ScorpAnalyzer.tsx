@@ -7,9 +7,10 @@
  * profit becomes payroll tax on a salary. Everything else — payroll costs,
  * the extra return, state fees — is out of scope and called out on screen.
  *
- * The risk meter is the reason this is a staff tool and not a public one. A
- * salary ratio that saves the most is also the one the IRS is most likely to
- * reclassify, so the number is always shown next to how defensible it is.
+ * Client-facing — screen-shared on the call, so the copy speaks to the creator.
+ * The risk meter is why the number is never shown alone: the salary ratio that
+ * saves the most is also the one the IRS is most likely to reclassify, so the
+ * saving always sits next to how defensible it is.
  */
 
 import { useState } from "react";
@@ -347,8 +348,8 @@ export default function ScorpAnalyzer() {
       <Disclaimer>
         Estimated self-employment / payroll tax savings only — before payroll and
         filing costs, and not a reasonable-compensation determination. Uses the
-        2025 Social Security wage base ({money(WAGE_BASE)}); update for the
-        current tax year. Internal estimate, not tax advice.
+        2025 Social Security wage base ({money(WAGE_BASE)}). An estimate for the
+        conversation, not tax advice.
       </Disclaimer>
     </div>
   );

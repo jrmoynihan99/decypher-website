@@ -11,9 +11,9 @@
  *     in .8899999999, which is not something an accounting firm can read out.
  *
  *  2. Connection health and data freshness are separate axes. A client can have
- *     a broken connection AND perfectly good numbers from last night — the row
- *     shows both, because collapsing them means choosing between hiding usable
- *     figures and hiding a problem.
+ *     a broken connection AND perfectly good numbers from last night, so the
+ *     "needs attention" list shows both — collapsing them means choosing
+ *     between hiding usable figures and hiding a problem.
  *
  *  3. The average states its denominator. Averaging over clients we couldn't
  *     read would count a broken connection as a $0 client and drag the firm's
@@ -55,6 +55,7 @@ import type {
   CreatorFinanceRow,
   FinancesPayload,
   LineItem,
+  MoneyCents,
   ProfitAndLossTotals,
 } from "@/lib/quickbooks/types";
 
@@ -139,6 +140,52 @@ export default function CreatorFinances({
   );
 
   /**
+   * Hand a client's books back. Registered with Intuit as the app's disconnect
+   * destination, so this control is the reason that URL resolves to something
+   * actionable rather than a dashboard you can only look at.
+   *
+   * Worth the confirm: it revokes our refresh token at Intuit, so there is no
+   * undo — coming back means signing in to QuickBooks and picking the company
+   * out of the list again.
+   */
+  const disconnect = useCallback(
+    async (row: CreatorFinanceRow) => {
+      if (
+        !confirm(
+          `Disconnect ${row.displayName}? This revokes our access at Intuit. Reconnecting means signing in and picking the company again.`,
+        )
+      )
+        return;
+      setBusy(`disconnect:${row.realmId}`);
+      setError("");
+      try {
+        const res = await fetch(
+          `/api/portal/quickbooks/connections/${row.realmId}`,
+          { method: "DELETE" },
+        );
+        const data = await res.json();
+        if (!res.ok || !data?.ok) throw new Error(data?.message);
+        // The route drops our credentials whether or not Intuit confirms the
+        // revocation, because a connection we can't reach is exactly when
+        // staff most need to be able to remove it. Say so rather than let a
+        // half-done disconnect read as a clean one.
+        if (!data.revoked) {
+          setError(
+            `Disconnected ${row.displayName} here, but Intuit didn't confirm the revocation — remove DeCypher from that company in QuickBooks to be certain.`,
+          );
+        }
+      } catch {
+        setError("Couldn't disconnect — try again.");
+        setBusy(null);
+        return;
+      }
+      setBusy(null);
+      await load(period);
+    },
+    [load, period],
+  );
+
+  /**
    * A company connected seconds ago has no figures yet, and waiting for the
    * overnight cron to prove the connection works is a poor first impression —
    * so the dashboard kicks the first sync on arrival.
@@ -182,7 +229,11 @@ export default function CreatorFinances({
 
   const bucket = primaryBucket(payload.aggregate);
   const average = useMemo(() => averageOf(bucket), [bucket]);
-  const current = payload.rows.find((r) => r.realmId === selected) ?? null;
+  // Both tabs read the same selection, so picking a creator in the comparison
+  // and opening their breakdown lands on the one you were just looking at. The
+  // fallback matters after a disconnect, when the held realmId no longer exists.
+  const current =
+    payload.rows.find((r) => r.realmId === selected) ?? payload.rows[0] ?? null;
 
   if (!payload.rows.length) {
     return (
@@ -232,7 +283,9 @@ export default function CreatorFinances({
         <Roster
           payload={payload}
           average={average}
+          selected={current}
           busy={busy}
+          onSelect={setSelected}
           onOpen={(realmId) => {
             setSelected(realmId);
             setTab("creator");
@@ -247,6 +300,7 @@ export default function CreatorFinances({
           selected={current}
           onSelect={setSelected}
           onSync={sync}
+          onDisconnect={disconnect}
           busy={busy}
         />
       ) : null}
@@ -368,23 +422,54 @@ function FirstRun() {
   );
 }
 
-/* ──────────────────────────── roster ──────────────────────────── */
+/* ──────────────────────── all creators ──────────────────────── */
 
+/**
+ * The firm-wide roll-up, then one creator read against the average.
+ *
+ * This was a row per connected company, which is the obvious shape and the
+ * wrong one: at ~150 clients it's a wall of figures nobody scans, and the
+ * question actually asked on a call — how does *this* creator sit against the
+ * rest of the book — was the one thing you had to work out in your head.
+ *
+ * So the totals stay in the tiles, the list collapses to a picker, and the
+ * table is three lines: creator, average, difference. There's no total line in
+ * it because the total is the strip directly above; printing it twice invites
+ * the reader to check whether the two agree.
+ */
 function Roster({
   payload,
   average,
+  selected,
   busy,
+  onSelect,
   onOpen,
   onSync,
 }: {
   payload: FinancesPayload;
   average: ProfitAndLossTotals;
+  selected: CreatorFinanceRow | null;
   busy: string | null;
+  onSelect: (realmId: string) => void;
   onOpen: (realmId: string) => void;
   onSync: (realmId: string) => void;
 }) {
   const bucket = primaryBucket(payload.aggregate);
   const { excluded, mixedCurrency, primaryCurrency } = payload.aggregate;
+  const d = selected?.data ?? null;
+
+  // Losing the table loses the at-a-glance read on which connections are
+  // broken, so the unhealthy rows keep a home of their own. `disabled` is
+  // deliberately off rather than failing, and the aggregate skips it too.
+  const excludedIds = new Set(excluded.map((e) => e.realmId));
+  const attention = payload.rows.filter(
+    (row) =>
+      row.connection !== "disabled" &&
+      (excludedIds.has(row.realmId) ||
+        row.connection === "reconnect-required" ||
+        row.connection === "error" ||
+        row.stale),
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -413,79 +498,138 @@ function Roster({
       ) : null}
 
       <Panel
-        title="Every creator"
+        title="Creator vs. average"
         action={<Mono className="text-dusk">{payload.rows.length} connected</Mono>}
         bodyClassName="px-0 py-0"
       >
+        <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3.5">
+          <Field label="Creator" className="w-[280px]">
+            <SelectInput
+              value={selected?.realmId ?? ""}
+              onChange={(e) => onSelect(e.target.value)}
+            >
+              {payload.rows.map((row) => (
+                <option key={row.realmId} value={row.realmId}>
+                  {row.displayName}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+
+          {selected ? (
+            <div className="flex items-center gap-3 pb-1">
+              <StatusCell row={selected} />
+              <button
+                onClick={() => onOpen(selected.realmId)}
+                className="cursor-pointer whitespace-nowrap font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-fog"
+              >
+                Full breakdown →
+              </button>
+            </div>
+          ) : null}
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px] border-collapse text-[13px]">
+          <table className="w-full min-w-[680px] border-collapse text-[13px]">
             <thead>
               <tr>
-                <TableHead align="left">Creator</TableHead>
+                <TableHead align="left">{""}</TableHead>
                 <TableHead>Income</TableHead>
                 <TableHead>Expenses</TableHead>
                 <TableHead>Net operating</TableHead>
                 <TableHead>Net profit</TableHead>
                 <TableHead>Margin</TableHead>
-                <TableHead align="left">Status</TableHead>
-                <TableHead>{""}</TableHead>
               </tr>
             </thead>
             <tbody>
-              {payload.rows.map((row) => (
-                <RosterRow
-                  key={row.realmId}
-                  row={row}
-                  busy={busy === row.realmId}
-                  onOpen={() => onOpen(row.realmId)}
-                  onSync={() => onSync(row.realmId)}
-                />
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-edge-mid">
+              <tr>
                 <TableCell align="left">
-                  <span className="font-display font-semibold text-fog">Total</span>
+                  <span className="font-display font-semibold text-fog">
+                    {selected?.displayName ?? "—"}
+                  </span>
                 </TableCell>
-                <TotalCells totals={bucket} />
-                <TableCell align="left">
-                  <span className="text-dusk">{bucket.count} counted</span>
-                </TableCell>
-                <TableCell>{""}</TableCell>
+                {d ? <TotalCells totals={d} /> : <BlankCells />}
               </tr>
               <tr>
                 <TableCell align="left">
-                  <span className="font-display font-semibold text-fog">Average</span>
-                </TableCell>
-                <TotalCells totals={average} />
-                <TableCell align="left">
+                  <span className="text-mist">Average</span>
                   {/* Naming the denominator is the point — an average over a
                       different set of clients is a different number. */}
-                  <span className="text-dusk">of {bucket.count} creators</span>
+                  <span className="ml-2 font-body text-[11px] text-dusk">
+                    of {bucket.count} creators
+                  </span>
                 </TableCell>
-                <TableCell>{""}</TableCell>
+                <TotalCells totals={average} />
               </tr>
-            </tfoot>
+              <tr className="border-t-2 border-edge-mid">
+                <TableCell align="left">
+                  <span className="font-display font-semibold text-fog">Difference</span>
+                </TableCell>
+                {d ? <DiffCells row={d} average={average} /> : <BlankCells />}
+              </tr>
+            </tbody>
           </table>
+        </div>
+
+        <div className="px-4 pb-4">
+          <Note>
+            Difference is this creator minus the firm-wide average, with the share of
+            the average alongside it. Expenses aren&rsquo;t colour-coded: a creator
+            billing three times the average is supposed to spend more than it, so
+            above-average spend isn&rsquo;t a finding on its own — the net lines are.
+          </Note>
         </div>
       </Panel>
 
-      {excluded.length ? (
-        <Panel title={`Left out of the totals (${excluded.length})`}>
-          {excluded.map((e) => (
-            <LineRow
-              key={e.realmId}
-              label={e.displayName}
-              value={e.reason === "never" ? "never synced" : "sync failed"}
-              tone="neg"
-              size="sm"
-            />
+      {attention.length ? (
+        <Panel title={`Needs attention (${attention.length})`} bodyClassName="px-0 py-0">
+          {attention.map((row) => (
+            <div
+              key={row.realmId}
+              className="flex flex-wrap items-center justify-between gap-3 border-t border-edge px-4 py-2.5 first:border-t-0"
+            >
+              <button
+                onClick={() => onSelect(row.realmId)}
+                className="cursor-pointer text-left text-[13px] text-fog transition-colors duration-150 hover:text-magenta"
+              >
+                {row.displayName}
+              </button>
+              <div className="flex items-center gap-3">
+                {excludedIds.has(row.realmId) ? (
+                  <span className="text-[11px] text-dusk">left out of the totals</span>
+                ) : null}
+                <StatusCell row={row} />
+                {row.connection === "reconnect-required" ? (
+                  // Same top-level navigation as "Add a client" — reconnecting
+                  // and onboarding are one code path.
+                  // eslint-disable-next-line @next/next/no-html-link-for-pages
+                  <a
+                    href="/api/portal/quickbooks/connect"
+                    className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-ember hover:text-fog"
+                  >
+                    Reconnect
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => onSync(row.realmId)}
+                    disabled={busy === row.realmId}
+                    className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-fog disabled:cursor-default disabled:opacity-40"
+                  >
+                    {busy === row.realmId ? "Syncing…" : "Sync"}
+                  </button>
+                )}
+              </div>
+            </div>
           ))}
-          <Note>
-            These clients are excluded rather than counted as zero — a connection we
-            can&rsquo;t read isn&rsquo;t a client who earned nothing, and treating it as one
-            would pull the average down by a bug.
-          </Note>
+          {excluded.length ? (
+            <div className="px-4 pb-4">
+              <Note>
+                The ones marked left out of the totals are excluded rather than counted
+                as zero — a connection we can&rsquo;t read isn&rsquo;t a client who earned
+                nothing, and treating it as one would pull the average down by a bug.
+              </Note>
+            </div>
+          ) : null}
         </Panel>
       ) : null}
     </div>
@@ -508,66 +652,89 @@ function TotalCells({ totals }: { totals: ProfitAndLossTotals }) {
   );
 }
 
-function RosterRow({
-  row,
-  busy,
-  onOpen,
-  onSync,
-}: {
-  row: CreatorFinanceRow;
-  busy: boolean;
-  onOpen: () => void;
-  onSync: () => void;
-}) {
-  const d = row.data;
+/** The five figure columns, for a creator we have no readable books for. */
+function BlankCells() {
   return (
-    <tr className="transition-colors duration-150 hover:bg-white/[0.03]">
-      <TableCell align="left">
-        <button
-          onClick={onOpen}
-          className="cursor-pointer text-left font-body text-fog transition-colors duration-150 hover:text-magenta"
-        >
-          {row.displayName}
-        </button>
-      </TableCell>
-      <TableCell>{d ? usd(d.income) : "—"}</TableCell>
-      <TableCell>{d ? usd(d.expenses + d.costOfGoodsSold) : "—"}</TableCell>
-      <TableCell>{d ? usd(d.netOperatingIncome) : "—"}</TableCell>
-      <TableCell>
-        {d ? (
-          <span className={d.netIncome >= 0 ? "text-teal" : "text-danger"}>
-            {usd(d.netIncome)}
-          </span>
-        ) : (
-          "—"
-        )}
-      </TableCell>
-      <TableCell>{d ? (marginLabel(d) ?? "—") : "—"}</TableCell>
-      <TableCell align="left">
-        <StatusCell row={row} />
-      </TableCell>
-      <TableCell>
-        {row.connection === "reconnect-required" ? (
-          // Same top-level navigation as "Add a client" — reconnecting and
-          // onboarding are one code path.
-          // eslint-disable-next-line @next/next/no-html-link-for-pages
-          <a
-            href="/api/portal/quickbooks/connect"
-            className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-ember hover:text-fog"
-          >
-            Reconnect
-          </a>
-        ) : row.connection === "disabled" ? null : (
-          <button
-            onClick={onSync}
-            disabled={busy}
-            className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-fog disabled:cursor-default disabled:opacity-40"
-          >
-            {busy ? "Syncing…" : "Sync"}
-          </button>
-        )}
-      </TableCell>
-    </tr>
+    <>
+      {["income", "expenses", "netop", "net", "margin"].map((key) => (
+        <TableCell key={key}>—</TableCell>
+      ))}
+    </>
+  );
+}
+
+const expensesOf = (t: ProfitAndLossTotals) => t.expenses + t.costOfGoodsSold;
+
+function DiffCells({
+  row,
+  average,
+}: {
+  row: ProfitAndLossTotals;
+  average: ProfitAndLossTotals;
+}) {
+  return (
+    <>
+      <DiffCell value={row.income - average.income} base={average.income} />
+      <DiffCell
+        value={expensesOf(row) - expensesOf(average)}
+        base={expensesOf(average)}
+        tone={false}
+      />
+      <DiffCell
+        value={row.netOperatingIncome - average.netOperatingIncome}
+        base={average.netOperatingIncome}
+      />
+      <DiffCell value={row.netIncome - average.netIncome} base={average.netIncome} />
+      <TableCell>{marginDelta(row, average)}</TableCell>
+    </>
+  );
+}
+
+/**
+ * One delta, with its size relative to the average beside it.
+ *
+ * The relative figure is dropped when the average isn't positive: "+240% of
+ * −$4,000" is a sentence with no meaning, and a firm-wide average net loss is
+ * exactly the moment nobody should be squinting at a percentage.
+ */
+function DiffCell({
+  value,
+  base,
+  tone = true,
+}: {
+  value: MoneyCents;
+  base: MoneyCents;
+  tone?: boolean;
+}) {
+  const rel = base > 0 ? value / base : null;
+  return (
+    <TableCell>
+      <span className={!tone ? "text-mist" : value >= 0 ? "text-teal" : "text-danger"}>
+        {signedUsd(value)}
+      </span>
+      {rel !== null ? (
+        <span className="ml-1.5 text-[10.5px] text-faint">{signedPct(rel)}</span>
+      ) : null}
+    </TableCell>
+  );
+}
+
+/** A delta reads as a sign, not as accounting parentheses. */
+const signedUsd = (cents: MoneyCents) =>
+  cents === 0 ? usd(0) : (cents < 0 ? "−" : "+") + usd(Math.abs(cents));
+
+const signedPct = (v: number) => (v < 0 ? "−" : "+") + pct(Math.abs(v), 0);
+
+/** Margin is a ratio, so the gap between two of them is points, not dollars. */
+function marginDelta(row: ProfitAndLossTotals, average: ProfitAndLossTotals) {
+  const a = netMargin(row);
+  const b = netMargin(average);
+  if (a === null || b === null) return "—";
+  const points = (a - b) * 100;
+  return (
+    <span className={points >= 0 ? "text-teal" : "text-danger"}>
+      {(points < 0 ? "−" : "+") + Math.abs(points).toFixed(1)} pts
+    </span>
   );
 }
 
@@ -613,16 +780,20 @@ function CreatorDetail({
   selected,
   onSelect,
   onSync,
+  onDisconnect,
   busy,
 }: {
   rows: CreatorFinanceRow[];
   selected: CreatorFinanceRow | null;
   onSelect: (realmId: string) => void;
   onSync: (realmId: string) => void;
+  onDisconnect: (row: CreatorFinanceRow) => void;
   busy: string | null;
 }) {
   if (!selected) return <Panel title="Pick a creator">No creator selected.</Panel>;
   const d = selected.data;
+  const syncing = busy === selected.realmId;
+  const disconnecting = busy === `disconnect:${selected.realmId}`;
 
   const series: Series[] = d
     ? [
@@ -659,11 +830,21 @@ function CreatorDetail({
           </span>
           <button
             onClick={() => onSync(selected.realmId)}
-            disabled={busy === selected.realmId}
+            disabled={syncing || disconnecting}
             className="cursor-pointer rounded-full border border-white/15 px-3 py-1 font-mono text-[11px] uppercase tracking-[1px] text-mist transition-colors duration-150 hover:border-mist hover:text-fog disabled:cursor-default disabled:opacity-40"
           >
-            {busy === selected.realmId ? "Syncing…" : "Sync now"}
+            {syncing ? "Syncing…" : "Sync now"}
           </button>
+          {/* Nothing left to hand back once it's already disconnected. */}
+          {selected.connection === "disabled" ? null : (
+            <button
+              onClick={() => onDisconnect(selected)}
+              disabled={syncing || disconnecting}
+              className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-danger disabled:cursor-default disabled:opacity-40"
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          )}
         </div>
       </div>
 
