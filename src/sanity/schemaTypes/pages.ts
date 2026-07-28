@@ -97,10 +97,10 @@ export const homePage = defineType({
         defineField({ name: "sub", title: "Subline", type: "text", rows: 2 }),
         defineField({
           name: "videoUrl",
-          title: "YouTube embed URL",
+          title: "YouTube URL",
           type: "url",
           description:
-            "e.g. https://www.youtube.com/embed/XXXX — leave empty to show the placeholder frame.",
+            "Any YouTube link works — watch, share, or embed. Leave empty to show the placeholder frame.",
         }),
       ],
     }),

@@ -4,8 +4,8 @@ import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
-import ClickToPlayVideo from "@/components/schedule/ClickToPlayVideo";
 import VideoWall from "@/components/schedule/VideoWall";
+import AutoplayVideo from "@/components/ui/AutoplayVideo";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
 import type {
@@ -124,7 +124,7 @@ export default function BookingConfirmed({
           {/* the pre-call briefing video, the star of this page */}
           <Reveal delay={0.5} amount={0.15} className="relative mt-6 md:mt-9">
             {video.videoUrl ? (
-              <ClickToPlayVideo
+              <AutoplayVideo
                 url={video.videoUrl}
                 title={video.title ?? "Pre-call briefing"}
                 variant="hero"

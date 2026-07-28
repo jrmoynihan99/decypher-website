@@ -46,7 +46,7 @@ Gotchas:
 
 ## Flows worth driving
 
-- `/schedule`: empty-submit → inline field errors; fill `#s-name` +
+- `/schedule-team`: empty-submit → inline field errors; fill `#s-name` +
   `#s-email`, click "Request my call" → thank-you takeover replaces the hero
   ("See you in our call." header + click-to-play creator-video wall from the
   Video Testimonials collection; reviews reel then stats follow below). On

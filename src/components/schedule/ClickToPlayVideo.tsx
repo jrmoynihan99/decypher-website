@@ -1,27 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { videoFrameClass } from "@/components/ui/videoFrame";
+import { youTubeEmbedSrc, youTubeId, youTubeThumb } from "@/lib/youtube";
 
 /**
- * Click-to-load YouTube embed shared by the thank-you takeover videos (the
- * pre-call hero video + the creator wall). Live iframes drag any phone under,
- * so the frame shows the video's own thumbnail behind a play button and only
- * mounts the iframe (autoplaying) once tapped.
+ * Click-to-load YouTube embed — the creator wall on the thank-you takeover and
+ * the careers VSL. A grid of live iframes drags any phone under, so the frame
+ * shows the video's own thumbnail behind a play button and only mounts the
+ * iframe (playing, with sound) once tapped. The single big video at the top of
+ * a page can afford to run on its own: that one is [[AutoplayVideo]].
  */
-
-/** Video id from any YouTube URL shape (watch, share, shorts, embed). */
-export function youTubeId(url: string): string | null {
-  const m = url.match(
-    /(?:youtube(?:-nocookie)?\.com\/(?:embed\/|watch\?(?:.*&)?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/,
-  );
-  return m ? m[1] : null;
-}
 
 /** Embed src that starts playing immediately (the visitor already pressed play). */
 function playSrc(url: string): string {
   const id = youTubeId(url);
-  if (id)
-    return `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0`;
+  if (id) return youTubeEmbedSrc(id, { autoplay: true });
   return `${url}${url.includes("?") ? "&" : "?"}autoplay=1`;
 }
 
@@ -40,13 +34,7 @@ export default function ClickToPlayVideo({
   const id = youTubeId(url);
   const hero = variant === "hero";
   return (
-    <div
-      className={`group relative aspect-video overflow-hidden border border-edge-mid bg-[linear-gradient(160deg,#16141D,#0D0B13)] transition-[border-color,box-shadow] duration-300 hover:border-magenta/40 ${
-        hero
-          ? "rounded-[20px] shadow-[0_28px_80px_rgba(0,0,0,.55)] hover:shadow-[0_34px_90px_-20px_rgba(255,45,120,.42)] md:rounded-[24px]"
-          : "rounded-[18px] shadow-[0_18px_50px_rgba(0,0,0,.45)] hover:shadow-[0_22px_60px_-18px_rgba(255,45,120,.4)]"
-      }`}
-    >
+    <div className={videoFrameClass(variant)}>
       {playing ? (
         <iframe
           src={playSrc(url)}
@@ -69,13 +57,13 @@ export default function ClickToPlayVideo({
             // load when the decoded image is suspiciously small.
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={`https://i.ytimg.com/vi/${id}/${hero ? "maxresdefault" : "hqdefault"}.jpg`}
+              src={youTubeThumb(id, hero ? "maxres" : "hq")}
               alt=""
               loading="lazy"
               onLoad={(e) => {
                 const img = e.currentTarget;
                 if (img.naturalWidth < 320 && !img.src.includes("hqdefault"))
-                  img.src = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+                  img.src = youTubeThumb(id, "hq");
               }}
               className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
             />

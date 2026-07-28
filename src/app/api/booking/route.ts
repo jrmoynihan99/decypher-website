@@ -17,7 +17,7 @@ import {
  *
  * Two ways in, and a caller sends exactly one:
  *
- *   band   — /schedule. The income band picks the event type (see
+ *   band   — /schedule-team. The income band picks the event type (see
  *            eventTypeForBand; that rule mirrors a Calendly routing form the
  *            API can't read).
  *   event  — the affiliate pages. A fixed call, no income gate, named by an

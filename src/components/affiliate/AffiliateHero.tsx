@@ -20,7 +20,7 @@ type HeroContent = NonNullable<AffiliatePageDoc["hero"]>;
  * pushing it to a testimonial section further down would spend that trust on
  * scrolling.
  *
- * The CTA jumps to the booking panel rather than /schedule: the call is already
+ * The CTA jumps to the booking panel rather than /schedule-team: the call is already
  * on this page, and sending them to the generic booking page would drop the
  * partner's context and re-ask the income question this call doesn't need.
  */

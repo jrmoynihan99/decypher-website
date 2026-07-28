@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import ScaleReveal from "@/components/reveal/ScaleReveal";
+import AutoplayVideo from "@/components/ui/AutoplayVideo";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import type { SectionHeadingContent } from "@/sanity/types";
 
 /**
  * Video frame: scales up and glows as it approaches the center of the
- * viewport. With a videoUrl from the CMS it renders the real embed;
- * without one it shows the on-brand placeholder frame.
+ * viewport. With a videoUrl from the CMS it renders the real player —
+ * autoplaying muted, click anywhere to unmute; without one it shows the
+ * on-brand placeholder frame.
  */
 export default function VideoSection({
   content,
@@ -71,15 +73,19 @@ export default function VideoSection({
           // NB: [transform:...] not scale-[.88] — Tailwind v4 scale utilities
           // use the standalone `scale` property, which would keep multiplying
           // against the scroll handler's inline `transform` scale.
-          className="relative aspect-video overflow-hidden rounded-[22px] border border-edge-mid bg-[linear-gradient(160deg,#16141D,#0D0B13)] shadow-[0_30px_80px_rgba(0,0,0,.55)] [transform:scale(.88)]"
+          // With a real video AutoplayVideo brings its own frame, so the
+          // placeholder chrome would only double the border.
+          className={`relative [transform:scale(.88)] ${
+            content.videoUrl
+              ? ""
+              : "aspect-video overflow-hidden rounded-[22px] border border-edge-mid bg-[linear-gradient(160deg,#16141D,#0D0B13)] shadow-[0_30px_80px_rgba(0,0,0,.55)]"
+          }`}
         >
           {content.videoUrl ? (
-            <iframe
-              src={content.videoUrl}
+            <AutoplayVideo
+              url={content.videoUrl}
               title={content.title ?? "Video"}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              className="absolute inset-0 h-full w-full border-0"
+              variant="hero"
             />
           ) : (
             <>
