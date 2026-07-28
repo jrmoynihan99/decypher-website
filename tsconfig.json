@@ -30,5 +30,10 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // "functions" is a separate deployment target with its own tsconfig, its own
+  // package.json and its own node_modules. Left in, the "**/*.ts" above pulls it
+  // into the Next build — which typechecks fine locally, where functions/
+  // node_modules exists, and fails on Vercel, where only the root package is
+  // installed and firebase-functions isn't there.
+  "exclude": ["node_modules", "functions"]
 }
