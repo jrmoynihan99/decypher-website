@@ -352,7 +352,7 @@ function pageDocs() {
       _id: "schedulePage",
       _type: "schedulePage",
       title: "Book a Call",
-      slug: { current: "schedule" },
+      slug: { current: "schedule-team" },
       seo: {
         title: "Book a Call — DeCypher Financials",
         description:
@@ -489,7 +489,7 @@ function settingsDoc(logoAssetId) {
       description:
         "Tax is a creator's biggest expense. We find the strategies hiding in your numbers — so you keep more of every brand deal, sponsorship, and payout.",
     },
-    consultCta: { label: "Free Consultation", href: "/schedule" },
+    consultCta: { label: "Free Consultation", href: "/schedule-team" },
     navLinks: withKeys([
       { _type: "navLink", label: "Our Creators", href: "/creators" },
       { _type: "navLink", label: "Services", href: "/services" },
@@ -502,7 +502,7 @@ function settingsDoc(logoAssetId) {
         { _type: "navLink", label: "Services", href: "/services" },
         { _type: "navLink", label: "Our Creators", href: "/creators" },
         { _type: "navLink", label: "Our Team", href: "/team" },
-        { _type: "navLink", label: "Book a Call", href: "/schedule" },
+        { _type: "navLink", label: "Book a Call", href: "/schedule-team" },
       ]),
       phone: "(978) 409-4901",
       address: "975 Chestnut St",

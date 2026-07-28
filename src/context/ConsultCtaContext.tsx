@@ -7,7 +7,10 @@ export interface ConsultCta {
   href: string;
 }
 
-const DEFAULTS: ConsultCta = { label: "Free Consultation", href: "/schedule" };
+const DEFAULTS: ConsultCta = {
+  label: "Free Consultation",
+  href: "/schedule-team",
+};
 
 const ConsultCtaContext = createContext<ConsultCta>(DEFAULTS);
 

@@ -39,7 +39,7 @@ export const siteSettings = defineType({
           name: "href",
           title: "Link",
           type: "string",
-          initialValue: "/schedule",
+          initialValue: "/schedule-team",
           description: "Where the button goes — normally the Book a Call page route.",
         }),
       ],

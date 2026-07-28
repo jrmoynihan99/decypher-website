@@ -16,7 +16,7 @@ import SectionHeading from "@/components/ui/SectionHeading";
  * someone who's been sent here by a person they trust is both redundant and a
  * good way to lose them.
  *
- * Unlike /schedule, confirmation replaces only this panel rather than taking
+ * Unlike /schedule-team, confirmation replaces only this panel rather than taking
  * over the page. The value stack and the partner's endorsement above are what
  * got them to book; blanking those out the moment they do would throw away the
  * reassurance right when second thoughts arrive.

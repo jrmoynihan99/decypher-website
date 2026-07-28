@@ -43,7 +43,7 @@ export default function ScheduleHero({
   const [booking, setBooking] = useState<Booking | null>(null);
   const [preview, setPreview] = useState(false);
 
-  // /schedule?confirmed shows the thank-you takeover without booking a real
+  // /schedule-team?confirmed shows the thank-you takeover without booking a real
   // call — for Studio editors checking copy and for Playwright screenshots.
   // An effect (not a state initializer) so server and first client render agree.
   useEffect(() => {
