@@ -52,7 +52,12 @@ export default function PortalShell({
       </header>
 
       <div className="flex">
-        <aside className="sticky top-16 hidden h-[calc(100svh-4rem)] w-[228px] flex-none flex-col border-r border-edge-soft md:flex">
+        {/* Offset and height are 4rem + 1px, not 4rem: the header is a 4rem bar
+            plus its own bottom border, and its height is auto so that border
+            adds to it. Subtracting only 4rem makes the rail a pixel taller than
+            the space beneath the header — enough to give every portal page a
+            permanent 1px of scroll. */}
+        <aside className="sticky top-[calc(4rem+1px)] hidden h-[calc(100svh-4rem-1px)] w-[228px] flex-none flex-col border-r border-edge-soft md:flex">
           {/* nav scrolls if it outgrows the rail; the user block never does */}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <SidebarRail isAdmin={isAdmin} permissions={session.permissions} />

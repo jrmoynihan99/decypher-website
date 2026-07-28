@@ -1,0 +1,182 @@
+{
+  "QueryResponse": {
+    "Account": [
+      {
+        "Id": "1",
+        "Name": "YouTube AdSense",
+        "FullyQualifiedName": "YouTube AdSense",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "ServiceFeeIncome",
+        "Active": true
+      },
+      {
+        "Id": "2",
+        "Name": "Brand Partnerships",
+        "FullyQualifiedName": "Brand Partnerships",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "ServiceFeeIncome",
+        "Active": true
+      },
+      {
+        "Id": "3",
+        "Name": "Sponsorships",
+        "FullyQualifiedName": "Brand Partnerships:Sponsorships",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "ServiceFeeIncome",
+        "SubAccount": true,
+        "Active": true
+      },
+      {
+        "Id": "4",
+        "Name": "Integrations",
+        "FullyQualifiedName": "Brand Partnerships:Integrations",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "ServiceFeeIncome",
+        "SubAccount": true,
+        "Active": true
+      },
+      {
+        "Id": "5",
+        "Name": "Merch Sales",
+        "FullyQualifiedName": "Merch Sales",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "SalesOfProductIncome",
+        "Active": true
+      },
+      {
+        "Id": "6",
+        "Name": "Affiliate Commissions",
+        "FullyQualifiedName": "Affiliate Commissions",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "ServiceFeeIncome",
+        "Active": true
+      },
+      {
+        "Id": "7",
+        "Name": "Refunds & Chargebacks",
+        "FullyQualifiedName": "Refunds & Chargebacks",
+        "Classification": "Revenue",
+        "AccountType": "Income",
+        "AccountSubType": "DiscountsRefundsGiven",
+        "Active": true
+      },
+      {
+        "Id": "20",
+        "Name": "Merch Production Costs",
+        "FullyQualifiedName": "Merch Production Costs",
+        "Classification": "Expense",
+        "AccountType": "Cost of Goods Sold",
+        "AccountSubType": "SuppliesMaterialsCogs",
+        "Active": true
+      },
+      {
+        "Id": "30",
+        "Name": "Contract Labor",
+        "FullyQualifiedName": "Contract Labor",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "OtherMiscellaneousServiceCost",
+        "Active": true
+      },
+      {
+        "Id": "31",
+        "Name": "Editing Services",
+        "FullyQualifiedName": "Editing Services",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "OtherMiscellaneousServiceCost",
+        "Active": true
+      },
+      {
+        "Id": "32",
+        "Name": "Software & Subscriptions",
+        "FullyQualifiedName": "Software & Subscriptions",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "DuesSubscriptions",
+        "Active": true
+      },
+      {
+        "Id": "33",
+        "Name": "Advertising",
+        "FullyQualifiedName": "Advertising",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "AdvertisingPromotional",
+        "Active": true
+      },
+      {
+        "Id": "34",
+        "Name": "Equipment",
+        "FullyQualifiedName": "Equipment",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "EquipmentRental",
+        "Active": true
+      },
+      {
+        "Id": "35",
+        "Name": "Travel",
+        "FullyQualifiedName": "Travel",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "Travel",
+        "Active": true
+      },
+      {
+        "Id": "36",
+        "Name": "Meals and Entertainment",
+        "FullyQualifiedName": "Meals and Entertainment",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "EntertainmentMeals",
+        "Active": true
+      },
+      {
+        "Id": "37",
+        "Name": "Legal & Professional Fees",
+        "FullyQualifiedName": "Legal & Professional Fees",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "LegalProfessionalFees",
+        "Active": true
+      },
+      {
+        "Id": "38",
+        "Name": "Bank Charges",
+        "FullyQualifiedName": "Bank Charges",
+        "Classification": "Expense",
+        "AccountType": "Expense",
+        "AccountSubType": "BankCharges",
+        "Active": true
+      },
+      {
+        "Id": "50",
+        "Name": "Interest Earned",
+        "FullyQualifiedName": "Interest Earned",
+        "Classification": "Revenue",
+        "AccountType": "Other Income",
+        "AccountSubType": "InterestEarned",
+        "Active": true
+      },
+      {
+        "Id": "60",
+        "Name": "Interest Paid",
+        "FullyQualifiedName": "Interest Paid",
+        "Classification": "Expense",
+        "AccountType": "Other Expense",
+        "AccountSubType": "InterestPaid",
+        "Active": true
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 19
+  },
+  "time": "2026-07-28T08:00:00.000-07:00"
+}

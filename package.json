@@ -10,7 +10,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "portal:admin": "node scripts/portal-admin.mjs"
+    "portal:admin": "node scripts/portal-admin.mjs",
+    "qb:check": "node scripts/quickbooks-parse-check.mjs",
+    "qb:introspect": "node scripts/quickbooks-introspect.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.1",

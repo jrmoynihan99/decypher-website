@@ -198,10 +198,9 @@ export async function getTestimonials(): Promise<{
     followers?: string;
     category?: string;
     accent?: TestimonialAccent;
-    row: "a" | "b";
   }[] = await client.fetch(
     `*[_type == "testimonial"] | order(order asc){
-      quote, name, handle, image, followers, category, accent, row
+      quote, name, handle, image, followers, category, accent
     }`,
   );
   const toCard = (t: (typeof rows)[number]): CmsTestimonial => ({
@@ -215,8 +214,15 @@ export async function getTestimonials(): Promise<{
     img: t.image ? urlFor(t.image).width(160).height(160).url() : undefined,
     ...TESTIMONIAL_ACCENTS[t.accent ?? "magenta"],
   });
+  // Dealt alternately down the site order instead of read off a per-document
+  // `row` field. That field was a required radio defaulting to "a", so every
+  // testimonial added after the seed landed in the top row — it reached 60
+  // against the bottom row's 3, which stretched that row and (the marquee's
+  // pace being track-width / duration) ran it ~20x faster. Alternating keeps
+  // the two rows within one card of each other no matter what editors add.
+  const cards = rows.map(toCard);
   return {
-    rowA: rows.filter((t) => t.row === "a").map(toCard),
-    rowB: rows.filter((t) => t.row === "b").map(toCard),
+    rowA: cards.filter((_, i) => i % 2 === 0),
+    rowB: cards.filter((_, i) => i % 2 === 1),
   };
 }

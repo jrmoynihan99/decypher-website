@@ -1,0 +1,8 @@
+node_modules/
+lib/
+
+# Non-secret function params (SITE_URL). Safe to commit if you'd rather pin it,
+# but left out by default so a local override can't ship by accident.
+.env
+.env.*
+!.env.example

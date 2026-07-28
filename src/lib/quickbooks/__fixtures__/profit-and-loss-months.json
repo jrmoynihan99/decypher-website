@@ -1,0 +1,457 @@
+{
+  "Header": {
+    "Time": "2026-07-28T08:00:00.000-07:00",
+    "ReportName": "ProfitAndLoss",
+    "ReportBasis": "Accrual",
+    "StartPeriod": "2026-05-01",
+    "EndPeriod": "2026-07-31",
+    "SummarizeColumnsBy": "Month",
+    "Currency": "USD",
+    "Option": [
+      { "Name": "AccountingStandard", "Value": "GAAP" },
+      { "Name": "NoReportData", "Value": "false" }
+    ]
+  },
+  "Columns": {
+    "Column": [
+      {
+        "ColTitle": "",
+        "ColType": "Account",
+        "MetaData": [{ "Name": "ColKey", "Value": "account" }]
+      },
+      {
+        "ColTitle": "May 2026",
+        "ColType": "Money",
+        "MetaData": [
+          { "Name": "StartDate", "Value": "2026-05-01" },
+          { "Name": "EndDate", "Value": "2026-05-31" },
+          { "Name": "ColKey", "Value": "May 2026" }
+        ]
+      },
+      {
+        "ColTitle": "Jun 2026",
+        "ColType": "Money",
+        "MetaData": [
+          { "Name": "StartDate", "Value": "2026-06-01" },
+          { "Name": "EndDate", "Value": "2026-06-30" },
+          { "Name": "ColKey", "Value": "Jun 2026" }
+        ]
+      },
+      {
+        "ColTitle": "Jul 2026",
+        "ColType": "Money",
+        "MetaData": [
+          { "Name": "StartDate", "Value": "2026-07-01" },
+          { "Name": "EndDate", "Value": "2026-07-31" },
+          { "Name": "ColKey", "Value": "Jul 2026" }
+        ]
+      },
+      {
+        "ColTitle": "Total",
+        "ColType": "Money",
+        "MetaData": [{ "Name": "ColKey", "Value": "total" }]
+      }
+    ]
+  },
+  "Rows": {
+    "Row": [
+      {
+        "Header": {
+          "ColData": [
+            { "value": "Income" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                { "value": "YouTube AdSense", "id": "1" },
+                { "value": "12400.00" },
+                { "value": "15220.50" },
+                { "value": "11905.75" },
+                { "value": "39526.25" }
+              ],
+              "type": "Data"
+            },
+            {
+              "Header": {
+                "ColData": [
+                  { "value": "Brand Partnerships", "id": "2" },
+                  { "value": "1500.00" },
+                  { "value": "2000.00" },
+                  { "value": "1000.00" },
+                  { "value": "4500.00" }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "ColData": [
+                      { "value": "Sponsorships", "id": "3" },
+                      { "value": "25000.00" },
+                      { "value": "18000.00" },
+                      { "value": "32500.00" },
+                      { "value": "75500.00" }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      { "value": "Integrations", "id": "4" },
+                      { "value": "8000.00" },
+                      { "value": "" },
+                      { "value": "12000.00" },
+                      { "value": "20000.00" }
+                    ],
+                    "type": "Data"
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  { "value": "Total Brand Partnerships" },
+                  { "value": "34500.00" },
+                  { "value": "20000.00" },
+                  { "value": "45500.00" },
+                  { "value": "100000.00" }
+                ]
+              },
+              "type": "Section"
+            },
+            {
+              "ColData": [
+                { "value": "Merch Sales", "id": "5" },
+                { "value": "3210.40" },
+                { "value": "4102.15" },
+                { "value": "2880.00" },
+                { "value": "10192.55" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Affiliate Commissions", "id": "6" },
+                { "value": "1850.25" },
+                { "value": "2300.00" },
+                { "value": "1975.50" },
+                { "value": "6125.75" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Refunds & Chargebacks", "id": "7" },
+                { "value": "(450.00)" },
+                { "value": "(1200.00)" },
+                { "value": "(275.50)" },
+                { "value": "(1925.50)" }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            { "value": "Total Income" },
+            { "value": "51510.65" },
+            { "value": "40422.65" },
+            { "value": "61985.75" },
+            { "value": "153919.05" }
+          ]
+        },
+        "type": "Section",
+        "group": "Income"
+      },
+      {
+        "Header": {
+          "ColData": [
+            { "value": "Cost of Goods Sold" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                { "value": "Merch Production Costs", "id": "20" },
+                { "value": "1420.00" },
+                { "value": "1880.50" },
+                { "value": "1105.00" },
+                { "value": "4405.50" }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            { "value": "Total Cost of Goods Sold" },
+            { "value": "1420.00" },
+            { "value": "1880.50" },
+            { "value": "1105.00" },
+            { "value": "4405.50" }
+          ]
+        },
+        "type": "Section",
+        "group": "COGS"
+      },
+      {
+        "Summary": {
+          "ColData": [
+            { "value": "GROSS PROFIT" },
+            { "value": "50090.65" },
+            { "value": "38542.15" },
+            { "value": "60880.75" },
+            { "value": "149513.55" }
+          ]
+        },
+        "type": "Section",
+        "group": "GrossProfit"
+      },
+      {
+        "Header": {
+          "ColData": [
+            { "value": "Expenses" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                { "value": "Contract Labor", "id": "30" },
+                { "value": "8500.00" },
+                { "value": "9200.00" },
+                { "value": "11000.00" },
+                { "value": "28700.00" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Editing Services", "id": "31" },
+                { "value": "4200.00" },
+                { "value": "4200.00" },
+                { "value": "5600.00" },
+                { "value": "14000.00" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Software & Subscriptions", "id": "32" },
+                { "value": "890.45" },
+                { "value": "912.30" },
+                { "value": "1045.88" },
+                { "value": "2848.63" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Advertising", "id": "33" },
+                { "value": "2500.00" },
+                { "value": "1800.00" },
+                { "value": "3200.00" },
+                { "value": "7500.00" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Equipment", "id": "34" },
+                { "value": "" },
+                { "value": "3499.99" },
+                { "value": "" },
+                { "value": "3499.99" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Travel", "id": "35" },
+                { "value": "1250.75" },
+                { "value": "" },
+                { "value": "2840.20" },
+                { "value": "4090.95" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Meals and Entertainment", "id": "36" },
+                { "value": "420.18" },
+                { "value": "385.90" },
+                { "value": "610.45" },
+                { "value": "1416.53" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Legal & Professional Fees", "id": "37" },
+                { "value": "1500.00" },
+                { "value": "1500.00" },
+                { "value": "1500.00" },
+                { "value": "4500.00" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Bank Charges", "id": "38" },
+                { "value": "145.20" },
+                { "value": "168.75" },
+                { "value": "152.40" },
+                { "value": "466.35" }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Uncategorized Expense" },
+                { "value": "320.00" },
+                { "value": "" },
+                { "value": "180.00" },
+                { "value": "500.00" }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            { "value": "Total Expenses" },
+            { "value": "19726.58" },
+            { "value": "21666.94" },
+            { "value": "26128.93" },
+            { "value": "67522.45" }
+          ]
+        },
+        "type": "Section",
+        "group": "Expenses"
+      },
+      {
+        "Summary": {
+          "ColData": [
+            { "value": "NET OPERATING INCOME" },
+            { "value": "30364.07" },
+            { "value": "16875.21" },
+            { "value": "34751.82" },
+            { "value": "81991.10" }
+          ]
+        },
+        "type": "Section",
+        "group": "NetOperatingIncome"
+      },
+      {
+        "Header": {
+          "ColData": [
+            { "value": "Other Income" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                { "value": "Interest Earned", "id": "50" },
+                { "value": "42.15" },
+                { "value": "44.80" },
+                { "value": "41.90" },
+                { "value": "128.85" }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            { "value": "Total Other Income" },
+            { "value": "42.15" },
+            { "value": "44.80" },
+            { "value": "41.90" },
+            { "value": "128.85" }
+          ]
+        },
+        "type": "Section",
+        "group": "OtherIncome"
+      },
+      {
+        "Header": {
+          "ColData": [
+            { "value": "Other Expenses" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" },
+            { "value": "" }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                { "value": "Interest Paid", "id": "60" },
+                { "value": "210.00" },
+                { "value": "210.00" },
+                { "value": "210.00" },
+                { "value": "630.00" }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            { "value": "Total Other Expenses" },
+            { "value": "210.00" },
+            { "value": "210.00" },
+            { "value": "210.00" },
+            { "value": "630.00" }
+          ]
+        },
+        "type": "Section",
+        "group": "OtherExpenses"
+      },
+      {
+        "Summary": {
+          "ColData": [
+            { "value": "NET OTHER INCOME" },
+            { "value": "-167.85" },
+            { "value": "-165.20" },
+            { "value": "-168.10" },
+            { "value": "-501.15" }
+          ]
+        },
+        "type": "Section",
+        "group": "NetOtherIncome"
+      },
+      {
+        "Summary": {
+          "ColData": [
+            { "value": "NET INCOME" },
+            { "value": "30196.22" },
+            { "value": "16710.01" },
+            { "value": "34583.72" },
+            { "value": "81489.95" }
+          ]
+        },
+        "type": "Section",
+        "group": "NetIncome"
+      }
+    ]
+  }
+}

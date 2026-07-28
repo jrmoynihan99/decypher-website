@@ -164,6 +164,10 @@ export default function Marquee({
     };
 
     const onDown = (e: PointerEvent) => {
+      // Leave interactive children alone. Capturing the pointer here retargets
+      // the resulting click to the track, so a button inside the strip would
+      // never fire — opting out of the drag is what makes it clickable.
+      if ((e.target as HTMLElement | null)?.closest?.("[data-nodrag]")) return;
       dragging = true;
       velocity = 0;
       lastX = e.clientX;

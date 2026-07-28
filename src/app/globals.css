@@ -239,6 +239,31 @@ body {
   }
 }
 
+/* Range slider thumb for the portal widgets. Plain CSS, not a Tailwind
+   @utility: the thumb only exists as a vendor pseudo-element, which arbitrary
+   variants can't reach portably. The track is painted inline by <Slider> so
+   the magenta fill can follow the value. */
+.widget-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--color-magenta);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(255, 45, 120, 0.4);
+}
+
+.widget-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--color-magenta);
+  cursor: pointer;
+}
+
 /* Pre-hydration resting state for decrypt headings: the server-rendered copy
    ships already blurred (blur value = REVEAL_BLUR in lib/decrypt.ts) so the
    finished text never flashes before the scramble takes over. The decrypt
