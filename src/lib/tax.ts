@@ -327,7 +327,12 @@ export function fmt(n: number): string {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
-function marginal(base: number, b: Bracket[]): number {
+/**
+ * Tax owed on `base` under a progressive bracket table. Exported because the
+ * portal widgets (lib/widget-tax.ts) model the same brackets with different
+ * deduction switches — they must not carry a second copy of the tables.
+ */
+export function marginal(base: number, b: Bracket[]): number {
   let t = 0;
   for (let i = 0; i < b.length; i++) {
     const [lo, r] = b[i];
@@ -338,7 +343,8 @@ function marginal(base: number, b: Bracket[]): number {
   return t;
 }
 
-function marginalRate(base: number, b: Bracket[]): number {
+/** The single bracket rate `base` lands in — not the effective rate. */
+export function marginalRate(base: number, b: Bracket[]): number {
   let rate = b[0][1];
   for (let i = 0; i < b.length; i++) {
     if (base > b[i][0]) rate = b[i][1];
@@ -347,7 +353,11 @@ function marginalRate(base: number, b: Bracket[]): number {
   return rate;
 }
 
-function stateTaxFor(base: number, name: string, status: FilingStatus): number {
+export function stateTaxFor(
+  base: number,
+  name: string,
+  status: FilingStatus,
+): number {
   const s = TAX.states[name];
   if (!s || s.none) return 0;
   if (s.flat != null) {

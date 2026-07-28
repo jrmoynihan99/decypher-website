@@ -148,32 +148,18 @@ export const testimonial = defineType({
       initialValue: "magenta",
       description: "Badge color — keeps cards on the brand palette.",
     }),
-    defineField({
-      name: "row",
-      title: "Marquee row",
-      type: "string",
-      options: {
-        list: [
-          { title: "Top row", value: "a" },
-          { title: "Bottom row", value: "b" },
-        ],
-        layout: "radio",
-        direction: "horizontal",
-      },
-      initialValue: "a",
-      validation: (r) => r.required(),
-      description: "The reviews reel scrolls two rows in opposite directions.",
-    }),
+    // `row` is retained, hidden, only so the value still on existing documents
+    // doesn't trip Studio's unknown-field warning. The reel now deals its two
+    // rows alternately down `order` (see getTestimonials) — picking a row by
+    // hand is what let the top row grow to 60 cards against the bottom's 3.
+    defineField({ name: "row", type: "string", hidden: true }),
     defineField({ name: "order", type: "number", validation: (r) => r.required() }),
   ],
   orderings: [
     {
       title: "Site order",
       name: "orderAsc",
-      by: [
-        { field: "row", direction: "asc" },
-        { field: "order", direction: "asc" },
-      ],
+      by: [{ field: "order", direction: "asc" }],
     },
   ],
   preview: {

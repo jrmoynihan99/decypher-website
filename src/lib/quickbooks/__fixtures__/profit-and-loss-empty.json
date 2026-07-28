@@ -1,0 +1,30 @@
+{
+  "Header": {
+    "Time": "2026-07-28T08:00:00.000-07:00",
+    "ReportName": "ProfitAndLoss",
+    "ReportBasis": "Accrual",
+    "StartPeriod": "1990-01-01",
+    "EndPeriod": "1990-12-31",
+    "SummarizeColumnsBy": "Month",
+    "Currency": "USD",
+    "Option": [
+      { "Name": "AccountingStandard", "Value": "GAAP" },
+      { "Name": "NoReportData", "Value": "true" }
+    ]
+  },
+  "Columns": {
+    "Column": [
+      {
+        "ColTitle": "",
+        "ColType": "Account",
+        "MetaData": [{ "Name": "ColKey", "Value": "account" }]
+      },
+      {
+        "ColTitle": "Total",
+        "ColType": "Money",
+        "MetaData": [{ "Name": "ColKey", "Value": "total" }]
+      }
+    ]
+  },
+  "Rows": {}
+}

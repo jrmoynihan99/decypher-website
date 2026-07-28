@@ -1,12 +1,13 @@
 import { requirePermission } from "@/lib/firebase/session";
-import { PORTAL_WIDGETS } from "@/components/portal/nav-items";
-import WidgetPlaceholder from "@/components/portal/WidgetPlaceholder";
-
-const widget = PORTAL_WIDGETS.find((w) => w.href === "/portal/tax-strategy")!;
+import TaxStrategyWorkbench from "@/components/portal/widgets/TaxStrategyWorkbench";
 
 export const metadata = { title: "Tax Strategy — DeCypher Portal" };
 
+/**
+ * The page is the gate; the header lives inside the workbench because it
+ * swaps — the launcher shows the tab title, an open tool shows a back link.
+ */
 export default async function TaxStrategyPage() {
   await requirePermission("tax-strategy");
-  return <WidgetPlaceholder widget={widget} />;
+  return <TaxStrategyWorkbench />;
 }

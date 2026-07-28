@@ -1,0 +1,22 @@
+{
+  "name": "decypher-functions",
+  "private": true,
+  "description": "Scheduled triggers for the QuickBooks sync. See src/index.ts.",
+  "main": "lib/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-functions": "^6.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -28,10 +28,22 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
   {
     href: "/portal/tax-strategy",
     name: "Tax Strategy",
-    blurb: "Model strategies against a client's numbers and save the scenarios.",
-    note: "Builds on the public estimator in lib/tax.ts",
+    blurb:
+      "Savings snapshot, shelter engine, S-corp analyzer and the property deal desk.",
+    note: "Shares the bracket tables in lib/tax.ts",
     icon: "M3 3v18h18M7 15l3.5-4 3 2.5L21 7",
     permission: "tax-strategy",
+    live: true,
+  },
+  {
+    href: "/portal/refund-calculator",
+    name: "Refund Calculator",
+    blurb:
+      "Pro-rated cancellation refunds, with the plain-English version to read out.",
+    note: "Plan pricing is set in the tool",
+    icon: "M3 10h18M7 15h4M9 3h6a2 2 0 012 2v14a2 2 0 01-2 2H9a2 2 0 01-2-2V5a2 2 0 012-2z",
+    permission: "refund-calculator",
+    live: true,
   },
   {
     href: "/portal/receipts",
@@ -52,10 +64,12 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
   {
     href: "/portal/creator-finances",
     name: "Creator Finances",
-    blurb: "Per-creator revenue, expenses and payout history in one place.",
-    note: "QuickBooks integration",
+    blurb:
+      "Per-creator profit & loss straight from their books, plus the roll-up across every client.",
+    note: "Syncs nightly from QuickBooks Online",
     icon: "M12 2v20M17 6H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
     permission: "creator-finances",
+    live: true,
   },
 ];
 
