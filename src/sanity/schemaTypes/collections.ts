@@ -87,7 +87,9 @@ export const creator = defineType({
       name: "order",
       type: "number",
       description:
-        "Sort position. The first 16 creators appear in the home hero strip and roster.",
+        "Sort position on Our Creators. The first 16 also fill the home hero " +
+        "strip, and the home roster carousel unless it's been hand-picked in " +
+        "Home → Roster.",
       validation: (r) => r.required(),
     }),
   ],

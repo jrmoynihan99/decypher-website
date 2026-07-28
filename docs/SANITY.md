@@ -17,6 +17,14 @@ The entire site is content-driven from Sanity (project `076c9ywj`, dataset
   home hero strip and roster. Job Openings are the role cards on Careers —
   each card links to its `Apply link` (a mailto or job-post URL), and an
   empty collection shows the page's editable empty state instead.
+- **Legal Pages** — privacy policy and terms of use, served at
+  `/legal/<slug>` by `src/app/(site)/legal/[slug]`. Also a list, so more can
+  be added without a deploy. Unlike a page document the *entire* text is one
+  rich-text `body` field — these are documents, not templates. Two
+  consequences: a change leaves no commit trail and passes through no review
+  (take legal copy to counsel before publishing), and **the URLs are
+  registered with Intuit's app assessment**, so renaming a slug breaks a link
+  someone external is relying on.
 - **Site Settings** — logo, navbar links, footer, stats, default SEO, and
   the global consultation button (label + link).
 
@@ -89,3 +97,10 @@ Careers page, the three starter Job Openings, and the Book-a-Call thank-you
 copy. Unlike the migration it never overwrites: new documents use
 `createIfNotExists` and the schedule page is patched with `setIfMissing`,
 so it is safe to re-run at any time.
+
+`npm run legal:seed` (`scripts/seed-legal.mjs`) seeded the privacy policy
+and terms of use. Also `createIfNotExists`, so re-running never clobbers a
+Studio edit — to start a document over, delete it in Studio first. The
+drafted copy ships with `[BRACKETED]` blanks (entity name, address,
+retention period, governing-law state); Studio shows a warning listing the
+ones still outstanding until they are filled in.

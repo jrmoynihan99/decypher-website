@@ -3,8 +3,11 @@
 /**
  * The Tax Strategy tab: four tools behind one permission.
  *
+ * Every tool here is client-facing: the tab gets screen-shared on a call, so
+ * the copy inside speaks to the creator ("your numbers"), never about them.
+ *
  * The tab opens on a launcher rather than a tool, because "tax strategy" is a
- * category, not a question — you arrive knowing which client question you're
+ * category, not a question — you arrive knowing which question you're
  * answering and pick the tool that answers it. Picking one replaces the whole
  * view so the tool gets the full column width, with a back link to the
  * launcher; only the selected tool is mounted, so the Deal Desk's 360-row
@@ -37,7 +40,7 @@ const TOOLS = [
     id: "shelter",
     name: "Shelter Engine",
     blurb:
-      "How much can legally be sheltered this year — Solo 401(k), SEP, Traditional and Roth IRA and HSA room by entity type, with the tax each one saves.",
+      "How much you can legally shelter this year — Solo 401(k), SEP, Traditional and Roth IRA and HSA room by entity type, with the tax each one saves.",
     tag: "Retirement",
     icon: "M12 22v-9M2 13a10 10 0 0120 0z",
     Component: ShelterEngine,
@@ -114,9 +117,9 @@ export default function TaxStrategyWorkbench() {
       </div>
 
       <p className="mt-2 max-w-xl text-sm text-muted">
-        Four tools for modelling strategies against a client&rsquo;s numbers,
-        live on the call. Nothing here is saved — the figures are for the
-        conversation, not the file.
+        Four tools for modelling strategies against your numbers, live on the
+        call. Nothing here is saved — the figures are for the conversation, not
+        your return.
       </p>
 
       <div className="mt-9 grid gap-4 sm:grid-cols-2">

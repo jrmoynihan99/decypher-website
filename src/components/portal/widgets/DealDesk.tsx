@@ -595,11 +595,11 @@ export default function DealDesk() {
                 <InlineField label="Cleaning" hint="per year" prefix="$" value={f.cleaningYr} onChange={set("cleaningYr")} />
                 <InlineField label="CapEx reserve" hint="per year — set aside for big-ticket items" prefix="$" value={f.capexYr} onChange={set("capexYr")} />
                 <Note>
-                  Dollar amounts are hard-coded baselines; the percentages next to
-                  tax, insurance and PMI show what each represents against price
-                  (or loan) so you can sanity-check them. Starting values are
-                  preliminary blends across Florida, California and New York —
-                  adjust for the actual market.
+                  The percentages next to tax, insurance and PMI show what each
+                  represents against the price (or the loan), so they&rsquo;re
+                  easy to sanity-check. Starting values are blended averages
+                  across Florida, California and New York — swap in the real
+                  numbers for your market and the deal re-prices instantly.
                 </Note>
               </Panel>
             </div>
@@ -713,9 +713,9 @@ export default function DealDesk() {
                   tone={m.cashFlowYr >= 0 ? "pos" : "neg"}
                 />
                 <Note>
-                  NOI here includes HOA as an operating cost (the original sheet
-                  left it out, which slightly overstated NOI). CapEx reserve and
-                  debt service sit below NOI, per standard underwriting.
+                  NOI here counts HOA as an operating cost — leaving it out is a
+                  common way to overstate a deal. CapEx reserve and debt service
+                  sit below NOI, per standard underwriting.
                 </Note>
               </Panel>
             </div>

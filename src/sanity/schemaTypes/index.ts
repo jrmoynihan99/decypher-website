@@ -9,6 +9,7 @@ import {
   testimonial,
   videoTestimonial,
 } from "./collections";
+import { legalPage } from "./legal";
 import {
   ctaBlock,
   faqItem,
@@ -46,6 +47,7 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   schedulePage,
   careersPage,
   affiliatePage,
+  legalPage,
   // collections
   creator,
   creatorCategory,

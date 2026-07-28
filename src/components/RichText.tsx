@@ -2,7 +2,12 @@ import { PortableText, type PortableTextComponents } from "next-sanity";
 import type { PortableTextBlock } from "next-sanity";
 
 /**
- * Renders a job posting's rich description in the site voice: display-font
+ * Renders Sanity portable text in the site voice — used by job postings and
+ * the legal pages. Shared deliberately: two renderers would drift, and a legal
+ * document reading in a different typographic voice from the rest of the site
+ * looks like it came from somewhere else.
+ *
+ * Styling: display-font
  * headings, mist body copy, magenta list markers, mono H5/H6 "section labels"
  * (the eyebrow style — handy for REQUIREMENTS / BENEFITS strips). The page's
  * real H1 is the hero title, so an editor H1 here is just the largest heading
@@ -108,7 +113,7 @@ const components: PortableTextComponents = {
   },
 };
 
-export default function JobRichText({
+export default function RichText({
   value,
   className = "",
 }: {

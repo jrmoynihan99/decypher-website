@@ -9,6 +9,8 @@ export interface CreatorLink {
 }
 
 export interface Creator {
+  /** Sanity document _id — how the home roster's hand-picked list is matched. */
+  id: string;
   name: string;
   cat: string;
   group: string;

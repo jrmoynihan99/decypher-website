@@ -137,6 +137,12 @@ export interface HomePageDoc extends PageBase {
   estimatorSection?: SectionHeadingContent;
   videoSection?: SectionHeadingContent & { videoUrl?: string };
   rosterSection?: SectionHeadingContent;
+  /**
+   * Hand-picked roster carousel. Page docs are fetched with a blanket `...`,
+   * so these arrive as raw refs — HomeTemplate matches them against the
+   * creators it already fetched rather than a second dereferencing query.
+   */
+  rosterCreators?: { _ref: string }[];
   servicesSection?: SectionHeadingContent;
   testimonialsSection?: SectionHeadingContent;
   /** Heading only — the questions come from Site Settings, shared with the affiliate pages. */
@@ -286,3 +292,19 @@ export type PageDoc =
   | SchedulePageDoc
   | CareersPageDoc
   | AffiliatePageDoc;
+
+/**
+ * A legal document — privacy policy, terms of use. Deliberately not a PageDoc:
+ * those are fixed templates with named fields, whereas here the entire page is
+ * `body`, so the whole text is editable in Studio rather than in the repo.
+ */
+export interface CmsLegalPage {
+  title: string;
+  /** URL segment under /legal/ — "privacy" serves /legal/privacy. */
+  slug: string;
+  eyebrow?: string;
+  /** Rendered verbatim, so any format works. */
+  effectiveDate?: string;
+  body: PortableTextBlock[];
+  seo?: SeoContent;
+}

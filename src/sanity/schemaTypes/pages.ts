@@ -110,7 +110,29 @@ export const homePage = defineType({
       type: "sectionHeadingBlock",
       group: "roster",
       description:
-        "Cards come from the Creators collection (first 16 by order). {count} in the subline = total creators.",
+        "{count} in the subline = total creators in the collection.",
+    }),
+    defineField({
+      name: "rosterCreators",
+      title: "Roster carousel",
+      type: "array",
+      group: "roster",
+      of: [{ type: "reference", to: [{ type: "creator" }] }],
+      description:
+        "Who appears in the two scrolling rows. The list is split down the " +
+        "middle — first half scrolls one way, second half the other — and each " +
+        "row loops forever, so it needs enough faces to fill the screen before " +
+        "it comes back around. Pick at least 12; 16–24 looks best. With fewer " +
+        "than about 10 the same creators visibly repeat every few seconds. " +
+        "Leave empty to fall back to the first 16 by Sort position.",
+      validation: (r) => [
+        r.unique(),
+        r.custom((picked?: unknown[]) =>
+          !picked || picked.length === 0 || picked.length >= 12
+            ? true
+            : "Thin for an infinite carousel — 12 or more (16–24 is the sweet spot) keeps the rows from visibly repeating.",
+        ).warning(),
+      ],
     }),
     defineField({
       name: "servicesSection",

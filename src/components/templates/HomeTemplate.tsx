@@ -31,6 +31,17 @@ export default function HomeTemplate({
   services: CmsService[];
   testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
 }) {
+  // Roster carousel: the creators picked in Studio (Home → Roster), in the
+  // order they're listed there. Nothing picked → the first 16 by sort position,
+  // which is what the section did before it was curatable.
+  const picked = page.rosterCreators ?? [];
+  const byId = new Map(creators.map((c) => [c.id, c]));
+  const rosterCreators = picked.length
+    ? picked
+        .map((ref) => byId.get(ref._ref))
+        .filter((c): c is Creator => Boolean(c))
+    : creators.slice(0, 16);
+
   return (
     <main id="top" className="relative">
       <CipherRain />
@@ -72,7 +83,7 @@ export default function HomeTemplate({
         <VideoSection content={page.videoSection ?? {}} />
         <RosterSection
           content={page.rosterSection ?? {}}
-          creators={creators.slice(0, 16)}
+          creators={rosterCreators}
         />
       </div>
       {/* Services + everything below share one web: the Atlas stage's own

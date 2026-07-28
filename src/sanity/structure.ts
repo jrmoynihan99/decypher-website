@@ -27,6 +27,7 @@ const PAGES: Array<{ type: string; title: string }> = [
 const HANDLED = [
   ...PAGES.map((p) => p.type),
   "affiliatePage",
+  "legalPage",
   "creator",
   // taxonomy docs picked (and created inline) via reference fields on
   // Creator — deliberately kept out of the sidebar
@@ -66,6 +67,16 @@ export const structure: StructureResolver = (S) =>
           S.documentTypeList("affiliatePage")
             .title("Affiliate Pages")
             .defaultOrdering([{ field: "partnerName", direction: "asc" }]),
+        ),
+      // Also a list — privacy policy, terms of use, anything else of that shape.
+      // These URLs are registered with Intuit, so renaming a slug breaks a link
+      // someone external is relying on.
+      S.listItem()
+        .title("Legal Pages")
+        .child(
+          S.documentTypeList("legalPage")
+            .title("Legal Pages")
+            .defaultOrdering([{ field: "title", direction: "asc" }]),
         ),
       S.divider(),
       S.listItem()

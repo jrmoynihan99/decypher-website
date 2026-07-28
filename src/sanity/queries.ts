@@ -3,6 +3,7 @@ import { client } from "./client";
 import { urlFor } from "./image";
 import type {
   CmsJob,
+  CmsLegalPage,
   CmsService,
   CmsTeamMember,
   CmsTestimonial,
@@ -49,6 +50,30 @@ export async function getAllPageSlugs(): Promise<string[]> {
   );
 }
 
+// ── legal pages ─────────────────────────────────────────────────────
+
+/**
+ * Not in PAGE_TYPES on purpose: legal pages route under /legal/ rather than at
+ * the site root, so they get their own route and their own fetch rather than
+ * sharing the [...slug] catch-all.
+ */
+export async function getLegalPageBySlug(
+  slug: string,
+): Promise<CmsLegalPage | null> {
+  return client.fetch(
+    `*[_type == "legalPage" && slug.current == $slug][0]{
+      title, "slug": slug.current, eyebrow, effectiveDate, body, seo
+    }`,
+    { slug },
+  );
+}
+
+export async function getAllLegalPageSlugs(): Promise<string[]> {
+  return client.fetch(
+    `*[_type == "legalPage" && defined(slug.current)].slug.current`,
+  );
+}
+
 // ── site settings ───────────────────────────────────────────────────
 
 export async function getSiteSettings(): Promise<SiteSettings | null> {
@@ -75,6 +100,7 @@ export async function getCreators(): Promise<Creator[]> {
   // string values working until migrate-creator-taxonomies.mjs has run
   const rows = await client.fetch(
     `*[_type == "creator"] | order(order asc){
+      "id": _id,
       name,
       "category": coalesce(category->title, category),
       "group": coalesce(group->title, group),
@@ -83,6 +109,7 @@ export async function getCreators(): Promise<Creator[]> {
   );
   return rows.map(
     (c: RawImageDoc & Omit<Creator, "img" | "cat" | "desc"> & { category: string; description?: string }) => ({
+      id: c.id,
       name: c.name,
       cat: c.category,
       group: c.group,
