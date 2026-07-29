@@ -6,6 +6,8 @@ import type { PortableTextBlock } from "next-sanity";
 export interface SeoContent {
   title?: string;
   description?: string;
+  /** Raw image ref — run it through urlFor() to get a URL. */
+  ogImage?: SanityImageSource;
 }
 
 export interface SectionHeadingContent {

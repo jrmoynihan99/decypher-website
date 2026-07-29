@@ -43,10 +43,20 @@ export async function getPageBySlug(slug: string): Promise<PageDoc | null> {
   );
 }
 
-export async function getAllPageSlugs(): Promise<string[]> {
+/**
+ * Every routable page slug. `excludeTypes` narrows the set without changing
+ * routing — the sitemap uses it to leave affiliate landing pages out of search
+ * while generateStaticParams still prerenders them.
+ */
+export async function getAllPageSlugs(
+  opts: { excludeTypes?: readonly string[] } = {},
+): Promise<string[]> {
+  const types = PAGE_TYPES.filter(
+    (t) => !opts.excludeTypes?.includes(t),
+  );
   return client.fetch(
     `*[_type in $types && defined(slug.current)].slug.current`,
-    { types: PAGE_TYPES },
+    { types },
   );
 }
 
