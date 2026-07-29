@@ -5,6 +5,10 @@
   "engines": {
     "node": "24.x"
   },
+  "//overrides": "firebase-admin -> jwks-rsa does a CommonJS require('jose'), but jose@6 is ESM-only. Vercel runs functions with --no-experimental-require-module, so require(esm) is disabled there and every route importing firebase-admin dies at load with ERR_REQUIRE_ESM (works locally, where the flag is on). jose@5 ships a CJS build; jwks-rsa only uses importJWK/exportSPKI, identical in both majors.",
+  "overrides": {
+    "jose": "^5.10.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
