@@ -51,11 +51,13 @@ export async function GET() {
 
   return NextResponse.json({
     node: process.version,
-    // require(esm) landed in 20.19 and 22.12 — this is the whole question
-    supportsRequireEsm: (() => {
-      const [maj, min] = process.versions.node.split(".").map(Number);
-      return maj > 22 || (maj === 22 && min >= 12) || (maj === 20 && min >= 19);
-    })(),
+    // Node 24 supports require(esm), yet the probes below still throw
+    // ERR_REQUIRE_ESM — so the feature must be switched off in this process.
+    // require_module is the authoritative flag; execArgv/NODE_OPTIONS show
+    // what turned it off.
+    requireModuleEnabled: process.features.require_module ?? null,
+    execArgv: process.execArgv,
+    nodeOptions: process.env.NODE_OPTIONS ?? null,
     region: process.env.VERCEL_REGION ?? null,
     jose: { version: joseVersion, resolved: josePath },
     require: {
