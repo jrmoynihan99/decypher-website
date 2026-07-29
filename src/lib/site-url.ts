@@ -27,7 +27,13 @@ export function siteUrl(): string {
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
       : "") ||
     PRODUCTION_ORIGIN;
-  return raw.replace(/\/+$/, "");
+
+  // SITE_URL is typed into a dashboard by a person, so tolerate the two ways
+  // it gets written wrong. A bare "wedecypher.co" matters most: the root
+  // layout does `new URL(siteUrl())` for metadataBase, and an origin with no
+  // scheme throws there — turning a typo into a failed production build.
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withScheme.replace(/\/+$/, "");
 }
 
 /** Absolute URL for a site-relative path. `absoluteUrl("/team")` → origin + /team. */

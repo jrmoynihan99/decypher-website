@@ -49,3 +49,6 @@ next-env.d.ts
 
 /decipher-homepage-design
 
+
+.vercel
+.env*
