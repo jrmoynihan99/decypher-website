@@ -40,8 +40,13 @@ Content conventions:
   editable under Book a Call → Thank You. The transmission-log panel that
   echoes the visitor's own submission stays in code, and every field falls
   back to a sensible default if left empty.
-- `/services-lab` is a dev playground and stays on static fixtures
-  (`src/lib/lab-fixtures.ts`).
+- **SEO** is per-page under each page's Meta group, falling back to Site
+  Settings → Default SEO. The optional **Share image** (1200×630) is what
+  iMessage/Slack/LinkedIn show; leave it empty and the site generates a
+  branded card instead (`src/app/opengraph-image.tsx`). `/robots.txt` and
+  `/sitemap.xml` are generated from Sanity, so new job posts and legal pages
+  appear in the sitemap without a deploy. Affiliate pages are deliberately
+  left out of it — see `src/app/sitemap.ts`.
 
 ## Caching / revalidation (same pattern as aletheia-website)
 

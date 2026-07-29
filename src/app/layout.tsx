@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
+import { socialMetadata } from "@/lib/seo";
+import { siteUrl } from "@/lib/site-url";
 import { getSiteSettings } from "@/sanity/queries";
 import "./globals.css";
 
@@ -23,14 +25,24 @@ const plexMono = IBM_Plex_Mono({
 
 export async function generateMetadata(): Promise<Metadata> {
   const settings = await getSiteSettings();
+  const title =
+    settings?.defaultSeo?.title ??
+    "DeCypher Financials — Accounting for Creators";
+  const description = settings?.defaultSeo?.description;
+
   return {
-    title:
-      settings?.defaultSeo?.title ??
-      "DeCypher Financials — Accounting for Creators",
-    description: settings?.defaultSeo?.description,
+    // Every relative URL below — and in every page's metadata — resolves
+    // against this. Without it Next emits relative og:image/canonical values,
+    // which crawlers can't follow.
+    metadataBase: new URL(siteUrl()),
+    title,
+    description,
     icons: {
       icon: { url: "/favicon.webp", type: "image/webp" },
     },
+    // Site-wide share-card defaults, for routes that don't build their own
+    // (the portal, /studio, 404). No canonical here — see socialMetadata.
+    ...socialMetadata({ title, description }),
   };
 }
 

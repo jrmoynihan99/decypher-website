@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import JobDetail from "@/components/careers/JobDetail";
+import { socialMetadata } from "@/lib/seo";
 import { getAllJobSlugs, getJobBySlug, getSiteSettings } from "@/sanity/queries";
 
 // Safety net only — content updates land instantly via the Sanity webhook.
@@ -20,9 +21,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     getSiteSettings(),
   ]);
   if (!job) return {};
+  const title = `${job.title} — Careers at DeCypher`;
+  const description = job.blurb ?? settings?.defaultSeo?.description;
   return {
-    title: `${job.title} — Careers at DeCypher`,
-    description: job.blurb ?? settings?.defaultSeo?.description,
+    title,
+    description,
+    ...socialMetadata({ title, description, path: `/careers/${slug}` }),
   };
 }
 

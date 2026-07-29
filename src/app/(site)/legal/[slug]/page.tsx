@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import RichText from "@/components/RichText";
+import { socialMetadata } from "@/lib/seo";
 import { getAllLegalPageSlugs, getLegalPageBySlug } from "@/sanity/queries";
 
 /**
@@ -37,12 +38,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const doc = await getLegalPageBySlug(slug);
   if (!doc) return {};
+  const title = doc.seo?.title ?? `${doc.title} — DeCypher Financials`;
+  const description = doc.seo?.description;
   return {
-    title: doc.seo?.title ?? `${doc.title} — DeCypher Financials`,
-    description: doc.seo?.description,
+    title,
+    description,
     // Stated rather than left to the default: Intuit's reviewer has to be able
     // to reach these, and a stray noindex would be silent.
     robots: { index: true, follow: true },
+    ...socialMetadata({ title, description, path: `/legal/${slug}` }),
   };
 }
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/seo";
 import AffiliateTemplate from "@/components/templates/AffiliateTemplate";
 import CareersTemplate from "@/components/templates/CareersTemplate";
 import CreatorsTemplate from "@/components/templates/CreatorsTemplate";
@@ -15,6 +16,7 @@ import {
   getTeam,
   getTestimonials,
   getVideoTestimonials,
+  slugToPath,
 } from "@/sanity/queries";
 import { urlFor } from "@/sanity/image";
 import type { PageDoc } from "@/sanity/types";
@@ -99,15 +101,38 @@ export async function renderPage(page: PageDoc) {
   }
 }
 
-/** Page SEO with Site Settings defaults as fallback. */
+/**
+ * Page SEO with Site Settings defaults as fallback.
+ *
+ * The Share image resolves page → Site Settings → the generated card; only the
+ * first two come from Sanity, so an unset image here means socialMetadata falls
+ * through to app/opengraph-image.tsx rather than emitting nothing.
+ */
 export async function pageMetadata(slug: string): Promise<Metadata> {
   const [page, settings] = await Promise.all([
     getPageBySlug(slug),
     getSiteSettings(),
   ]);
   if (!page) return {};
+
+  const title = page.seo?.title ?? settings?.defaultSeo?.title;
+  const description =
+    page.seo?.description ?? settings?.defaultSeo?.description;
+  const share = page.seo?.ogImage ?? settings?.defaultSeo?.ogImage;
+
   return {
-    title: page.seo?.title ?? settings?.defaultSeo?.title,
-    description: page.seo?.description ?? settings?.defaultSeo?.description,
+    title,
+    description,
+    // Self-referencing canonical: the catch-all serves the same document at
+    // more than one URL shape (trailing slash, the query strings on affiliate
+    // links), and this names the one that should be indexed.
+    ...socialMetadata({
+      title,
+      description,
+      path: slugToPath(page.slug),
+      image: share
+        ? urlFor(share).width(1200).height(630).fit("crop").url()
+        : undefined,
+    }),
   };
 }

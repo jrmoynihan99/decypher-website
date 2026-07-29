@@ -128,6 +128,13 @@ export const seoBlock = defineType({
       type: "text",
       rows: 3,
     }),
+    defineField({
+      name: "ogImage",
+      title: "Share image",
+      type: "image",
+      description:
+        "Shown when the page is shared to iMessage, Slack, LinkedIn, X, etc. Use 1200×630 — anything else gets cropped to that. Empty falls back to Site Settings, then to a generated DeCypher card.",
+    }),
   ],
   options: { collapsible: true, collapsed: true },
 });
