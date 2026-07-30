@@ -24,18 +24,30 @@ export class QuickBooksError extends Error {
   readonly code: string;
   /** Safe to retry on the next sync without human involvement. */
   readonly retryable: boolean;
+  /**
+   * Intuit's per-request trace id, from the `intuit_tid` response header.
+   *
+   * Their support team looks issues up by this and nothing else, so it is
+   * folded into `message` rather than left as a field somebody has to remember
+   * to read: the message is what already reaches the logs, the per-company
+   * `lastSyncMessage`, and the status text staff see. Undefined when the
+   * request never got a response (network failure) or Intuit omitted it.
+   */
+  readonly tid?: string;
 
   constructor(
     message: string,
     status = 502,
     code = "quickbooks_error",
     retryable = false,
+    tid?: string,
   ) {
-    super(message);
+    super(tid ? `${message} [intuit_tid ${tid}]` : message);
     this.name = "QuickBooksError";
     this.status = status;
     this.code = code;
     this.retryable = retryable;
+    this.tid = tid;
   }
 }
 
@@ -48,8 +60,8 @@ export class QuickBooksError extends Error {
  * and buries the one signal the dashboard needs to show a Reconnect button.
  */
 export class QuickBooksAuthError extends QuickBooksError {
-  constructor(message: string, code = "invalid_grant") {
-    super(message, 401, code, false);
+  constructor(message: string, code = "invalid_grant", tid?: string) {
+    super(message, 401, code, false, tid);
     this.name = "QuickBooksAuthError";
   }
 }
