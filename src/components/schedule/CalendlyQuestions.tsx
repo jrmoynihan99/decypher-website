@@ -44,7 +44,9 @@ const textareaCls =
  */
 const SEP = String.fromCharCode(31); // ASCII unit separator
 const split = (v: string) => (v ? v.split(SEP).filter(Boolean) : []);
-const join = (list: string[]) => list.join(SEP);
+// Deduped on the way in, so a pick can't appear twice however it got there —
+// including "Other" text typed to match a choice that's already ticked.
+const join = (list: string[]) => Array.from(new Set(list)).join(SEP);
 
 /**
  * The form's internal encoding → what Calendly actually gets: comma-joined the
