@@ -32,9 +32,30 @@ const rowOff = "border-white/15 bg-panel-2 hover:border-magenta/40";
 const textareaCls =
   "min-h-[110px] w-full resize-y rounded-[11px] border border-white/15 bg-panel-2 px-3 py-[11px] font-body text-base text-fog outline-none transition-[border-color,box-shadow] duration-150 focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.22)]";
 
-/** Multi-select answers go to Calendly as one comma-joined string. */
-const split = (v: string) => (v ? v.split(", ").filter(Boolean) : []);
-const join = (list: string[]) => list.join(", ");
+/**
+ * A multi-select's picks live in one string, so the joiner has to be something
+ * a choice can never contain. ", " isn't: several of these choices are full
+ * sentences with commas in them ("Yes, I will show up to the meeting on time,
+ * and if I need to reschedule…"), and splitting on ", " shattered one choice
+ * into fragments that matched nothing. The row then never read as checked, so
+ * people clicked it again — and every click appended the whole sentence once
+ * more, which is what landed on the booked call. A unit separator can't appear
+ * in a Calendly choice or in typed "Other" text, so the round-trip is lossless.
+ */
+const SEP = String.fromCharCode(31); // ASCII unit separator
+const split = (v: string) => (v ? v.split(SEP).filter(Boolean) : []);
+const join = (list: string[]) => list.join(SEP);
+
+/**
+ * The form's internal encoding → what Calendly actually gets: comma-joined the
+ * way its own multi-selects are, with the unfilled "Other" placeholder dropped
+ * rather than booked as literal "__other__". A single-value answer round-trips
+ * unchanged, so every question type can go through this.
+ */
+export const toCalendlyAnswer = (value: string | undefined) =>
+  split(value ?? "")
+    .filter((s) => s !== OTHER)
+    .join(", ");
 
 export default function CalendlyQuestions({
   questions,
@@ -192,9 +213,12 @@ function ChoiceList({
   );
 }
 
-/** True when a required question has no usable answer yet. */
+/**
+ * True when a required question has no usable answer yet. Judged on what would
+ * actually be sent, so a checked-but-empty "Other" reads as unanswered whether
+ * it's the only pick or sits alongside real ones.
+ */
 export function isUnanswered(q: CalendlyQuestion, value: string | undefined) {
-  const v = (value ?? "").trim();
   if (!q.required) return false;
-  return !v || v === OTHER;
+  return !toCalendlyAnswer(value).trim();
 }
