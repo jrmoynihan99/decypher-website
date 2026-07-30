@@ -11,6 +11,7 @@ import {
 import CalendlyQuestions, {
   type Answers,
   isUnanswered,
+  toCalendlyAnswer,
 } from "@/components/schedule/CalendlyQuestions";
 import TimePicker, { BROWSER_TZ } from "@/components/schedule/TimePicker";
 import type { CalendlyQuestion } from "@/lib/calendly";
@@ -158,7 +159,8 @@ export default function ScheduleForm({
           textReminderNumber: `+1${phone.replace(/\D/g, "")}`,
           answers: loaded.questions.map((q) => ({
             question: q.name,
-            answer: answers[q.position] ?? "",
+            // Held in the form's own encoding — decode before it leaves.
+            answer: toCalendlyAnswer(answers[q.position]),
             position: q.position,
           })),
         }),
