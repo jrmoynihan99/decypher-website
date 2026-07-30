@@ -117,8 +117,14 @@ async function request<T>(
   const body = (await res.json().catch(() => null)) as QboFault | null;
   const { message, code } = faultMessage(body, res.status);
 
+  // Intuit stamps every response with a trace id and their support team looks
+  // failures up by it. Captured on the error path only: on success it is noise,
+  // but without it a ticket is "sync failed for realm X" and nobody can trace
+  // which of that night's ~300 calls actually broke.
+  const tid = res.headers.get("intuit_tid") ?? undefined;
+
   if (res.status === 401) {
-    throw new QuickBooksAuthError(message, code);
+    throw new QuickBooksAuthError(message, code, tid);
   }
   if (res.status === 403) {
     // Not a revocation: the token is valid but this company or scope is off
@@ -128,6 +134,7 @@ async function request<T>(
       403,
       code,
       false,
+      tid,
     );
   }
   throw new QuickBooksError(
@@ -135,6 +142,7 @@ async function request<T>(
     res.status,
     code,
     res.status === 429 || res.status >= 500,
+    tid,
   );
 }
 

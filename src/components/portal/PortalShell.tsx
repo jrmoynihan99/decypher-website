@@ -5,6 +5,13 @@ import SidebarUser from "@/components/portal/SidebarUser";
 import { SidebarRail, SidebarStrip } from "@/components/portal/PortalSidebar";
 
 /**
+ * Where portal users report a problem. Deliberately a real, monitored mailbox
+ * rather than a support@ alias — an address that bounces is worse than none,
+ * and Intuit's reviewers do test the contact route they're told about.
+ */
+const SUPPORT_EMAIL = "otavio@wedecypher.co";
+
+/**
  * Chrome for every signed-in portal page: full-bleed sticky header over a
  * left rail + content column.
  *
@@ -67,7 +74,27 @@ export default function PortalShell({
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 px-5 py-9 sm:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-5 py-9 sm:px-8">
+          {children}
+
+          {/* Inside <main> rather than the rail on purpose: the rail is hidden
+              below md, and a support route that disappears on a phone is not a
+              support route. Intuit's app assessment asks specifically whether
+              users can reach support from within the app. */}
+          <footer className="mt-14 border-t border-edge-soft pt-5">
+            <p className="font-mono text-[11px] leading-relaxed text-dusk">
+              Trouble with the portal or a QuickBooks connection?{" "}
+              <a
+                href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("DeCypher Portal support")}`}
+                className="text-mist underline decoration-edge-bright underline-offset-2 transition-colors hover:text-fog"
+              >
+                {SUPPORT_EMAIL}
+              </a>
+              . Include the client name and the time it happened — sync errors
+              are recorded per company with an Intuit trace id.
+            </p>
+          </footer>
+        </main>
       </div>
     </div>
   );
