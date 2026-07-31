@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
 import { getSession } from "@/lib/firebase/session";
+import { generateInviteLink } from "@/lib/firebase/users";
 import { parsePermissions, type PermissionKey } from "@/lib/permissions";
 
 /**
@@ -112,7 +113,7 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
 }
 
 /** Re-issue an invite link — reset links expire, new hires get distracted. */
-export async function POST(request: NextRequest, { params }: Ctx) {
+export async function POST(_request: NextRequest, { params }: Ctx) {
   const session = await guard();
   if (session instanceof NextResponse) return session;
 
@@ -126,14 +127,18 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         { status: 400 },
       );
     }
-    const link = await adminAuth().generatePasswordResetLink(user.email, {
-      url: `${request.nextUrl.origin}/portal/login`,
-      handleCodeInApp: false,
-    });
+    const link = await generateInviteLink(user.email);
     return NextResponse.json({ ok: true, inviteLink: link });
-  } catch {
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    console.error("[portal] re-invite failed", uid, err);
     return NextResponse.json(
-      { ok: false, message: "Could not generate an invite link" },
+      {
+        ok: false,
+        message: code
+          ? `Could not generate an invite link (${code})`
+          : "Could not generate an invite link — check the server logs",
+      },
       { status: 500 },
     );
   }

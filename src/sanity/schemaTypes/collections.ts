@@ -1,4 +1,5 @@
 import { defineField, defineType } from "sanity";
+import { pageLinkField } from "./pageLink";
 
 /**
  * Tiny taxonomy documents behind the Creator category/group pickers.
@@ -266,6 +267,7 @@ export const jobOpening = defineType({
   title: "Job opening",
   type: "document",
   fields: [
+    pageLinkField({ basePath: "/careers" }),
     defineField({ name: "title", type: "string", validation: (r) => r.required() }),
     defineField({
       name: "slug",

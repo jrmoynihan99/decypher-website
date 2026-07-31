@@ -41,6 +41,9 @@ export default function StaffManager({
   const [perms, setPerms] = useState<PermissionKey[]>([...PERMISSION_KEYS]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState("");
+  // Row actions used to fail silently — a button that does nothing reads as a
+  // frozen UI, so anything the API refuses gets said out loud above the table.
+  const [rowError, setRowError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [busyUid, setBusyUid] = useState("");
   const [accessUid, setAccessUid] = useState("");
@@ -93,30 +96,43 @@ export default function StaffManager({
     await refresh();
   };
 
-  const patch = async (uid: string, body: Record<string, unknown>) => {
+  /** Fire a row action and report whatever the API said if it refused. */
+  const act = async (uid: string, init: RequestInit, fallback: string) => {
     setBusyUid(uid);
-    await fetch(`/api/portal/users/${uid}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => {});
-    await refresh();
+    setRowError("");
+    const data = await fetch(`/api/portal/users/${uid}`, init)
+      .then((res) => res.json().catch(() => ({})))
+      .catch(() => ({}));
     setBusyUid("");
+    if (!data?.ok) setRowError(data?.message || fallback);
+    return data;
+  };
+
+  const patch = async (uid: string, body: Record<string, unknown>) => {
+    await act(
+      uid,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      "Could not update the account.",
+    );
+    await refresh();
   };
 
   const remove = async (user: StaffUser) => {
     if (!confirm(`Delete ${user.displayName}'s account? This can't be undone.`)) return;
-    setBusyUid(user.uid);
-    await fetch(`/api/portal/users/${user.uid}`, { method: "DELETE" }).catch(() => {});
+    await act(user.uid, { method: "DELETE" }, "Could not delete the account.");
     await refresh();
-    setBusyUid("");
   };
 
   const reinvite = async (user: StaffUser) => {
-    setBusyUid(user.uid);
-    const res = await fetch(`/api/portal/users/${user.uid}`, { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    setBusyUid("");
+    const data = await act(
+      user.uid,
+      { method: "POST" },
+      "Could not generate an invite link.",
+    );
     if (data?.ok) setInvite({ email: user.email, link: data.inviteLink });
   };
 
@@ -128,6 +144,12 @@ export default function StaffManager({
           link={invite.link}
           onDismiss={() => setInvite(null)}
         />
+      ) : null}
+
+      {rowError ? (
+        <div className="mt-8 rounded-[11px] border border-danger/40 bg-danger/10 px-3 py-2.5 text-sm text-danger">
+          {rowError}
+        </div>
       ) : null}
 
       <div className="mt-8 overflow-hidden rounded-[18px] border border-white/10">

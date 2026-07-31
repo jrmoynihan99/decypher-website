@@ -32,6 +32,7 @@ import {
   Mono,
   Note,
   Panel,
+  SearchSelect,
   SelectInput,
   TableCell,
   TableHead,
@@ -67,6 +68,14 @@ const COLORS = {
   expenses: "#ff2d78",
   net: "#f1eef6",
 } as const;
+
+/**
+ * The option list all three pickers share. Searchable rather than a plain
+ * select on purpose: the book is ~150 companies, so the operator arrives
+ * knowing the name and shouldn't have to scroll to find it.
+ */
+const creatorOptions = (rows: CreatorFinanceRow[]) =>
+  rows.map((row) => ({ value: row.realmId, label: row.displayName }));
 
 type Tab = "roster" | "creator" | "mapping";
 
@@ -457,6 +466,7 @@ function Roster({
   const bucket = primaryBucket(payload.aggregate);
   const { excluded, mixedCurrency, primaryCurrency } = payload.aggregate;
   const d = selected?.data ?? null;
+  const options = useMemo(() => creatorOptions(payload.rows), [payload.rows]);
 
   // Losing the table loses the at-a-glance read on which connections are
   // broken, so the unhealthy rows keep a home of their own. `disabled` is
@@ -503,18 +513,15 @@ function Roster({
         bodyClassName="px-0 py-0"
       >
         <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3.5">
-          <Field label="Creator" className="w-[280px]">
-            <SelectInput
-              value={selected?.realmId ?? ""}
-              onChange={(e) => onSelect(e.target.value)}
-            >
-              {payload.rows.map((row) => (
-                <option key={row.realmId} value={row.realmId}>
-                  {row.displayName}
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
+          <SearchSelect
+            label="Creator"
+            className="w-[280px]"
+            value={selected?.realmId ?? ""}
+            onChange={onSelect}
+            options={options}
+            placeholder="Search creators…"
+            emptyLabel="No creator by that name."
+          />
 
           {selected ? (
             <div className="flex items-center gap-3 pb-1">
@@ -790,6 +797,8 @@ function CreatorDetail({
   onDisconnect: (row: CreatorFinanceRow) => void;
   busy: string | null;
 }) {
+  const options = useMemo(() => creatorOptions(rows), [rows]);
+
   if (!selected) return <Panel title="Pick a creator">No creator selected.</Panel>;
   const d = selected.data;
   const syncing = busy === selected.realmId;
@@ -806,15 +815,15 @@ function CreatorDetail({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <Field label="Creator" className="w-[280px]">
-          <SelectInput value={selected.realmId} onChange={(e) => onSelect(e.target.value)}>
-            {rows.map((row) => (
-              <option key={row.realmId} value={row.realmId}>
-                {row.displayName}
-              </option>
-            ))}
-          </SelectInput>
-        </Field>
+        <SearchSelect
+          label="Creator"
+          className="w-[280px]"
+          value={selected.realmId}
+          onChange={onSelect}
+          options={options}
+          placeholder="Search creators…"
+          emptyLabel="No creator by that name."
+        />
         <div className="flex items-center gap-3">
           <span className="text-[11.5px] text-dusk">
             {selected.lastSyncedAt ? (
@@ -1026,18 +1035,19 @@ type MappedAccount = AccountMeta & {
  */
 function Mapping({ rows }: { rows: CreatorFinanceRow[] }) {
   const [realmId, setRealmId] = useState(rows[0]?.realmId ?? "");
+  const options = useMemo(() => creatorOptions(rows), [rows]);
 
   return (
     <div className="flex flex-col gap-5">
-      <Field label="Client" className="w-[280px]">
-        <SelectInput value={realmId} onChange={(e) => setRealmId(e.target.value)}>
-          {rows.map((row) => (
-            <option key={row.realmId} value={row.realmId}>
-              {row.displayName}
-            </option>
-          ))}
-        </SelectInput>
-      </Field>
+      <SearchSelect
+        label="Client"
+        className="w-[280px]"
+        value={realmId}
+        onChange={setRealmId}
+        options={options}
+        placeholder="Search clients…"
+        emptyLabel="No client by that name."
+      />
 
       {/* Keyed on realmId so switching client remounts with empty state. That's
           why the table below never has to reset anything in an effect — the

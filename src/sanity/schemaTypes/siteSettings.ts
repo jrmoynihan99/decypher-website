@@ -12,6 +12,7 @@ export const siteSettings = defineType({
     { name: "stats", title: "Stats" },
     { name: "faq", title: "FAQ" },
     { name: "email", title: "Email" },
+    { name: "tracking", title: "Tracking" },
   ],
   fields: [
     defineField({
@@ -134,6 +135,15 @@ export const siteSettings = defineType({
             }),
         }),
       ],
+    }),
+    defineField({
+      name: "trackingCode",
+      title: "Site-wide tracking code",
+      type: "text",
+      rows: 8,
+      group: "tracking",
+      description:
+        "The base snippet from your ads or analytics platform — the Meta pixel, a Google tag, GTM — pasted whole, script tags and all. It runs on every page of the site, which is what lets those platforms count a visit to a thank-you page as a conversion. Per-campaign conversion snippets go on the individual page instead (Thank You Pages → Conversion tracking code). Give it a minute or two after publishing before checking the live site. Anything pasted here runs in your visitors' browsers on every page, so only paste code you got from the platform itself.",
     }),
     defineField({
       name: "faqs",

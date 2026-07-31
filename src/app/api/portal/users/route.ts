@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminAuth, adminDb, isConfigured } from "@/lib/firebase/admin";
 import { getSession } from "@/lib/firebase/session";
-import { listStaff } from "@/lib/firebase/users";
+import { generateInviteLink, listStaff } from "@/lib/firebase/users";
 import { PERMISSION_KEYS, parsePermissions, type PermissionKey } from "@/lib/permissions";
 
 /**
@@ -61,14 +61,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // No password is set here — deliberately. The account is created in a state
+  // nobody can sign into, and the invite link below is the only way to give it
+  // one. That means an admin never knows a colleague's password and there's no
+  // temporary credential to leak in a chat log.
+  let uid: string;
   try {
-    // No password is set here — deliberately. The account is created in a
-    // state nobody can sign into, and the invite link below is the only way to
-    // give it one. That means an admin never knows a colleague's password and
-    // there's no temporary credential to leak in a chat log.
     const user = await adminAuth().createUser({ email, displayName, emailVerified: false });
+    uid = user.uid;
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "auth/email-already-exists") {
+      return NextResponse.json(
+        { ok: false, message: "That email already has an account" },
+        { status: 409 },
+      );
+    }
+    console.error("[portal] createUser failed", err);
+    return NextResponse.json(
+      { ok: false, message: failureMessage("Could not create the account", code) },
+      { status: 500 },
+    );
+  }
 
-    await adminDb().collection("users").doc(user.uid).set({
+  // Past this point an Auth account exists. Anything that goes wrong now has to
+  // undo it — a half-made account is worse than none, because it isn't usable
+  // and it makes the retry fail with "that email already has an account".
+  try {
+    await adminDb().collection("users").doc(uid).set({
       email,
       displayName,
       role,
@@ -81,23 +101,23 @@ export async function POST(request: NextRequest) {
       createdBy: session.email,
     });
 
-    const link = await adminAuth().generatePasswordResetLink(email, {
-      url: `${request.nextUrl.origin}/portal/login`,
-      handleCodeInApp: false,
-    });
+    const link = await generateInviteLink(email);
 
-    return NextResponse.json({ ok: true, uid: user.uid, inviteLink: link });
+    return NextResponse.json({ ok: true, uid, inviteLink: link });
   } catch (err) {
     const code = (err as { code?: string })?.code;
-    if (code === "auth/email-already-exists") {
-      return NextResponse.json(
-        { ok: false, message: "That email already has an account" },
-        { status: 409 },
-      );
-    }
+    console.error("[portal] rolling back half-created account", email, err);
+    await adminAuth().deleteUser(uid).catch(() => {});
+    await adminDb().collection("users").doc(uid).delete().catch(() => {});
     return NextResponse.json(
-      { ok: false, message: "Could not create the account" },
+      { ok: false, message: failureMessage("Could not create the account", code) },
       { status: 500 },
     );
   }
+}
+
+/** Admin-only surface, so the raw Firebase code goes to the person who can act
+ *  on it rather than dying in a log nobody reads. */
+function failureMessage(prefix: string, code?: string) {
+  return code ? `${prefix} (${code})` : `${prefix} — check the server logs`;
 }

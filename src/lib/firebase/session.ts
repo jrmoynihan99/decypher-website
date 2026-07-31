@@ -93,10 +93,19 @@ export const getSession = cache(async (): Promise<StaffSession | null> => {
   }
 });
 
-/** For pages/layouts: resolve a session or bounce to the login screen. */
+/**
+ * For pages/layouts: resolve a session or bounce to the login screen.
+ *
+ * The `stale` flag is load-bearing, not cosmetic. Getting here means a session
+ * cookie was present (the proxy would have redirected otherwise) but didn't
+ * survive verification. Without the flag the proxy sees that same cookie on the
+ * login request and bounces it straight back to /portal — an infinite redirect
+ * for anyone holding an expired or revoked cookie. The flag tells the proxy to
+ * let this one through and bin the cookie on the way past.
+ */
 export async function requireSession(): Promise<StaffSession> {
   const session = await getSession();
-  if (!session) redirect("/portal/login");
+  if (!session) redirect("/portal/login?stale=1");
   return session;
 }
 

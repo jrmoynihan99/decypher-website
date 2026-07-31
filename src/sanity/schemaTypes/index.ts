@@ -29,6 +29,7 @@ import {
   teamPage,
 } from "./pages";
 import { siteSettings } from "./siteSettings";
+import { thankYouPage } from "./thankYou";
 
 export const schemaTypes: SchemaTypeDefinition[] = [
   // objects
@@ -47,6 +48,7 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   schedulePage,
   careersPage,
   affiliatePage,
+  thankYouPage,
   legalPage,
   // collections
   creator,

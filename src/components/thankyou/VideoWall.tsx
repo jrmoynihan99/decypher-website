@@ -8,11 +8,11 @@ import DecryptOnView from "@/components/ui/DecryptOnView";
 import type { CmsVideoTestimonial, SectionHeadingContent } from "@/sanity/types";
 
 /**
- * The creator-video wall on the thank-you takeover, beneath the pre-call hero
- * video. Cards come from the Video Testimonials collection; the heading is
- * editable in Sanity (Book a Call → Thank You) with these defaults as
- * fallback. Embeds are click-to-load (ClickToPlayVideo) — a grid of live
- * YouTube iframes would drag any phone under.
+ * The creator-video wall on a thank-you page, beneath the pre-call hero video.
+ * Cards come from the Video Testimonials collection; the heading is shared by
+ * every thank-you page and editable in Sanity (Book a Call → Thank You), with
+ * these defaults as fallback. Embeds are click-to-load (ClickToPlayVideo) — a
+ * grid of live YouTube iframes would drag any phone under.
  */
 
 const DEFAULTS = {

@@ -1,4 +1,5 @@
 import { defineField, defineType } from "sanity";
+import { pageLinkField } from "./pageLink";
 
 /**
  * One document type per page template. Section layout and order live in
@@ -20,23 +21,26 @@ const slugField = defineField({
 
 const seoField = defineField({ name: "seo", type: "seoBlock" });
 
+const HOME_GROUPS = [
+  { name: "hero", title: "Hero" },
+  { name: "stats", title: "Stats" },
+  { name: "estimator", title: "Estimator" },
+  { name: "video", title: "Video" },
+  { name: "roster", title: "Roster" },
+  { name: "services", title: "Services" },
+  { name: "testimonials", title: "Testimonials" },
+  { name: "faq", title: "FAQ" },
+  { name: "cta", title: "CTA" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const homePage = defineType({
   name: "homePage",
   title: "Home",
   type: "document",
-  groups: [
-    { name: "hero", title: "Hero" },
-    { name: "stats", title: "Stats" },
-    { name: "estimator", title: "Estimator" },
-    { name: "video", title: "Video" },
-    { name: "roster", title: "Roster" },
-    { name: "services", title: "Services" },
-    { name: "testimonials", title: "Testimonials" },
-    { name: "faq", title: "FAQ" },
-    { name: "cta", title: "CTA" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: HOME_GROUPS,
   fields: [
+    pageLinkField({ groups: HOME_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Home", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -165,16 +169,19 @@ export const homePage = defineType({
   preview: { prepare: () => ({ title: "Home" }) },
 });
 
+const SERVICES_GROUPS = [
+  { name: "header", title: "Header" },
+  { name: "cta", title: "CTA" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const servicesPage = defineType({
   name: "servicesPage",
   title: "Services",
   type: "document",
-  groups: [
-    { name: "header", title: "Header" },
-    { name: "cta", title: "CTA" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: SERVICES_GROUPS,
   fields: [
+    pageLinkField({ groups: SERVICES_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Services", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -197,16 +204,19 @@ export const servicesPage = defineType({
   preview: { prepare: () => ({ title: "Services" }) },
 });
 
+const CREATORS_GROUPS = [
+  { name: "header", title: "Header" },
+  { name: "cta", title: "CTA" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const creatorsPage = defineType({
   name: "creatorsPage",
   title: "Our Creators",
   type: "document",
-  groups: [
-    { name: "header", title: "Header" },
-    { name: "cta", title: "CTA" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: CREATORS_GROUPS,
   fields: [
+    pageLinkField({ groups: CREATORS_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Our Creators", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -221,17 +231,20 @@ export const creatorsPage = defineType({
   preview: { prepare: () => ({ title: "Our Creators" }) },
 });
 
+const TEAM_GROUPS = [
+  { name: "header", title: "Header" },
+  { name: "tiers", title: "Tiers" },
+  { name: "cta", title: "CTA" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const teamPage = defineType({
   name: "teamPage",
   title: "Our Team",
   type: "document",
-  groups: [
-    { name: "header", title: "Header" },
-    { name: "tiers", title: "Tiers" },
-    { name: "cta", title: "CTA" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: TEAM_GROUPS,
   fields: [
+    pageLinkField({ groups: TEAM_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Our Team", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -258,17 +271,20 @@ export const teamPage = defineType({
   preview: { prepare: () => ({ title: "Our Team" }) },
 });
 
+const SCHEDULE_GROUPS = [
+  { name: "hero", title: "Hero" },
+  { name: "confirmation", title: "Thank You" },
+  { name: "proof", title: "Stats & Reviews" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const schedulePage = defineType({
   name: "schedulePage",
   title: "Book a Call",
   type: "document",
-  groups: [
-    { name: "hero", title: "Hero" },
-    { name: "confirmation", title: "Thank You" },
-    { name: "proof", title: "Stats & Reviews" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: SCHEDULE_GROUPS,
   fields: [
+    pageLinkField({ groups: SCHEDULE_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Book a Call", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -284,51 +300,13 @@ export const schedulePage = defineType({
       ],
     }),
     defineField({
-      name: "confirmation",
-      type: "object",
+      name: "thankYou",
+      title: "Thank you page",
+      type: "reference",
+      to: [{ type: "thankYouPage" }],
       group: "confirmation",
       description:
-        "The thank-you takeover shown after the form is submitted: a short header, the big pre-call hero video, then the creator-video wall.",
-      fields: [
-        defineField({
-          name: "eyebrow",
-          type: "string",
-          description: 'Teal status line, e.g. "● CHANNEL OPEN".',
-        }),
-        defineField({ name: "title", type: "string" }),
-        defineField({
-          name: "body",
-          type: "text",
-          rows: 3,
-          description: "Short line under the title — keep it brief so the hero video stays above the fold on phones.",
-        }),
-        defineField({
-          name: "video",
-          title: "Hero video",
-          type: "object",
-          description:
-            'The big pre-call video right under the header — the "But first…" body line trails straight into it. An on-brand placeholder frame shows until the URL is set.',
-          fields: [
-            defineField({
-              name: "eyebrow",
-              type: "string",
-              description:
-                "Optional kicker over the video — leave empty to let the body line above do the introducing.",
-            }),
-            defineField({
-              name: "title",
-              type: "string",
-              description: "Optional heading over the video — usually empty.",
-            }),
-            defineField({
-              name: "videoUrl",
-              title: "YouTube URL",
-              type: "url",
-              description: "Any YouTube link works — watch, share, or unlisted.",
-            }),
-          ],
-        }),
-      ],
+        "Where this form sends people once they've booked. Ad links can override it per campaign by adding ?ty=<route> — e.g. /schedule-team?ty=meta-january lands on /thank-you/meta-january. This is the page used when there's no such parameter, or when the one in the link doesn't match a page. Edit the pages themselves under Thank You Pages.",
     }),
     defineField({
       name: "videoWallSection",
@@ -336,37 +314,42 @@ export const schedulePage = defineType({
       type: "sectionHeadingBlock",
       group: "confirmation",
       description:
-        "The heading over the creator-video grid, beneath the hero video. The videos come from the Video Testimonials collection.",
+        "The heading over the creator-video grid, on EVERY thank-you page — set once here rather than retyped on each one. The videos come from the Video Testimonials collection.",
     }),
     defineField({
       name: "statsSection",
       title: "Stats heading",
       type: "sectionHeadingBlock",
       group: "proof",
-      description: "Stat values live in Site Settings → Stats.",
+      description:
+        "Shown here and on every thank-you page. Stat values live in Site Settings → Stats.",
     }),
     defineField({
       name: "testimonialsSection",
       title: "Testimonials heading",
       type: "sectionHeadingBlock",
       group: "proof",
+      description: "Shown here and on every thank-you page.",
     }),
   ],
   preview: { prepare: () => ({ title: "Book a Call" }) },
 });
 
+const CAREERS_GROUPS = [
+  { name: "header", title: "Header" },
+  { name: "openings", title: "Openings" },
+  { name: "why", title: "Why DeCypher" },
+  { name: "cta", title: "CTA" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const careersPage = defineType({
   name: "careersPage",
   title: "Careers",
   type: "document",
-  groups: [
-    { name: "header", title: "Header" },
-    { name: "openings", title: "Openings" },
-    { name: "why", title: "Why DeCypher" },
-    { name: "cta", title: "CTA" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: CAREERS_GROUPS,
   fields: [
+    pageLinkField({ groups: CAREERS_GROUPS }),
     defineField({ name: "title", type: "string", initialValue: "Careers", group: "meta" }),
     { ...slugField, group: "meta" },
     { ...seoField, group: "meta" },
@@ -445,17 +428,20 @@ export const careersPage = defineType({
 /** Routes that aren't Sanity pages but would still shadow (or be shadowed by) one. */
 const RESERVED_SLUGS = ["studio", "portal", "api", "schedule-team"];
 
+const AFFILIATE_GROUPS = [
+  { name: "hero", title: "Hero" },
+  { name: "value", title: "Value Stack" },
+  { name: "quotes", title: "Partner Quotes" },
+  { name: "meta", title: "Route & SEO" },
+];
+
 export const affiliatePage = defineType({
   name: "affiliatePage",
   title: "Affiliate Page",
   type: "document",
-  groups: [
-    { name: "hero", title: "Hero" },
-    { name: "value", title: "Value Stack" },
-    { name: "quotes", title: "Partner Quotes" },
-    { name: "meta", title: "Route & SEO" },
-  ],
+  groups: AFFILIATE_GROUPS,
   fields: [
+    pageLinkField({ groups: AFFILIATE_GROUPS }),
     defineField({
       name: "partnerName",
       title: "Partner name",

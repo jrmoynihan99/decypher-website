@@ -25,7 +25,15 @@
  * Keep this file presentational. Widget maths belongs in lib/widget-tax.ts.
  */
 
-import { useLayoutEffect, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import NumberFlow from "@number-flow/react";
 import { toRaw, withCommas } from "@/lib/widget-format";
 
@@ -501,6 +509,17 @@ export function InlineField({
   );
 }
 
+/** The shell both the native select and the searchable one wear. */
+const selectCls =
+  "w-full appearance-none rounded-[10px] border border-edge-mid bg-panel-2 py-2.5 pl-3 pr-8 font-body text-[14px] text-fog outline-none transition-[border-color,box-shadow] duration-150 focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]";
+
+const caretStyle: React.CSSProperties = {
+  backgroundImage:
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%238f88a0' stroke-width='2'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E\")",
+  backgroundRepeat: "no-repeat",
+  backgroundPosition: "right 11px center",
+};
+
 export function SelectInput({
   className = "",
   ...props
@@ -508,15 +527,240 @@ export function SelectInput({
   return (
     <select
       {...props}
-      className={`w-full appearance-none rounded-[10px] border border-edge-mid bg-panel-2 py-2.5 pl-3 pr-8 font-body text-[14px] text-fog outline-none transition-[border-color,box-shadow] duration-150 focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)] ${className}`}
-      style={{
-        backgroundImage:
-          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%238f88a0' stroke-width='2'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E\")",
-        backgroundRepeat: "no-repeat",
-        backgroundPosition: "right 11px center",
-      }}
+      className={`${selectCls} ${className}`}
+      style={caretStyle}
     />
   );
+}
+
+export type SearchOption = { value: string; label: string };
+
+/**
+ * A select you can type into.
+ *
+ * A native `<select>` is the right control up to a couple of dozen options. At
+ * ~150 connected clients it's a scroll hunt, and the browser's own type-ahead
+ * only matches from the first character — so "acme" never finds "The Acme Co",
+ * and the operator ends up scrolling anyway.
+ *
+ * The label is rendered here rather than by wrapping this in `Field`, because
+ * `Field` is a `<label>`: inside one, a click on an option in the popup also
+ * counts as a click on the input, and the two fight over focus.
+ */
+export function SearchSelect({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder = "Search…",
+  emptyLabel = "No matches",
+  className = "",
+  disabled = false,
+}: {
+  label?: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  options: SearchOption[];
+  placeholder?: string;
+  emptyLabel?: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const uid = useId();
+  const listId = `${uid}-list`;
+  const inputId = `${uid}-input`;
+  const optionId = (i: number) => `${uid}-opt-${i}`;
+
+  const matches = useMemo(() => rankOptions(options, query), [options, query]);
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+    setActive(0);
+  }, []);
+
+  const openList = () => {
+    if (open || disabled) return;
+    // Start on the current selection, so arrow keys move from where you are
+    // rather than from the top of a 150-row list.
+    setQuery("");
+    setActive(Math.max(0, options.findIndex((o) => o.value === value)));
+    setOpen(true);
+  };
+
+  const commit = (option: SearchOption) => {
+    onChange(option.value);
+    close();
+  };
+
+  // A pointerdown anywhere else is a dismissal — including on another control,
+  // which then still receives its own click.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open, close]);
+
+  useEffect(() => {
+    if (!open) return;
+    (listRef.current?.children[active] as HTMLElement | undefined)?.scrollIntoView({
+      block: "nearest",
+    });
+  }, [open, active]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        openList();
+        return;
+      }
+      const dir = e.key === "ArrowDown" ? 1 : -1;
+      setActive((i) => Math.min(matches.length - 1, Math.max(0, i + dir)));
+      return;
+    }
+    if (e.key === "Enter" && open) {
+      e.preventDefault();
+      const pick = matches[active];
+      if (pick) commit(pick);
+      return;
+    }
+    if (e.key === "Escape" && open) {
+      e.preventDefault();
+      close();
+      return;
+    }
+    // Tabbing away commits nothing — the same as leaving a select alone.
+    if (e.key === "Tab" && open) close();
+  };
+
+  return (
+    <div ref={rootRef} className={`relative ${className}`}>
+      {label ? (
+        <label
+          htmlFor={inputId}
+          className="mb-1.5 block font-mono text-[10.5px] font-bold uppercase tracking-[1.2px] text-mist"
+        >
+          {label}
+        </label>
+      ) : null}
+
+      <input
+        ref={inputRef}
+        id={inputId}
+        type="text"
+        role="combobox"
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={open && matches[active] ? optionId(active) : undefined}
+        // Closed, it reads as the current value; open, it's an empty search box
+        // with that value still legible behind it as the placeholder.
+        value={open ? query : selectedLabel}
+        placeholder={open ? selectedLabel || placeholder : placeholder}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setActive(0);
+          if (!open) setOpen(true);
+        }}
+        onFocus={openList}
+        onClick={openList}
+        onKeyDown={onKeyDown}
+        className={`${selectCls} cursor-pointer placeholder:text-dusk disabled:cursor-default disabled:opacity-50`}
+        style={caretStyle}
+      />
+
+      {open ? (
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label={typeof label === "string" ? label : undefined}
+          className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-[280px] overflow-y-auto rounded-[10px] border border-edge-mid bg-panel-2 py-1 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.85)]"
+        >
+          {matches.length ? (
+            matches.map((option, i) => {
+              const isSelected = option.value === value;
+              return (
+                <li
+                  key={option.value}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={isSelected}
+                  // pointerdown, not click: mousedown would blur the input and
+                  // the outside-click handler would close the list first.
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    commit(option);
+                  }}
+                  onPointerMove={() => setActive(i)}
+                  className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-[13.5px] ${
+                    i === active ? "bg-white/[0.06] text-fog" : "text-mist"
+                  }`}
+                >
+                  <span className="min-w-0 truncate">{option.label}</span>
+                  {isSelected ? (
+                    <span aria-hidden className="flex-none text-[12px] text-magenta">
+                      ✓
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })
+          ) : (
+            <li className="px-3 py-2.5 text-[13px] text-dusk">{emptyLabel}</li>
+          )}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Substring search across the whole name, best-anchored match first.
+ *
+ * Ranking earns its keep at this list length: typing "media" should offer
+ * "Media House" before "Multimedia Co", and every token has to match somewhere
+ * so "acme media" finds the one client whether or not those words are adjacent.
+ */
+function rankOptions(options: SearchOption[], query: string): SearchOption[] {
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return options;
+
+  const hits: { option: SearchOption; tier: number; index: number }[] = [];
+  options.forEach((option, index) => {
+    const hay = option.label.toLowerCase();
+    if (!tokens.every((t) => hay.includes(t))) return;
+    hits.push({ option, tier: anchorTier(hay, tokens[0]), index });
+  });
+  // Ties keep the incoming order, which is the order the list already had.
+  hits.sort((a, b) => a.tier - b.tier || a.index - b.index);
+  return hits.map((h) => h.option);
+}
+
+/** 0 = the name starts with it, 1 = a word does, 2 = mid-word only. */
+function anchorTier(hay: string, token: string): number {
+  let best = 2;
+  for (let i = hay.indexOf(token); i !== -1; i = hay.indexOf(token, i + 1)) {
+    const tier = i === 0 ? 0 : /[a-z0-9]/.test(hay[i - 1]) ? 2 : 1;
+    if (tier < best) best = tier;
+    if (best === 0) break;
+  }
+  return best;
 }
 
 /* ─────────────────────────────── controls ────────────────────────────── */

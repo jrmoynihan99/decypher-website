@@ -26,6 +26,14 @@ function revalidateForDoc(doc: {
   const type = doc?._type;
   const slug = typeof doc?.slug === "string" ? doc.slug : doc?.slug?.current;
 
+  // Book a Call carries the headings every thank-you page shares and the
+  // reference deciding where the form goes, so its edits fan out past its own
+  // path — see the note on thankYouPage below for why that means a full purge.
+  if (type === "schedulePage") {
+    revalidatePath("/", "layout");
+    return { strategy: "full-purge", type, reason: "shared by every thank-you page" };
+  }
+
   if (type && PAGE_TYPE_SET.has(type) && typeof slug === "string" && slug) {
     const path = slugToPath(slug);
     revalidatePath(path);
@@ -41,6 +49,32 @@ function revalidateForDoc(doc: {
     revalidatePath(path);
     revalidatePath("/legal/[slug]", "page");
     return { strategy: "surgical", type, path };
+  }
+
+  /**
+   * Thank-you pages can't be purged surgically, for a reason worth writing
+   * down: adding one changes a second page as well. The booking form only
+   * honours a `?ty=` naming a route that exists, and it checks that against a
+   * list baked into the prerendered Book a Call page — so until that page is
+   * regenerated, a brand-new campaign silently books to the default instead.
+   *
+   * The obvious surgical move, revalidatePath("/[...slug]", "page"), does not
+   * reach prerendered instances of a catch-all route (verified against Next
+   * 16.2.10 — the page kept serving the stale list until a layout purge).
+   * Naming "/schedule-team" outright would work until someone renames that
+   * route in the Studio, at which point it breaks silently.
+   *
+   * So: the same full purge the collections take, for the same stated reason —
+   * with this few routes it is cheaper than being clever, and campaign pages
+   * are created a handful of times a month.
+   */
+  if (type === "thankYouPage") {
+    revalidatePath("/", "layout");
+    return {
+      strategy: "full-purge",
+      type,
+      reason: "route list is embedded in the booking page",
+    };
   }
 
   revalidatePath("/", "layout");

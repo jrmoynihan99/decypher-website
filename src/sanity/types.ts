@@ -110,6 +110,8 @@ export interface SiteSettings {
   faqs?: FaqContent[];
   /** Envelope for the estimator's lead email; env vars are the fallback. */
   leadEmail?: LeadEmailSettings;
+  /** Base analytics/pixel snippet, injected on every page. Empty = none. */
+  trackingCode?: string;
 }
 
 /** CMS-editable sender for the estimate email (see lib/lead-email.ts). */
@@ -180,23 +182,63 @@ export interface SchedulePageDoc extends PageBase {
     title?: string;
     body?: string;
   };
-  confirmation?: BookingConfirmationContent;
+  /**
+   * The thank-you page the form falls back to. Page docs are fetched with a
+   * blanket `...`, so this arrives as a raw reference — ScheduleTemplate
+   * resolves the route through getThankYouRouting() rather than dereferencing
+   * it here.
+   */
+  thankYou?: { _ref: string };
+  /** Heading over the video wall — shared by every thank-you page. */
   videoWallSection?: SectionHeadingContent;
   statsSection?: SectionHeadingContent;
   testimonialsSection?: SectionHeadingContent;
 }
 
-/** Copy for the post-submit thank-you takeover on Book a Call. */
-export interface BookingConfirmationContent {
-  eyebrow?: string;
-  title?: string;
-  body?: string;
+/**
+ * A post-booking landing page. Like the affiliate pages this type has many
+ * documents — one per ad campaign — so everything shared between them (the
+ * video wall, the reviews, the stats) is deliberately absent here and resolved
+ * by the template instead.
+ */
+export interface CmsThankYouPage {
+  /** Internal label, e.g. "Meta ads — January UGC campaign". Never rendered. */
+  title: string;
+  /** URL segment under /thank-you/. */
+  slug: string;
+  header?: {
+    eyebrow?: string;
+    title?: string;
+    body?: string;
+  };
   /** The big "but first" pre-call video under the header. */
   video?: {
     eyebrow?: string;
     title?: string;
     videoUrl?: string;
   };
+  /** Conversion snippet for this page only; the base pixel is site-wide. */
+  trackingCode?: string;
+}
+
+/**
+ * The section headings every thank-you page shares. They live on the Book a
+ * Call document rather than being repeated per page — same reasoning as the
+ * affiliate pages' shared stats and FAQ: a heading corrected once should be
+ * corrected everywhere.
+ */
+export interface ThankYouSharedSections {
+  videoWallSection?: SectionHeadingContent;
+  statsSection?: SectionHeadingContent;
+  testimonialsSection?: SectionHeadingContent;
+}
+
+/** What the booking form needs to send someone to the right thank-you page. */
+export interface ThankYouRouting {
+  /** Route of the page set in Book a Call → Thank You; null if unset. */
+  defaultSlug: string | null;
+  /** Every published route, so a bogus ?ty= can fall back instead of 404. */
+  slugs: string[];
 }
 
 /** One card on the thank-you video wall. */

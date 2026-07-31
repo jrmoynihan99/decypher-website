@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
+import TrackingCode from "@/components/TrackingCode";
 import { socialMetadata } from "@/lib/seo";
 import { siteUrl } from "@/lib/site-url";
 import { getSiteSettings } from "@/sanity/queries";
@@ -59,11 +60,13 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const settings = await getSiteSettings();
+
   return (
     <html
       lang="en"
@@ -77,6 +80,12 @@ export default function RootLayout({
           <style>{`.decrypt-pending{filter:none !important}`}</style>
         </noscript>
         {children}
+        {/* Base analytics/pixel from Site Settings → Tracking. Every page, not
+            just the marketing routes: an ads platform can only count a landing
+            on a thank-you page as a conversion if its tag is already loaded
+            everywhere. Empty until the client pastes one, and renders nothing
+            when empty. */}
+        <TrackingCode code={settings?.trackingCode} id="site-tracking" />
       </body>
     </html>
   );
