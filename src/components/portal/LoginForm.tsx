@@ -19,7 +19,14 @@ import {
  * sign the client SDK back out and let it forget everything. It exists here as
  * a token-minting device, nothing more.
  */
-export default function LoginForm({ next }: { next: string }) {
+export default function LoginForm({
+  next,
+  notice = "",
+}: {
+  next: string;
+  /** Why they're looking at this screen, when they didn't ask for it. */
+  notice?: string;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -111,6 +118,14 @@ export default function LoginForm({ next }: { next: string }) {
       <p className="mt-2 text-sm text-muted">
         Accounts are issued by an admin. There&rsquo;s no self sign-up.
       </p>
+
+      {/* Suppressed once they've actually tried — a failed attempt is the more
+          useful thing to be reading. */}
+      {notice && !formError ? (
+        <div className="mt-5 rounded-[11px] border border-white/15 bg-white/[0.04] px-3 py-2.5 text-sm text-mist">
+          {notice}
+        </div>
+      ) : null}
 
       <div className="mt-7">
         <label className={fieldLabelCls} htmlFor="p-email">

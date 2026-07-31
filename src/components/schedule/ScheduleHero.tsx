@@ -1,27 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import StatsGrid from "@/components/home/StatsGrid";
 import ParagraphReveal from "@/components/reveal/ParagraphReveal";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
-import BookingConfirmed from "@/components/schedule/BookingConfirmed";
-import ScheduleForm, { type Booking } from "@/components/schedule/ScheduleForm";
+import ScheduleForm from "@/components/schedule/ScheduleForm";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
+import { resolveThankYouPath } from "@/lib/thank-you";
 import type {
-  CmsVideoTestimonial,
   SchedulePageDoc,
   StatContent,
+  ThankYouRouting,
 } from "@/sanity/types";
 
 /**
- * Client shell for the schedule hero: renders the pitch + form grid until a
- * request goes through, then swaps the whole hero for the thank-you takeover
- * (BookingConfirmed — header + creator-video wall). Swapping at this level —
- * rather than inside the form panel — lets the confirmation own the full
- * stage while the proof sections below stay put.
+ * Client shell for the schedule hero: the pitch + form grid, and the handoff
+ * to the thank-you page once a request goes through.
+ *
+ * The thank-you used to be a takeover swapped in right here. It's a real route
+ * now (/thank-you/<campaign>) because the client runs paid ads and needs each
+ * campaign's conversion to have a URL an ad platform can fire a pixel on — a
+ * state swap has no URL to fire on. Which page depends on the `?ty=` on the
+ * link the visitor arrived through; see lib/thank-you.ts.
+ *
+ * The navigation is a full page load rather than a router push, on purpose:
+ * a client-side route change doesn't reload the document, so the pixel in the
+ * page head never re-runs and the conversion goes uncounted. The destination
+ * is prerendered, so the cost is small and the tracking actually works.
  *
  * The proof stats ride along under the pitch as a 2x2, but only once the grid
  * splits at lg — stacked under the headline they'd push the form below the
@@ -29,37 +37,19 @@ import type {
  */
 export default function ScheduleHero({
   hero,
-  confirmation,
-  videoWall,
-  videos,
   stats,
+  thankYou,
 }: {
   hero: NonNullable<SchedulePageDoc["hero"]>;
-  confirmation: SchedulePageDoc["confirmation"];
-  videoWall: SchedulePageDoc["videoWallSection"];
-  videos: CmsVideoTestimonial[];
   stats: StatContent[];
+  thankYou: ThankYouRouting;
 }) {
-  const [booking, setBooking] = useState<Booking | null>(null);
-  const [preview, setPreview] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
-  // /schedule-team?confirmed shows the thank-you takeover without booking a real
-  // call — for Studio editors checking copy and for Playwright screenshots.
-  // An effect (not a state initializer) so server and first client render agree.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("confirmed"))
-      setPreview(true);
-  }, []);
-
-  if (booking || preview) {
-    return (
-      <BookingConfirmed
-        content={confirmation}
-        videoWall={videoWall}
-        videos={videos}
-      />
-    );
-  }
+  // The form re-enables its button as soon as the request resolves, and the
+  // browser takes a moment to leave — long enough to click "Book my call"
+  // twice and book two calls. Swapping the panel out closes that window.
+  if (leaving) return <Handoff />;
 
   return (
     <SectionReveal>
@@ -110,15 +100,37 @@ export default function ScheduleHero({
 
         <Reveal delay={0.35}>
           <ScheduleForm
-            onBooked={(b) => {
-              setBooking(b);
-              // the confirmation mounts at the top of the page — bring the
-              // visitor with it (matters on mobile, where the form sits low)
-              window.scrollTo({ top: 0, behavior: "smooth" });
+            onBooked={() => {
+              setLeaving(true);
+              window.location.assign(
+                resolveThankYouPath(window.location.search, thankYou),
+              );
             }}
           />
         </Reveal>
       </section>
     </SectionReveal>
+  );
+}
+
+/** Holds the stage for the moment between "booked" and the thank-you page. */
+function Handoff() {
+  return (
+    <section className="relative z-[1] mx-auto flex min-h-[46svh] max-w-[720px] flex-col items-center justify-center px-6 py-24 text-center">
+      <GlowOrb
+        size={780}
+        blur={54}
+        alpha={0.2}
+        beta={0.12}
+        duration={16}
+        style={{ top: "-160px" }}
+      />
+      <p className="relative m-0 font-mono text-xs uppercase tracking-[0.3em] text-teal">
+        ● CHANNEL OPEN
+      </p>
+      <p className="relative m-0 mt-4 font-mono text-[11.5px] tracking-[0.14em] text-faint">
+        {"// YOU'RE BOOKED — OPENING YOUR BRIEFING"}
+      </p>
+    </section>
   );
 }

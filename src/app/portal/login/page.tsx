@@ -6,9 +6,9 @@ import LoginForm from "@/components/portal/LoginForm";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; stale?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, stale } = await searchParams;
 
   // Only ever bounce to a path on this site — an absolute URL here would turn
   // the login screen into an open redirect.
@@ -25,7 +25,14 @@ export default async function LoginPage({
         <span aria-hidden>←</span> Back to site
       </Link>
 
-      <LoginForm next={safeNext} />
+      <LoginForm
+        next={safeNext}
+        notice={
+          stale
+            ? "Your session expired or was signed out. Sign in again to continue."
+            : ""
+        }
+      />
     </main>
   );
 }

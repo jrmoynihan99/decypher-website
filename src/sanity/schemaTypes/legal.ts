@@ -1,4 +1,5 @@
 import { defineField, defineType } from "sanity";
+import { pageLinkField } from "./pageLink";
 
 /**
  * The drafted copy ships with [BRACKETED] blanks — entity name, address,
@@ -44,6 +45,7 @@ export const legalPage = defineType({
   title: "Legal Page",
   type: "document",
   fields: [
+    pageLinkField({ basePath: "/legal" }),
     defineField({
       name: "title",
       type: "string",

@@ -6,6 +6,8 @@ import type { StructureResolver } from "sanity/structure";
  *   Pages          → the six page documents (fixed IDs — one doc per template)
  *   Affiliate Pages→ partner landing pages — a LIST, not fixed docs: the client
  *                    adds one per affiliate from here
+ *   Thank You Pages→ post-booking pages — also a LIST: one per ad campaign, so
+ *                    each conversion has its own URL to fire a pixel on
  *   Creators       → roster collection, in site order
  *   Testimonials   → reviews reel, grouped by marquee row
  *   Video Testimonials → thank-you video wall, in site order
@@ -27,6 +29,7 @@ const PAGES: Array<{ type: string; title: string }> = [
 const HANDLED = [
   ...PAGES.map((p) => p.type),
   "affiliatePage",
+  "thankYouPage",
   "legalPage",
   "creator",
   // taxonomy docs picked (and created inline) via reference fields on
@@ -67,6 +70,15 @@ export const structure: StructureResolver = (S) =>
           S.documentTypeList("affiliatePage")
             .title("Affiliate Pages")
             .defaultOrdering([{ field: "partnerName", direction: "asc" }]),
+        ),
+      // One per ad campaign. Newest first: these accumulate as campaigns come
+      // and go, and the one being set up right now is the one being looked for.
+      S.listItem()
+        .title("Thank You Pages")
+        .child(
+          S.documentTypeList("thankYouPage")
+            .title("Thank You Pages")
+            .defaultOrdering([{ field: "_createdAt", direction: "desc" }]),
         ),
       // Also a list — privacy policy, terms of use, anything else of that shape.
       // These URLs are registered with Intuit, so renaming a slug breaks a link

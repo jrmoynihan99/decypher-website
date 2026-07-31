@@ -15,7 +15,7 @@ import {
   getSiteSettings,
   getTeam,
   getTestimonials,
-  getVideoTestimonials,
+  getThankYouRouting,
   slugToPath,
 } from "@/sanity/queries";
 import { urlFor } from "@/sanity/image";
@@ -58,17 +58,20 @@ export async function renderPage(page: PageDoc) {
       return <TeamTemplate page={page} members={members} />;
     }
     case "schedulePage": {
-      const [settings, testimonials, videos] = await Promise.all([
+      const [settings, testimonials, thankYou] = await Promise.all([
         getSiteSettings(),
         getTestimonials(),
-        getVideoTestimonials(),
+        // Where the form hands off once a call is booked. Resolved server-side
+        // because the page doc holds a raw reference (blanket `...` fetch) and
+        // the form also needs the full route list to validate a `?ty=` against.
+        getThankYouRouting(),
       ]);
       return (
         <ScheduleTemplate
           page={page}
           settings={settings}
           testimonials={testimonials}
-          videos={videos}
+          thankYou={thankYou}
         />
       );
     }

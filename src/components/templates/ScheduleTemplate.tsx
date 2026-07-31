@@ -5,21 +5,21 @@ import ScheduleHero from "@/components/schedule/ScheduleHero";
 import ScrollToTop from "@/components/ui/ScrollToTop";
 import type {
   CmsTestimonial,
-  CmsVideoTestimonial,
   SchedulePageDoc,
   SiteSettings,
+  ThankYouRouting,
 } from "@/sanity/types";
 
 export default function ScheduleTemplate({
   page,
   settings,
   testimonials,
-  videos,
+  thankYou,
 }: {
   page: SchedulePageDoc;
   settings: SiteSettings | null;
   testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
-  videos: CmsVideoTestimonial[];
+  thankYou: ThankYouRouting;
 }) {
   return (
     <main className="relative">
@@ -35,16 +35,11 @@ export default function ScheduleTemplate({
           }}
         />
 
-        {/* hero: pitch + form until the request sends, then the thank-you
-            takeover (header + pre-call hero video + creator wall) — the swap
-            lives in ScheduleHero (client). At lg+ the proof stats sit under
-            the pitch. */}
+        {/* pitch + form; booking hands off to a thank-you page (own route) */}
         <ScheduleHero
           hero={page.hero ?? {}}
-          confirmation={page.confirmation}
-          videoWall={page.videoWallSection}
-          videos={videos}
           stats={settings?.stats ?? []}
+          thankYou={thankYou}
         />
 
         {/* the receipts */}

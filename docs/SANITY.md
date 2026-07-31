@@ -17,6 +17,18 @@ The entire site is content-driven from Sanity (project `076c9ywj`, dataset
   home hero strip and roster. Job Openings are the role cards on Careers —
   each card links to its `Apply link` (a mailto or job-post URL), and an
   empty collection shows the page's editable empty state instead.
+- **Thank You Pages** — where the booking form sends people once they've
+  booked, served at `/thank-you/<slug>` by
+  `src/app/(site)/thank-you/[slug]`. A list rather than one page, because the
+  client runs paid ads and each campaign needs its own URL for an ad platform
+  to count as a conversion. Only the header copy, the pre-call video and an
+  optional conversion snippet are editable per page — the video wall, review
+  carousel and stats are identical on all of them and come from Book a Call
+  and the collections. **Which page a booking lands on** is decided by the
+  landing link: `/schedule-team?ty=meta-january` → `/thank-you/meta-january`.
+  No parameter (or one naming a page that doesn't exist) falls back to the
+  page set in Book a Call → Thank You, and `/thank-you` serves that same
+  fallback. Never indexed. See `src/lib/thank-you.ts`.
 - **Legal Pages** — privacy policy and terms of use, served at
   `/legal/<slug>` by `src/app/(site)/legal/[slug]`. Also a list, so more can
   be added without a deploy. Unlike a page document the *entire* text is one
@@ -36,17 +48,26 @@ Content conventions:
 - The tax estimator is intentionally **not** CMS-driven — it encodes 2026
   tax law and legal disclaimers. Same for form field labels and the
   interaction hints inside the services animation.
-- The Book-a-Call **thank-you takeover** (shown after the form submits) is
-  editable under Book a Call → Thank You. The transmission-log panel that
-  echoes the visitor's own submission stays in code, and every field falls
-  back to a sensible default if left empty.
+- The **thank-you pages** each own their header copy and pre-call video; the
+  parts they share — the video wall heading, and the reviews/stats headings —
+  live under Book a Call (→ Thank You and → Stats & Reviews), set once rather
+  than retyped per campaign. Every field falls back to a sensible default if
+  left empty.
+- **Tracking snippets** are pasted, not coded: Site Settings → Tracking holds
+  the base pixel/analytics tag that runs on every page, and each thank-you
+  page can carry its own conversion snippet on top. Both accept whatever the
+  platform hands over (script tags and all) and are parsed into real script
+  elements by `src/components/TrackingCode.tsx` — markup injected as a string
+  never executes. Note the trust boundary: this runs CMS content in every
+  visitor's browser, so only paste code the platform itself provided.
 - **SEO** is per-page under each page's Meta group, falling back to Site
   Settings → Default SEO. The optional **Share image** (1200×630) is what
   iMessage/Slack/LinkedIn show; leave it empty and the site generates a
   branded card instead (`src/app/opengraph-image.tsx`). `/robots.txt` and
   `/sitemap.xml` are generated from Sanity, so new job posts and legal pages
   appear in the sitemap without a deploy. Affiliate pages are deliberately
-  left out of it — see `src/app/sitemap.ts`.
+  left out of it — see `src/app/sitemap.ts` — and thank-you pages are both
+  left out of it and marked `noindex`.
 
 ## Caching / revalidation (same pattern as aletheia-website)
 
@@ -102,6 +123,13 @@ Careers page, the three starter Job Openings, and the Book-a-Call thank-you
 copy. Unlike the migration it never overwrites: new documents use
 `createIfNotExists` and the schedule page is patched with `setIfMissing`,
 so it is safe to re-run at any time.
+
+`npm run thankyou:seed` (`scripts/seed-thank-you.mjs`) split the thank-you
+takeover off Book a Call into a thank-you page of its own: it copies whatever
+was in `schedulePage.confirmation` at the time into a "Default" page, points
+Book a Call at it, and clears the old field. Idempotent — once the field is
+cleared there is nothing left to copy. `--force` rewrites the default page
+from the schedule doc, discarding Studio edits to that one page.
 
 `npm run legal:seed` (`scripts/seed-legal.mjs`) seeded the privacy policy
 and terms of use. Also `createIfNotExists`, so re-running never clobbers a

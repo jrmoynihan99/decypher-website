@@ -1,5 +1,5 @@
 import type { Creator } from "@/lib/creators";
-import { client } from "./client";
+import { client, freshClient } from "./client";
 import { urlFor } from "./image";
 import type {
   CmsJob,
@@ -7,10 +7,13 @@ import type {
   CmsService,
   CmsTeamMember,
   CmsTestimonial,
+  CmsThankYouPage,
   CmsVideoTestimonial,
   PageDoc,
   SiteSettings,
   TestimonialAccent,
+  ThankYouRouting,
+  ThankYouSharedSections,
 } from "./types";
 
 // Keep in sync with the copy in schemaTypes/pages.ts — this one drives the GROQ
@@ -58,6 +61,62 @@ export async function getAllPageSlugs(
     `*[_type in $types && defined(slug.current)].slug.current`,
     { types },
   );
+}
+
+// ── thank-you pages ─────────────────────────────────────────────────
+
+/**
+ * Not in PAGE_TYPES on purpose: these route under /thank-you/ rather than at
+ * the site root, so they get their own route and their own fetches — same
+ * arrangement as the legal pages.
+ *
+ * All four read through freshClient rather than the CDN. A campaign page is
+ * typically created minutes before the ad goes live, which is exactly the
+ * window where a CDN read is stale — and a stale answer here doesn't self
+ * correct, it gets frozen into the ISR cache. See client.ts.
+ */
+export async function getThankYouPageBySlug(
+  slug: string,
+): Promise<CmsThankYouPage | null> {
+  return freshClient.fetch(
+    `*[_type == "thankYouPage" && slug.current == $slug][0]{
+      title, "slug": slug.current, header, video, trackingCode
+    }`,
+    { slug },
+  );
+}
+
+export async function getAllThankYouSlugs(): Promise<string[]> {
+  return freshClient.fetch(
+    `*[_type == "thankYouPage" && defined(slug.current)].slug.current`,
+  );
+}
+
+/** The headings shared by every thank-you page — see ThankYouSharedSections. */
+export async function getThankYouSharedSections(): Promise<ThankYouSharedSections> {
+  const res: ThankYouSharedSections | null = await freshClient.fetch(
+    `*[_type == "schedulePage"][0]{
+      videoWallSection, statsSection, testimonialsSection
+    }`,
+  );
+  return res ?? {};
+}
+
+/**
+ * Both halves of the booking form's redirect in one round trip: the fallback
+ * page and the set of routes a `?ty=` parameter is allowed to name.
+ */
+export async function getThankYouRouting(): Promise<ThankYouRouting> {
+  const res: Partial<ThankYouRouting> | null = await freshClient.fetch(
+    `{
+      "defaultSlug": *[_type == "schedulePage"][0].thankYou->slug.current,
+      "slugs": *[_type == "thankYouPage" && defined(slug.current)].slug.current
+    }`,
+  );
+  return {
+    defaultSlug: res?.defaultSlug ?? null,
+    slugs: res?.slugs ?? [],
+  };
 }
 
 // ── legal pages ─────────────────────────────────────────────────────
