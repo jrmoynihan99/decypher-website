@@ -3,25 +3,21 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFormValue } from "sanity";
+import { PRODUCTION_ORIGIN } from "@/lib/site-url";
 
 /**
  * The document's public URL, read-only, with a copy button — pinned to the top
  * of every slugged document so a link can be handed to a partner without
  * anyone reassembling it from the Route field in their head.
  *
- * The origin is whatever host the Studio itself is open on, not a hardcoded
- * domain: on wedecypher.co/studio it copies a wedecypher.co link, on a Vercel
- * deployment it copies that deployment's link, and on localhost it copies
- * localhost. That is the self-correcting answer — the link always points at the
- * site the editor is actually looking at, including before the domain cutover,
- * when a wedecypher.co link would still resolve to the old GoHighLevel site.
+ * The origin is always the live domain, deliberately NOT window.location.origin.
+ * The Studio gets opened on whatever Vercel deployment URL is at hand, and a
+ * link built from that host is the one thing this field must never produce: it
+ * would be pasted into an ad or a DM and outlive the deployment it names.
  *
  * Nothing is ever written: the field holds no value, it renders one derived
  * from the live `slug` in the form, so it follows an unsaved edit immediately.
  */
-
-/** Only used for the server pass — replaced with the real origin on mount. */
-const FALLBACK_ORIGIN = "https://wedecypher.co";
 
 /** "/" → "/", "services" → "/services", ("/legal", "privacy") → "/legal/privacy". */
 function toPath(basePath: string, rawSlug: string): string | null {
@@ -112,14 +108,9 @@ function buttonStyle(hover: boolean): CSSProperties {
 export function createPageLinkInput(basePath = "") {
   function PageLinkInput() {
     const slug = useFormValue(["slug", "current"]);
-    const [origin, setOrigin] = useState(FALLBACK_ORIGIN);
     const [copied, setCopied] = useState(false);
     const [hover, setHover] = useState(false);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    useEffect(() => {
-      setOrigin(window.location.origin);
-    }, []);
 
     useEffect(
       () => () => {
@@ -129,7 +120,7 @@ export function createPageLinkInput(basePath = "") {
     );
 
     const path = typeof slug === "string" ? toPath(basePath, slug) : null;
-    const url = path ? `${origin}${path}` : null;
+    const url = path ? `${PRODUCTION_ORIGIN}${path}` : null;
 
     const copy = useCallback(() => {
       if (!url) return;
