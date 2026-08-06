@@ -18,7 +18,12 @@
  * Contrast with slack.ts's portalApplicationsUrl(), which is nullable on
  * purpose: a Slack message can drop a link, but metadata can't drop an origin.
  */
-const PRODUCTION_ORIGIN = "https://wedecypher.co";
+/**
+ * Exported for the Studio's Page link field, which can't call siteUrl(): it runs
+ * in the browser, where none of the env vars above exist, and the whole point of
+ * that field is to hand someone the public link — never a preview host.
+ */
+export const PRODUCTION_ORIGIN = "https://wedecypher.co";
 
 export function siteUrl(): string {
   const raw =
