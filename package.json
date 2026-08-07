@@ -18,7 +18,10 @@
     "legal:seed": "node scripts/seed-legal.mjs",
     "thankyou:seed": "node scripts/seed-thank-you.mjs",
     "qb:check": "node scripts/quickbooks-parse-check.mjs",
-    "qb:introspect": "node scripts/quickbooks-introspect.mjs"
+    "qb:introspect": "node scripts/quickbooks-introspect.mjs",
+    "sales:backfill": "node scripts/sales-backfill.mjs",
+    "sales:import": "node scripts/sales-import-airtable.mjs",
+    "sales:webhook": "node scripts/calendly-webhook.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.1",

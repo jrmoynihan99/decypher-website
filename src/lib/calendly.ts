@@ -10,6 +10,7 @@
  */
 
 import { UNQUALIFIED_BAND } from "@/lib/income-bands";
+import type { Answer, CallType } from "@/lib/sales/options";
 
 const API = "https://api.calendly.com";
 
@@ -87,7 +88,7 @@ export class CalendlyError extends Error {
 
 /* ===================== routing ===================== */
 
-const EVENT_TYPES = {
+export const EVENT_TYPES = {
   /** creator-support1/creator-discovery-call-1 — the ☎️ call, under $50k. */
   unqualified: `${API}/event_types/dad6beb5-5021-4d0d-a3b2-b5e653ad48a5`,
   /** creator-support1/creator-discovery-call-1-2 — the 📞 call, $50k and up. */
@@ -119,6 +120,32 @@ const BOOKABLE_BY_KEY: Record<string, string> = {
 /** The event type for an allowlisted key, or null if it isn't one. */
 export function eventTypeForKey(key: string): string | null {
   return BOOKABLE_BY_KEY[key] ?? null;
+}
+
+/**
+ * Reverse of EVENT_TYPES: which of the three sales calls an event type URI is.
+ *
+ * This is the filter that keeps the pipeline clean. The org runs ~41 event
+ * types and the majority are delivery, not sales — QBO onboarding, tax manager,
+ * "Catch up w/OT". Ingestion resolves every incoming booking through here and
+ * drops anything that returns null, so the Sales Flow tab only ever holds calls
+ * that belong in a pipeline.
+ */
+const CALL_TYPE_BY_URI = new Map<string, CallType>(
+  Object.entries(EVENT_TYPES).map(([key, uri]) => [uri, key as CallType]),
+);
+
+/** Which sales call this event type is, or null if it isn't one of the three. */
+export function callTypeForEventType(uri: string | null | undefined): CallType | null {
+  if (!uri) return null;
+  // Compare on the UUID: the same event type is addressed both as a bare URI
+  // and, in webhook payloads, with query strings and alternate hosts attached.
+  const uuid = uri.split("?")[0].split("/").pop();
+  if (!uuid) return null;
+  for (const [known, type] of CALL_TYPE_BY_URI) {
+    if (known.endsWith(uuid)) return type;
+  }
+  return null;
 }
 
 /**
@@ -258,6 +285,154 @@ export async function getAvailableTimes(
     }
   }
   return slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
+}
+
+/* ===================== pipeline ingestion ===================== */
+
+/**
+ * Reads below exist for the Sales Flow tab, which needs the opposite direction
+ * of travel from the rest of this module: not "offer times and book one", but
+ * "tell me every call that was booked". They're used by the backfill script and
+ * by the webhook receiver.
+ */
+
+export interface ScheduledEvent {
+  uri: string;
+  eventTypeUri: string;
+  /** The event name as it was when booked — retired names survive on old rows. */
+  name: string;
+  startTime: string;
+  status: "active" | "canceled";
+}
+
+export interface InviteeRecord {
+  uri: string;
+  /** Invitee UUID — the pipeline document id. Stable across re-sync. */
+  id: string;
+  eventUri: string;
+  name: string;
+  email: string;
+  timezone: string | null;
+  /** When they booked, which is what the pipeline sorts and reports on. */
+  createdAt: string;
+  status: "active" | "canceled";
+  rescheduled: boolean;
+  /** Calendly's own SMS field — the most reliable phone number on the record. */
+  textReminderNumber: string | null;
+  answers: Answer[];
+}
+
+interface ScheduledEventResource {
+  uri: string;
+  event_type: string;
+  name: string;
+  start_time: string;
+  status: string;
+}
+
+interface FullInviteeResource {
+  uri: string;
+  event: string;
+  name: string;
+  email: string;
+  timezone: string | null;
+  created_at: string;
+  status: string;
+  rescheduled: boolean;
+  text_reminder_number: string | null;
+  questions_and_answers?: Answer[];
+}
+
+/** The organisation the token belongs to — required to list scheduled events. */
+export async function getOrganizationUri(): Promise<string> {
+  const { resource } = await api<{ resource: { current_organization: string } }>(
+    "/users/me",
+  );
+  return resource.current_organization;
+}
+
+function toScheduledEvent(r: ScheduledEventResource): ScheduledEvent {
+  return {
+    uri: r.uri,
+    eventTypeUri: r.event_type,
+    name: r.name,
+    startTime: r.start_time,
+    status: r.status === "canceled" ? "canceled" : "active",
+  };
+}
+
+export function toInviteeRecord(r: FullInviteeResource): InviteeRecord {
+  return {
+    uri: r.uri,
+    id: r.uri.split("?")[0].split("/").pop()!,
+    eventUri: r.event,
+    name: r.name ?? "",
+    email: r.email ?? "",
+    timezone: r.timezone ?? null,
+    createdAt: r.created_at,
+    status: r.status === "canceled" ? "canceled" : "active",
+    rescheduled: Boolean(r.rescheduled),
+    textReminderNumber: r.text_reminder_number ?? null,
+    answers: r.questions_and_answers ?? [],
+  };
+}
+
+/**
+ * One page of the org's scheduled events, oldest first.
+ *
+ * There is no event_type filter on this endpoint — the org runs ~41 event types
+ * and the majority are delivery, not sales — so callers page through everything
+ * and drop what `callTypeForEventType` doesn't recognise. Oldest-first because
+ * a backfill that resumes should resume from a stable point; new bookings
+ * appended at the end don't shift the pages already read.
+ */
+export async function listScheduledEvents(opts: {
+  organization: string;
+  minStartTime?: string;
+  maxStartTime?: string;
+  /** Pass the previous call's `nextPage` back verbatim. */
+  nextPage?: string | null;
+  count?: number;
+}): Promise<{ events: ScheduledEvent[]; nextPage: string | null }> {
+  let path: string;
+  if (opts.nextPage) {
+    // Calendly's next_page is a fully-formed absolute URL and must be used as
+    // given. Rebuilding the query around `pagination.next_page_token` returns
+    // 400 "page_token is invalid" — verified live, don't re-derive it.
+    path = opts.nextPage.replace(API, "");
+  } else {
+    const qs = new URLSearchParams({
+      organization: opts.organization,
+      count: String(opts.count ?? 100),
+      sort: "start_time:asc",
+    });
+    if (opts.minStartTime) qs.set("min_start_time", opts.minStartTime);
+    if (opts.maxStartTime) qs.set("max_start_time", opts.maxStartTime);
+    path = `/scheduled_events?${qs}`;
+  }
+
+  const body = await api<{
+    collection: ScheduledEventResource[];
+    pagination: { next_page: string | null };
+  }>(path);
+
+  return {
+    events: body.collection.map(toScheduledEvent),
+    nextPage: body.pagination?.next_page ?? null,
+  };
+}
+
+/**
+ * Everyone on a scheduled event. These are 1:1 calls, so this is almost always
+ * a single invitee — but it's a collection in the API and a group event would
+ * silently lose people if we only read the first.
+ */
+export async function listInvitees(eventUri: string): Promise<InviteeRecord[]> {
+  const uuid = eventUri.split("?")[0].split("/").pop();
+  const body = await api<{ collection: FullInviteeResource[] }>(
+    `/scheduled_events/${uuid}/invitees?count=100`,
+  );
+  return body.collection.map(toInviteeRecord);
 }
 
 /* ===================== write ===================== */
