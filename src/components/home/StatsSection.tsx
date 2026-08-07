@@ -1,7 +1,7 @@
 import RevenueGraph from "@/components/home/RevenueGraph";
 import StatsGrid from "@/components/home/StatsGrid";
 import SectionHeading from "@/components/ui/SectionHeading";
-import type { RevenueTimeline } from "@/lib/quickbooks/public-stats";
+import { hasLiveToken, type RevenueTimeline } from "@/lib/quickbooks/public-stats";
 import type { StatContent } from "@/sanity/types";
 
 /**
@@ -25,6 +25,16 @@ export default function StatsSection({
   stats: StatContent[];
   revenue?: RevenueTimeline | null;
 }) {
+  // The graph draws the revenue figure, so its card reads as the selected tab
+  // (the other stats get graphs of their own eventually). Found by data, not
+  // position: the card that carries the live token — or, until the token is
+  // activated, the one labelled like "lifetime revenue".
+  const highlightIndex = revenue
+    ? stats.findIndex(
+        (s) => hasLiveToken(s.value ?? "") || /lifetime revenue/i.test(s.label ?? ""),
+      )
+    : -1;
+
   return (
     <section
       id="proof"
@@ -33,6 +43,7 @@ export default function StatsSection({
       <SectionHeading eyebrow={eyebrow} title={title} />
       <StatsGrid
         stats={stats}
+        highlightIndex={highlightIndex}
         className="mx-auto mt-8 grid max-w-[1160px] grid-cols-2 gap-3 md:mt-[52px] md:grid-cols-[repeat(auto-fit,minmax(230px,1fr))] md:gap-[18px]"
       />
       {revenue && (

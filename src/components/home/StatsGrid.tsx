@@ -34,10 +34,17 @@ export default function StatsGrid({
   stats,
   className = "",
   variant = "card",
+  highlightIndex = null,
 }: {
   stats: StatContent[];
   className?: string;
   variant?: "card" | "bare";
+  /**
+   * The "selected" card — the one whose figure the revenue graph below is
+   * drawing. Reads as an active tab (the other stats get their own graphs
+   * eventually); nothing is clickable yet. Card variant only.
+   */
+  highlightIndex?: number | null;
 }) {
   const parsed = useMemo(() => stats.map((s) => parseStat(s.value)), [stats]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -97,6 +104,7 @@ export default function StatsGrid({
           p={parsed[i]}
           value={revealed[i] ? parsed[i].num : 0}
           variant={variant}
+          highlight={variant === "card" && i === highlightIndex}
           registerWipe={(el) => {
             wipeRefs.current[i] = el;
           }}
@@ -116,12 +124,14 @@ function StatCard({
   p,
   value,
   variant,
+  highlight,
   registerWipe,
 }: {
   stat: StatContent;
   p: { prefix: string; num: number; suffix: string };
   value: number;
   variant: "card" | "bare";
+  highlight: boolean;
   registerWipe: (el: HTMLSpanElement | null) => void;
 }) {
   const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLDivElement>();
@@ -138,7 +148,11 @@ function StatCard({
           : // frost is md+ only: the card sits on an always-animating canvas, so
             // a backdrop-filter re-blurs EVERY frame while visible — too hot for
             // mobile GPUs. Phones get a near-opaque panel instead.
-            "group relative overflow-hidden rounded-[18px] border border-white/10 bg-panel/85 px-4 py-5 transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:bg-white/[0.045] md:px-7 md:py-8 md:backdrop-blur-xl"
+            `group relative overflow-hidden rounded-[18px] border bg-panel/85 px-4 py-5 transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:bg-white/[0.045] md:px-7 md:py-8 md:backdrop-blur-xl ${
+              highlight
+                ? "border-magenta/35 shadow-[0_22px_70px_-30px_rgba(255,45,120,.5)] hover:border-magenta/50"
+                : "border-white/10 hover:border-white/20"
+            }`
       }
     >
       {/* cursor spotlight — position eased in JS, opacity eased in CSS */}
@@ -151,6 +165,20 @@ function StatCard({
               "radial-gradient(340px circle at var(--mx, 50%) var(--my, 0%), rgba(255,45,120,.16), transparent 68%)",
           }}
         />
+      )}
+      {/* selected-tab dressing: gradient hairline along the bottom edge plus a
+          low interior wash — the visual hand-off to the graph drawn beneath */}
+      {!bare && highlight && (
+        <>
+          <span
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-violet via-magenta to-[#ff5c96]"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_85%_at_50%_115%,rgba(255,45,120,0.13),transparent_62%)]"
+          />
+        </>
       )}
       <div className="relative">
         <NumberFlow
