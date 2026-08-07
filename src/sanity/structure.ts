@@ -24,6 +24,7 @@ const PAGES: Array<{ type: string; title: string }> = [
   { type: "teamPage", title: "Our Team" },
   { type: "schedulePage", title: "Book a Call" },
   { type: "careersPage", title: "Careers" },
+  { type: "leaderboardPage", title: "Referral Leaderboard" },
 ];
 
 const HANDLED = [

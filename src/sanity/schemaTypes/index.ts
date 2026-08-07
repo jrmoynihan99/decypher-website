@@ -28,6 +28,7 @@ import {
   servicesPage,
   teamPage,
 } from "./pages";
+import { leaderboardPage } from "./leaderboard";
 import { siteSettings } from "./siteSettings";
 import { thankYouPage } from "./thankYou";
 
@@ -50,6 +51,7 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   affiliatePage,
   thankYouPage,
   legalPage,
+  leaderboardPage,
   // collections
   creator,
   creatorCategory,

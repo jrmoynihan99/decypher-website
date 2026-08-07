@@ -12,12 +12,50 @@ import type {
   CallType,
   CommissionPreset,
   DealStatus,
-  LeadSource,
-  PaymentPlan,
   ReferralKind,
-  Service,
   ShowStatus,
 } from "./options";
+
+/* ───────────────────────── editable dropdowns ───────────────────────── */
+
+/**
+ * One entry in an editable dropdown.
+ *
+ * `key` is permanent — it's what a year of rows is written in, so the editor
+ * can never change it. `label` and position are the editable parts; `retired`
+ * hides an option from new picks while old rows keep rendering it. Deleting a
+ * key outright would strand every row that holds it, which is why there is no
+ * delete, only retire.
+ */
+export interface OptionItem {
+  key: string;
+  label: string;
+  retired?: boolean;
+}
+
+/**
+ * The dropdown lists an operator can edit, in display order.
+ *
+ * Two tiers, and the boundary is semantic, not arbitrary:
+ * - `leadSource` / `service` / `paymentPlan` are pure vocabulary — rename,
+ *   reorder, retire AND add freely. Nothing in the code branches on their keys.
+ * - `dealStatus` / `showStatus` / `referralKind` allow rename + reorder only.
+ *   Their keys drive money logic (DEAL_STATUS_META.counts decides what a
+ *   commission pays and what the leaderboard ranks), so adding or retiring
+ *   entries is not an edit, it's a code change.
+ */
+export interface SalesOptionsConfig {
+  leadSource: OptionItem[];
+  service: OptionItem[];
+  paymentPlan: OptionItem[];
+  dealStatus: OptionItem[];
+  showStatus: OptionItem[];
+  referralKind: OptionItem[];
+}
+
+export type EditableList = keyof SalesOptionsConfig;
+/** The lists where adding and retiring keys is allowed. */
+export const OPEN_LISTS = ["leadSource", "service", "paymentPlan"] as const;
 
 /** The fields an operator may change. Exactly what PATCH accepts. */
 export interface SalesCallEdits {
@@ -35,13 +73,14 @@ export interface SalesCallEdits {
    */
   archived: boolean;
 
-  leadSource: LeadSource | null;
+  /** A key from the editable leadSource list — plain string, not a union. */
+  leadSource: string | null;
   showStatus: ShowStatus | null;
   status: DealStatus | null;
   /** The offer made, whole dollars. Airtable's DEAL Desk → Offer. */
   offer: number | null;
-  paymentPlan: PaymentPlan | null;
-  service: Service | null;
+  paymentPlan: string | null;
+  service: string | null;
   /** Onboarding date, ISO yyyy-mm-dd. Airtable's OB Date. */
   onboardingDate: string | null;
   notes: string | null;
@@ -85,7 +124,7 @@ export interface SalesCallRow extends SalesCallEdits {
    * RSC flight data, once for hydration) — and the grid renders none of it.
    * A detail view that needs the full Q&A should fetch one document, not ship
    * every answer to every session. */
-  suggestedLeadSource: LeadSource | null;
+  suggestedLeadSource: string | null;
   /** Verbatim "How did you hear about us?", shown next to the dropdown. */
   leadSourceRaw: string | null;
   /** Verbatim "Who referred you?", shown next to the referrer picker. */
@@ -103,6 +142,26 @@ export interface ReferrerRow {
   name: string;
   /** Other spellings seen in the wild — "MEGHAN" for "MEGHAN LIM". */
   aliases: string[];
+  /** Inactive = hidden from the picker for new rows; old rows keep the name. */
   active: boolean;
+  /**
+   * On the public /leaderboard page. Defaults true; the switch exists for the
+   * out-of-network people (gift-card referrers, one-off intros) the client
+   * doesn't want ranked publicly.
+   */
+  showOnLeaderboard: boolean;
+  /**
+   * Explicit link to a Sanity `creator` document, for the photo. Set in the
+   * referrer manager; when null the leaderboard falls back to a fuzzy name
+   * match against the Sanity roster, and to initials when that misses too.
+   */
+  sanityCreatorId: string | null;
   createdAt: string | null;
+}
+
+/** A Sanity creator, trimmed to what the referrer manager needs. */
+export interface CreatorOption {
+  id: string;
+  name: string;
+  imageUrl: string | null;
 }

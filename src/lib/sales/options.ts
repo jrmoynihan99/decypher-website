@@ -484,6 +484,49 @@ export function asOption<T extends string>(
     : null;
 }
 
+/* ───────────────────── editable dropdown defaults ───────────────────── */
+
+import type { OptionItem, SalesOptionsConfig } from "./types";
+
+const toItems = <T extends string>(
+  keys: readonly T[],
+  labels: Record<T, string>,
+): OptionItem[] => keys.map((key) => ({ key, label: labels[key] }));
+
+/**
+ * What `salesConfig/options` holds before anyone edits it — the same lists
+ * this module has always hardcoded, now as data. The static exports above
+ * remain the semantic layer (DEAL_STATUS_META, commission math, import
+ * mappings); this is the *presentation* layer the client may edit. A key
+ * that exists here must keep existing — see the OptionItem comment in
+ * types.ts for why retire-not-delete.
+ */
+export function defaultOptionsConfig(): SalesOptionsConfig {
+  return {
+    leadSource: toItems(LEAD_SOURCES, LEAD_SOURCE_LABELS),
+    service: toItems(SERVICES, SERVICE_LABELS),
+    paymentPlan: toItems(PAYMENT_PLANS, PAYMENT_PLAN_LABELS),
+    dealStatus: toItems(DEAL_STATUSES, DEAL_STATUS_LABELS),
+    showStatus: toItems(SHOW_STATUSES, SHOW_STATUS_LABELS),
+    referralKind: toItems(REFERRAL_KINDS, REFERRAL_KIND_LABELS),
+  };
+}
+
+/** Slug for a brand-new option added in the editor. */
+export function optionKey(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50);
+}
+
+/** Label for a key, falling back to the key itself for retired/unknown ones. */
+export function optionLabel(items: OptionItem[], key: string | null): string {
+  if (!key) return "—";
+  return items.find((i) => i.key === key)?.label ?? key;
+}
+
 /** Narrow an untrusted value to a non-negative whole-dollar amount, or null. */
 export function asMoney(value: unknown): number | null {
   if (value === null || value === "") return null;

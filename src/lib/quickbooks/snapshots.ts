@@ -19,7 +19,12 @@ import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import { aggregateRows } from "./aggregate";
 import { listConnections, type ConnectionRow } from "./connections";
 import { slicePnl } from "./parse";
-import { resolvePeriod, sliceIndices, type PeriodKey } from "./periods";
+import {
+  availableYears,
+  resolvePeriod,
+  sliceIndices,
+  type PeriodKey,
+} from "./periods";
 import type {
   AccountingBasis,
   CreatorFinanceRow,
@@ -178,11 +183,16 @@ export async function listCreatorFinances(
 ): Promise<FinancesPayload> {
   const connections = await listConnections();
   if (!connections.length) {
-    return { period, basis, rows: [], aggregate: aggregateRows([]) };
+    return { period, basis, rows: [], aggregate: aggregateRows([]), years: [] };
   }
 
   const docs = await adminDb().getAll(...connections.map((c) => ref(c.realmId, basis)));
   const snapshots = new Map(docs.map((doc) => [doc.id, doc.data()]));
+
+  // Union of every cached month, for the year selector. Collected while
+  // slicing rather than in a second pass — the stored months are already in
+  // hand and a company onboarded last month must not shrink the list.
+  const allMonths = new Set<string>();
 
   const rows: CreatorFinanceRow[] = connections.map((c) => {
     const snap = snapshots.get(snapshotId(c.realmId, basis));
@@ -197,6 +207,7 @@ export async function listCreatorFinances(
       } else {
         const stored = toPnl(snap.data);
         if (stored) {
+          for (const m of stored.months) allMonths.add(m);
           // The period selector is a slice of the cached window — exact, and
           // free of any further API traffic. See the module header.
           const resolved = resolvePeriod(period, now, c.fiscalYearStartMonth);
@@ -227,5 +238,11 @@ export async function listCreatorFinances(
     };
   });
 
-  return { period, basis, rows, aggregate: aggregateRows(rows) };
+  return {
+    period,
+    basis,
+    rows,
+    aggregate: aggregateRows(rows),
+    years: availableYears([...allMonths]),
+  };
 }

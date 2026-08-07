@@ -3,6 +3,7 @@ import { client, freshClient } from "./client";
 import { urlFor } from "./image";
 import type {
   CmsJob,
+  CmsLeaderboardPage,
   CmsLegalPage,
   CmsService,
   CmsTeamMember,
@@ -126,6 +127,25 @@ export async function getThankYouRouting(): Promise<ThankYouRouting> {
  * the site root, so they get their own route and their own fetch rather than
  * sharing the [...slug] catch-all.
  */
+/**
+ * The leaderboard page's content shell. A singleton with a fixed route, so no
+ * slug — and deliberately NOT in PAGE_TYPES, since /leaderboard is its own
+ * route rather than a catch-all slug.
+ *
+ * The standings themselves come from Firestore (lib/sales/leaderboard.ts);
+ * this is only the wrapper copy and the creator post spotlights.
+ */
+export async function getLeaderboardPage(): Promise<CmsLeaderboardPage | null> {
+  return client.fetch(
+    `*[_type == "leaderboardPage"][0]{
+      title, seo, header, hawaiiSection, hawaiiEmpty,
+      standingsSection, riseSection,
+      spotlights[]{ name, postUrl, caption },
+      cta
+    }`,
+  );
+}
+
 export async function getLegalPageBySlug(
   slug: string,
 ): Promise<CmsLegalPage | null> {

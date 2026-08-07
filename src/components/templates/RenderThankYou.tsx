@@ -6,6 +6,7 @@ import {
   getThankYouSharedSections,
   getVideoTestimonials,
 } from "@/sanity/queries";
+import { withLiveStats } from "@/lib/quickbooks/public-stats";
 import type { CmsThankYouPage } from "@/sanity/types";
 
 /**
@@ -15,7 +16,7 @@ import type { CmsThankYouPage } from "@/sanity/types";
  */
 export async function renderThankYou(page: CmsThankYouPage | null) {
   const [settings, shared, testimonials, videos] = await Promise.all([
-    getSiteSettings(),
+    getSiteSettings().then(withLiveStats),
     getThankYouSharedSections(),
     getTestimonials(),
     getVideoTestimonials(),

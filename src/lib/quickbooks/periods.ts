@@ -28,11 +28,24 @@ export const PERIOD_KEYS = [
   "this-quarter",
   "last-quarter",
   "last-year",
+  "all-time",
 ] as const;
 
-export type PeriodKey = (typeof PERIOD_KEYS)[number];
+export type FixedPeriodKey = (typeof PERIOD_KEYS)[number];
 
-export const PERIOD_LABELS: Record<PeriodKey, string> = {
+/**
+ * A specific fiscal year, e.g. "year-2024".
+ *
+ * Dynamic rather than enumerated because which years exist depends on how far
+ * back the sync window reaches — see availableYears(), which builds the
+ * selector from the months actually in the cache instead of offering a year
+ * that would silently resolve to an empty slice.
+ */
+export type YearPeriodKey = `year-${number}`;
+
+export type PeriodKey = FixedPeriodKey | YearPeriodKey;
+
+export const PERIOD_LABELS: Record<FixedPeriodKey, string> = {
   ytd: "Year to date",
   "last-12-months": "Last 12 months",
   "this-month": "This month",
@@ -40,15 +53,43 @@ export const PERIOD_LABELS: Record<PeriodKey, string> = {
   "this-quarter": "This quarter",
   "last-quarter": "Last quarter",
   "last-year": "Last full year",
+  "all-time": "All time",
 };
 
 export const DEFAULT_PERIOD: PeriodKey = "ytd";
 
 const VALID = new Set<string>(PERIOD_KEYS);
 
+const YEAR_RE = /^year-(\d{4})$/;
+
+/** Sanity bounds on a year key — anything outside is a typo or an attack. */
+const MIN_YEAR = 2000;
+const MAX_YEAR = 2100;
+
+export function isYearPeriod(key: PeriodKey): key is YearPeriodKey {
+  return YEAR_RE.test(key);
+}
+
+/** The calendar year a "year-YYYY" key names, or null. */
+export function periodYear(key: PeriodKey): number | null {
+  const m = YEAR_RE.exec(key);
+  return m ? Number(m[1]) : null;
+}
+
 /** Narrow an untrusted value (a query string, a Firestore doc) to a period key. */
 export function parsePeriodKey(value: unknown): PeriodKey | null {
-  return typeof value === "string" && VALID.has(value) ? (value as PeriodKey) : null;
+  if (typeof value !== "string") return null;
+  if (VALID.has(value)) return value as FixedPeriodKey;
+  const m = YEAR_RE.exec(value);
+  if (!m) return null;
+  const year = Number(m[1]);
+  return year >= MIN_YEAR && year <= MAX_YEAR ? (value as YearPeriodKey) : null;
+}
+
+/** Display label for any period key, fixed or dynamic. */
+export function periodLabel(key: PeriodKey): string {
+  const year = periodYear(key);
+  return year != null ? String(year) : (PERIOD_LABELS[key as FixedPeriodKey] ?? key);
 }
 
 /* ────────────────────────── month keys ────────────────────────── */
@@ -143,12 +184,29 @@ export function resolvePeriod(
 
   const range = (startOrd: number, endOrd: number): ResolvedPeriod => ({
     key,
-    label: PERIOD_LABELS[key],
+    label: periodLabel(key),
     startMonth: fromOrdinal(startOrd),
     endMonth: fromOrdinal(endOrd),
   });
 
+  /**
+   * A named year is that FISCAL year — the one starting in the named calendar
+   * year — for the same reason "year to date" is fiscal: an accounting firm's
+   * "2024" means the client's 2024 books. With the near-universal January
+   * fiscal start the two are identical anyway.
+   */
+  const year = periodYear(key);
+  if (year != null) {
+    const start = ordinal(monthKeyOf(year, fiscalStartMonth));
+    return range(start, start + 11);
+  }
+
   switch (key) {
+    case "all-time":
+      // Deliberately wider than any cache: sliceIndices clamps to the months
+      // that actually exist, so "all time" means "everything we hold" without
+      // this function needing to know what that is.
+      return range(ordinal(monthKeyOf(MIN_YEAR, 1)), nowOrd);
     case "ytd":
       return range(fiscalStartOrd, nowOrd);
     case "last-12-months":
@@ -170,33 +228,73 @@ export function resolvePeriod(
     }
     case "last-year":
       return range(fiscalStartOrd - 12, fiscalStartOrd - 1);
+    default:
+      // Unreachable for a parsed key — year keys returned above, and every
+      // fixed key has a case. A malformed key falls back to the default
+      // period rather than throwing: a bad query string should show the
+      // wrong-ish window, not 500 the whole dashboard.
+      return range(fiscalStartOrd, nowOrd);
   }
 }
+
+/**
+ * How many fiscal years of history a sync fetches, beyond the current one.
+ *
+ * Was 1 — the minimum "last full year" needs. Raised to serve per-year
+ * selection and "all time", including the public lifetime-revenue stat.
+ *
+ * The ceiling is Intuit's 400k-cell response cap: ~72 monthly columns ×
+ * ~200 accounts is ~14k cells, still in one request. The real cost is the
+ * stored snapshot — every line item carries a monthly array, so ~40 lines ×
+ * 72 months is ~30KB of JSON per company, comfortably under Firestore's 1MB
+ * document limit. Don't raise this to 20 without re-checking that.
+ *
+ * NOTE: "all time" means "as far back as this reaches". A company with books
+ * predating the window reports from the window's start, not from inception.
+ */
+export const HISTORY_YEARS = 5;
 
 /**
  * The window a sync actually fetches — wide enough that every period above is a
  * slice of it, with no second API call.
  *
- * Binding constraint is "last full year": in July 2026 that's Jan–Dec 2025,
- * which a trailing-12-month fetch (Aug 2025 onward) would miss entirely. So we
- * start at the beginning of the PREVIOUS fiscal year: 13–24 months depending on
- * where we are in the year.
- *
- * Cost of the extra breadth is nil — ~24 columns × ~200 accounts is ~5k cells
- * against Intuit's 400k-cell response cap, in the same single request.
+ * Starts at the beginning of the fiscal year HISTORY_YEARS back, so the year
+ * selector and "all time" are arithmetic on cached months rather than fresh
+ * QuickBooks traffic — the same trick that already made the period dropdown
+ * free.
  */
 export function syncWindow(
   today: Date,
   fiscalStartMonth = 1,
 ): { startDate: string; endDate: string; startMonth: MonthKey; endMonth: MonthKey } {
   const { startMonth: prevYearStart } = resolvePeriod("last-year", today, fiscalStartMonth);
+  const start = fromOrdinal(ordinal(prevYearStart) - 12 * (HISTORY_YEARS - 1));
   const endMonth = monthKeyOf(today.getUTCFullYear(), today.getUTCMonth() + 1);
   return {
-    startMonth: prevYearStart,
+    startMonth: start,
     endMonth,
-    startDate: monthStartDate(prevYearStart),
+    startDate: monthStartDate(start),
     endDate: monthEndDate(endMonth),
   };
+}
+
+/**
+ * Fiscal years the cached months can actually answer for, newest first.
+ *
+ * Built from real data rather than from the calendar so the selector never
+ * offers a year that resolves to an empty slice. A year counts as available if
+ * any of its months are present — a partial year is still worth reporting, and
+ * the label makes no promise of completeness.
+ */
+export function availableYears(months: MonthKey[], fiscalStartMonth = 1): number[] {
+  const years = new Set<number>();
+  for (const key of months) {
+    const [y, m] = key.split("-").map(Number);
+    if (!y || !m) continue;
+    // A month before the fiscal start belongs to the year that started earlier.
+    years.add(m >= fiscalStartMonth ? y : y - 1);
+  }
+  return [...years].sort((a, b) => b - a);
 }
 
 /**

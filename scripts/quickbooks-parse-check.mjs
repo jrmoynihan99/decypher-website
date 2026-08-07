@@ -336,10 +336,11 @@ check("last-year with a July fiscal start", resolvePeriod("last-year", today, 7)
   key: "last-year", label: "Last full year", startMonth: "2025-07", endMonth: "2026-06",
 });
 
-// The window must cover "last full year", which a trailing-12 fetch would miss.
-check("sync window reaches back to the previous fiscal year", syncWindow(today), {
-  startMonth: "2025-01", endMonth: "2026-07",
-  startDate: "2025-01-01", endDate: "2026-07-31",
+// The window reaches back HISTORY_YEARS (5) fiscal years — what makes per-year
+// selection, "all time" and the public revenue graph free of extra API calls.
+check("sync window reaches back HISTORY_YEARS fiscal years", syncWindow(today), {
+  startMonth: "2021-01", endMonth: "2026-07",
+  startDate: "2021-01-01", endDate: "2026-07-31",
 });
 check("month-end handles a leap February", syncWindow(new Date("2028-02-10T00:00:00Z")).endDate, "2028-02-29");
 

@@ -175,6 +175,12 @@ export type FinancesPayload = {
   basis: AccountingBasis;
   rows: CreatorFinanceRow[];
   aggregate: FinanceAggregate;
+  /**
+   * Fiscal years the cache can actually answer for, newest first. Computed
+   * server-side from the union of every snapshot's months so the period
+   * selector can't offer a year that resolves to an empty slice.
+   */
+  years: number[];
 };
 
 /** Canonical order — iterate this rather than Object.keys, which isn't ordered. */

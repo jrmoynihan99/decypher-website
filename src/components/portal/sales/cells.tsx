@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SearchSelect, type SearchOption } from "@/components/portal/widgets/ui";
+import type { OptionItem } from "@/lib/sales/types";
 
 /** Shared select styling, sized for a dense grid rather than a form. */
 const cellSelectCls =
@@ -32,10 +33,9 @@ const cellInputCls =
 
 /* ───────────────────────────── select ───────────────────────────── */
 
-export function SelectCell<T extends string>({
+export function SelectCell<T extends string = string>({
   value,
-  options,
-  labels,
+  items,
   onChange,
   saving,
   placeholder = "—",
@@ -43,14 +43,21 @@ export function SelectCell<T extends string>({
   title,
 }: {
   value: T | null;
-  options: readonly T[];
-  labels: Record<T, string>;
+  /** From the editable options config — order is display order. */
+  items: OptionItem[];
   onChange: (v: T | null) => void;
   saving?: boolean;
   placeholder?: string;
   width?: string;
   title?: string;
 }) {
+  // Retired options are hidden from new picks, but a row already holding one
+  // must keep rendering it — and stay saveable — or retiring an option would
+  // silently corrupt the historical rows written in it.
+  const current = value ? items.find((i) => i.key === value) : undefined;
+  const offered = items.filter((i) => !i.retired || i.key === value);
+  const unknown = value && !current;
+
   return (
     <select
       value={value ?? ""}
@@ -61,11 +68,13 @@ export function SelectCell<T extends string>({
       style={caret}
     >
       <option value="">{placeholder}</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {labels[o]}
+      {offered.map((o) => (
+        <option key={o.key} value={o.key}>
+          {o.label}
+          {o.retired ? " (retired)" : ""}
         </option>
       ))}
+      {unknown ? <option value={value!}>{value}</option> : null}
     </select>
   );
 }

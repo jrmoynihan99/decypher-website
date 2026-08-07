@@ -21,7 +21,9 @@
     "qb:introspect": "node scripts/quickbooks-introspect.mjs",
     "sales:backfill": "node scripts/sales-backfill.mjs",
     "sales:import": "node scripts/sales-import-airtable.mjs",
-    "sales:webhook": "node scripts/calendly-webhook.mjs"
+    "sales:webhook": "node scripts/calendly-webhook.mjs",
+    "leaderboard:seed": "node scripts/seed-leaderboard.mjs",
+    "stats:activate-live": "node scripts/activate-live-revenue-stat.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.1",
