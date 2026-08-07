@@ -342,6 +342,24 @@ export type PageDoc =
  * those are fixed templates with named fields, whereas here the entire page is
  * `body`, so the whole text is editable in Studio rather than in the repo.
  */
+/**
+ * The /leaderboard content shell. On its own route (not a catch-all slug), so
+ * `Cms*` rather than `*Doc` and absent from the PageDoc union — same branch as
+ * CmsThankYouPage and CmsLegalPage.
+ */
+export interface CmsLeaderboardPage {
+  title?: string;
+  seo?: SeoContent;
+  header?: PageHeaderContent;
+  hawaiiSection?: SectionHeadingContent;
+  hawaiiEmpty?: string;
+  standingsSection?: SectionHeadingContent;
+  riseSection?: SectionHeadingContent;
+  /** Social posts attached to a creator's row, matched by name. */
+  spotlights?: { name?: string; postUrl?: string; caption?: string }[];
+  cta?: CtaContent;
+}
+
 export interface CmsLegalPage {
   title: string;
   /** URL segment under /legal/ — "privacy" serves /legal/privacy. */

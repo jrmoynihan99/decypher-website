@@ -28,26 +28,21 @@ import {
   CALL_TYPE_SHORT,
   type CallType,
   COMMISSION_PRESETS,
-  DEAL_STATUSES,
-  DEAL_STATUS_LABELS,
   DEAL_STATUS_META,
-  LEAD_SOURCES,
-  LEAD_SOURCE_LABELS,
-  PAYMENT_PLANS,
-  PAYMENT_PLAN_LABELS,
-  REFERRAL_KINDS,
-  REFERRAL_KIND_LABELS,
-  SERVICES,
-  SERVICE_LABELS,
-  SHOW_STATUSES,
-  SHOW_STATUS_LABELS,
   SHOW_STATUS_META,
   type CommissionPreset,
   commissionTotal,
+  optionLabel,
   partnerPayout,
   payoutDate,
 } from "@/lib/sales/options";
-import type { ReferrerRow, SalesCallEdits, SalesCallRow } from "@/lib/sales/types";
+import type {
+  CreatorOption,
+  ReferrerRow,
+  SalesCallEdits,
+  SalesCallRow,
+  SalesOptionsConfig,
+} from "@/lib/sales/types";
 import {
   Chip,
   Kpi,
@@ -69,13 +64,21 @@ import {
   Suggestion,
   TextCell,
 } from "./cells";
+import SalesStats from "./SalesStats";
+import OptionsEditor from "./OptionsEditor";
 
-type Tab = "booked" | "deals" | "referrals";
+type Tab = "booked" | "deals" | "referrals" | "stats";
 
 const money = (n: number) => `$${n.toLocaleString("en-US")}`;
 
 const shortDate = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "—";
+  iso
+    ? new Date(iso).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "2-digit",
+      })
+    : "—";
 
 /**
  * How many rows to put in the DOM at once.
@@ -95,6 +98,7 @@ const RANGES = [
   { id: "ytd", label: "Year to date" },
   { id: "12m", label: "Last 12 months" },
   { id: "all", label: "All time" },
+  { id: "custom", label: "Custom range…" },
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
 
@@ -106,39 +110,73 @@ const RANGE_DAYS: Partial<Record<RangeId, number>> = {
   "12m": 365,
 };
 
-/** Epoch ms a range begins at, or null for "everything". */
-function rangeStart(id: RangeId): number | null {
-  if (id === "all") return null;
+/**
+ * Epoch ms bounds for a range. `null` on either side means unbounded.
+ *
+ * Custom returns whatever the two date inputs hold — either may be empty, so
+ * "everything before 1 March" is expressible without inventing a start date.
+ * The end is pushed to the end of its day: a bookedAt timestamp of 14:30 on
+ * the chosen end date is inside the range a human means by it.
+ */
+function rangeBounds(
+  id: RangeId,
+  custom: { from: string; to: string },
+): { start: number | null; end: number | null } {
+  if (id === "custom") {
+    const start = custom.from ? new Date(`${custom.from}T00:00:00`).getTime() : null;
+    const end = custom.to ? new Date(`${custom.to}T23:59:59.999`).getTime() : null;
+    return {
+      start: Number.isFinite(start) ? start : null,
+      end: Number.isFinite(end) ? end : null,
+    };
+  }
+  if (id === "all") return { start: null, end: null };
   if (id === "ytd") {
     const now = new Date();
-    return new Date(now.getFullYear(), 0, 1).getTime();
+    return { start: new Date(now.getFullYear(), 0, 1).getTime(), end: null };
   }
   const days = RANGE_DAYS[id];
-  return days ? Date.now() - days * 86_400_000 : null;
+  return { start: days ? Date.now() - days * 86_400_000 : null, end: null };
 }
 
 export default function SalesFlow({
   initialCalls,
   initialReferrers,
+  initialConfig,
+  creators,
 }: {
   initialCalls: SalesCallRow[];
   initialReferrers: ReferrerRow[];
+  initialConfig: SalesOptionsConfig;
+  creators: CreatorOption[];
 }) {
   const [calls, setCalls] = useState(initialCalls);
   const [referrers, setReferrers] = useState(initialReferrers);
+  const [config, setConfig] = useState(initialConfig);
+  const [editingOptions, setEditingOptions] = useState(false);
   const [tab, setTab] = useState<Tab>("booked");
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<RangeId>("ytd");
+  const [custom, setCustom] = useState({ from: "", to: "" });
   const [callType, setCallType] = useState<CallType | "all">("all");
   const [visible, setVisible] = useState(PAGE);
   const [showArchived, setShowArchived] = useState(false);
+  /* Per-tab segment filters. "" = all. Status is shared by Deal Desk and
+     Referrals — it is the same field, so one selection following you across
+     the two tabs is the behaviour that matches the data model. */
+  const [statusFilter, setStatusFilter] = useState("");
+  const [serviceFilter, setServiceFilter] = useState("");
+  const [referrerFilter, setReferrerFilter] = useState("");
   /** The last row archived, so it can be put straight back. */
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** `${id}:${field}` while a write is in flight, so one cell greys, not the row. */
   const [saving, setSaving] = useState<Set<string>>(new Set());
 
-  const busy = useCallback((id: string, field: string) => saving.has(`${id}:${field}`), [saving]);
+  const busy = useCallback(
+    (id: string, field: string) => saving.has(`${id}:${field}`),
+    [saving],
+  );
 
   /**
    * Latest rows, for the save rollback, without making `saveMany` depend on
@@ -187,7 +225,9 @@ export default function SalesFlow({
       if (!before) return;
       const keys = Object.keys(patch).map((f) => `${id}:${f}`);
 
-      setCalls((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      setCalls((rows) =>
+        rows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      );
       setSaving((s) => {
         const next = new Set(s);
         for (const k of keys) next.add(k);
@@ -196,16 +236,22 @@ export default function SalesFlow({
       setError(null);
 
       try {
-        const res = await fetch(`/api/portal/sales/calls/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
+        const res = await fetch(
+          `/api/portal/sales/calls/${encodeURIComponent(id)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          },
+        );
         const body = await res.json().catch(() => null);
-        if (!res.ok || !body?.ok) throw new Error(body?.message ?? `Save failed (${res.status})`);
+        if (!res.ok || !body?.ok)
+          throw new Error(body?.message ?? `Save failed (${res.status})`);
         // Take the server's row: it also refreshes derived fields like
         // referrerName that this component didn't compute.
-        setCalls((rows) => rows.map((r) => (r.id === id ? (body.call as SalesCallRow) : r)));
+        setCalls((rows) =>
+          rows.map((r) => (r.id === id ? (body.call as SalesCallRow) : r)),
+        );
       } catch (e) {
         setCalls((rows) => rows.map((r) => (r.id === id ? before : r)));
         setError(e instanceof Error ? e.message : "Couldn't save");
@@ -221,7 +267,11 @@ export default function SalesFlow({
   );
 
   const save = useCallback(
-    <K extends keyof SalesCallEdits>(id: string, field: K, value: SalesCallEdits[K]) => {
+    <K extends keyof SalesCallEdits>(
+      id: string,
+      field: K,
+      value: SalesCallEdits[K],
+    ) => {
       void saveMany(id, { [field]: value } as Partial<SalesCallEdits>);
     },
     [saveMany],
@@ -243,27 +293,121 @@ export default function SalesFlow({
     [saveMany],
   );
 
-  const addReferrer = useCallback(async (name: string): Promise<string | null> => {
+  const addReferrer = useCallback(
+    async (name: string): Promise<string | null> => {
+      setError(null);
+      try {
+        const res = await fetch("/api/portal/sales/referrers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body?.ok)
+          throw new Error(body?.message ?? "Couldn't add partner");
+        const referrer = body.referrer as ReferrerRow;
+        setReferrers((rs) =>
+          rs.some((r) => r.id === referrer.id)
+            ? rs
+            : [...rs, referrer].sort((a, b) => a.name.localeCompare(b.name)),
+        );
+        return referrer.id;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't add partner");
+        return null;
+      }
+    },
+    [],
+  );
+
+  /* ── options-editor handlers ── */
+
+  const saveConfig = useCallback(async (next: SalesOptionsConfig) => {
     setError(null);
     try {
-      const res = await fetch("/api/portal/sales/referrers", {
-        method: "POST",
+      const res = await fetch("/api/portal/sales/options", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ config: next }),
       });
       const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.ok) throw new Error(body?.message ?? "Couldn't add partner");
-      const referrer = body.referrer as ReferrerRow;
-      setReferrers((rs) => (rs.some((r) => r.id === referrer.id) ? rs : [...rs, referrer].sort((a, b) => a.name.localeCompare(b.name))));
-      return referrer.id;
+      if (!res.ok || !body?.ok) throw new Error(body?.message ?? "Couldn't save options");
+      // Adopt the server's sanitized copy, not the draft — it's the one that
+      // re-appends any default key the draft tried to drop.
+      setConfig(body.config as SalesOptionsConfig);
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't add partner");
-      return null;
+      setError(e instanceof Error ? e.message : "Couldn't save options");
+      return false;
+    }
+  }, []);
+
+  const patchReferrer = useCallback(
+    async (
+      id: string,
+      patch: Partial<
+        Pick<ReferrerRow, "name" | "active" | "showOnLeaderboard" | "sanityCreatorId">
+      >,
+    ) => {
+      setError(null);
+      try {
+        const res = await fetch(`/api/portal/sales/referrers/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body?.ok) throw new Error(body?.message ?? "Couldn't save partner");
+        const updated = body.referrer as ReferrerRow;
+        setReferrers((rs) =>
+          rs.map((r) => (r.id === id ? updated : r)).sort((a, b) => a.name.localeCompare(b.name)),
+        );
+        // A rename propagates to referrerName server-side; mirror it locally
+        // so the grid doesn't show the old spelling until the next refresh.
+        if (patch.name) {
+          setCalls((rows) =>
+            rows.map((r) => (r.referrerId === id ? { ...r, referrerName: updated.name } : r)),
+          );
+        }
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't save partner");
+        return false;
+      }
+    },
+    [],
+  );
+
+  const removeReferrer = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/portal/sales/referrers/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.message ?? "Couldn't remove partner");
+      if (body.outcome === "deleted") {
+        setReferrers((rs) => rs.filter((r) => r.id !== id));
+      } else {
+        // Deactivated: keep the row so the roster explains itself, greyed out.
+        setReferrers((rs) =>
+          rs.map((r) =>
+            r.id === id ? { ...r, active: false, showOnLeaderboard: false } : r,
+          ),
+        );
+      }
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't remove partner");
+      return false;
     }
   }, []);
 
   const referrerOptions = useMemo(
-    () => referrers.filter((r) => r.active).map((r) => ({ value: r.id, label: r.name })),
+    () =>
+      referrers
+        .filter((r) => r.active)
+        .map((r) => ({ value: r.id, label: r.name })),
     [referrers],
   );
 
@@ -279,22 +423,52 @@ export default function SalesFlow({
    * what's findable.
    */
 
-  const archivedCount = useMemo(() => calls.filter((c) => c.archived).length, [calls]);
+  const archivedCount = useMemo(
+    () => calls.filter((c) => c.archived).length,
+    [calls],
+  );
 
-  const scoped = useMemo(() => {
-    const start = rangeStart(range);
+  /** Date range + call type, archived state not yet applied. */
+  const inRange = useMemo(() => {
+    const { start, end } = rangeBounds(range, custom);
     return calls.filter((c) => {
-      // Archived rows are out of every tab, every count and every total until
-      // explicitly asked for — an archived deal must not show up in revenue.
-      if (c.archived !== showArchived) return false;
       if (callType !== "all" && c.callType !== callType) return false;
-      if (start == null) return true;
+      if (start == null && end == null) return true;
       // Rows are ordered by bookedAt in Firestore, so a null can't reach here;
       // excluding one would be right anyway — it can't be placed in a range.
       if (!c.bookedAt) return false;
-      return new Date(c.bookedAt).getTime() >= start;
+      const t = new Date(c.bookedAt).getTime();
+      if (start != null && t < start) return false;
+      if (end != null && t > end) return false;
+      return true;
     });
-  }, [calls, range, callType, showArchived]);
+  }, [calls, range, callType, custom]);
+
+  // Archived rows are out of every tab, every count and every total until
+  // explicitly asked for — an archived deal must not show up in revenue.
+  const scoped = useMemo(
+    () => inRange.filter((c) => c.archived === showArchived),
+    [inRange, showArchived],
+  );
+
+  /**
+   * What the Stats tab aggregates. Archived is always excluded here regardless
+   * of the toggle — "show me what I deleted" is a grid affordance, and a stats
+   * page that silently reported on deleted deals would be a trap.
+   */
+  const statsRows = useMemo(
+    () => inRange.filter((c) => !c.archived),
+    [inRange],
+  );
+
+  /** By-year only: the whole history, date filter deliberately not applied. */
+  const allTimeRows = useMemo(
+    () =>
+      calls.filter(
+        (c) => !c.archived && (callType === "all" || c.callType === callType),
+      ),
+    [calls, callType],
+  );
 
   const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -307,10 +481,18 @@ export default function SalesFlow({
   }, [scoped, query]);
 
   const rows = useMemo(() => {
-    if (tab === "deals") return searched.filter((c) => c.isSales || c.isReferral);
-    if (tab === "referrals") return searched.filter((c) => c.isReferral);
-    return searched;
-  }, [searched, tab]);
+    let r = searched;
+    if (tab === "deals") {
+      r = r.filter((c) => c.isSales || c.isReferral);
+      if (serviceFilter) r = r.filter((c) => c.service === serviceFilter);
+      if (statusFilter) r = r.filter((c) => c.status === statusFilter);
+    } else if (tab === "referrals") {
+      r = r.filter((c) => c.isReferral);
+      if (referrerFilter) r = r.filter((c) => c.referrerId === referrerFilter);
+      if (statusFilter) r = r.filter((c) => c.status === statusFilter);
+    }
+    return r;
+  }, [searched, tab, serviceFilter, statusFilter, referrerFilter]);
 
   const page = useMemo(() => rows.slice(0, visible), [rows, visible]);
 
@@ -318,7 +500,9 @@ export default function SalesFlow({
 
   const stats = useMemo(() => {
     const deals = scoped.filter((c) => c.isSales || c.isReferral);
-    const won = deals.filter((c) => c.status && DEAL_STATUS_META[c.status].counts);
+    const won = deals.filter(
+      (c) => c.status && DEAL_STATUS_META[c.status].counts,
+    );
     const referrals = scoped.filter((c) => c.isReferral);
     return {
       booked: scoped.length,
@@ -326,23 +510,65 @@ export default function SalesFlow({
       won: won.length,
       revenue: won.reduce((sum, c) => sum + (c.offer ?? 0), 0),
       referrals: referrals.length,
-      owed: referrals.filter((c) => !c.paid).reduce((sum, c) => sum + commissionTotal(c), 0),
+      owed: referrals
+        .filter((c) => !c.paid)
+        .reduce((sum, c) => sum + commissionTotal(c), 0),
     };
   }, [scoped]);
 
-  const rangeLabel = RANGES.find((r) => r.id === range)?.label ?? "";
+  const rangeLabel = useMemo(() => {
+    if (range !== "custom") return RANGES.find((r) => r.id === range)?.label ?? "";
+    const nice = (d: string) =>
+      new Date(`${d}T00:00:00`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    if (custom.from && custom.to) return `${nice(custom.from)} – ${nice(custom.to)}`;
+    if (custom.from) return `Since ${nice(custom.from)}`;
+    if (custom.to) return `Up to ${nice(custom.to)}`;
+    return "Custom range";
+  }, [range, custom]);
+
+  if (editingOptions) {
+    return (
+      <div className="space-y-5">
+        {error ? (
+          <div className="rounded-[10px] border border-danger/40 bg-danger/10 px-3.5 py-2.5 text-[12.5px] text-danger">
+            {error}
+          </div>
+        ) : null}
+        <OptionsEditor
+          config={config}
+          onSaveConfig={saveConfig}
+          referrers={referrers}
+          onPatchReferrer={patchReferrer}
+          onDeleteReferrer={removeReferrer}
+          creators={creators}
+          onClose={() => setEditingOptions(false)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
       <KpiRow cols={4}>
         <Kpi label="Booked calls" value={stats.booked} />
         <Kpi label="In deal desk" value={stats.deals} />
-        <Kpi label="Closed won" value={stats.won} tone="pos" sub={money(stats.revenue)} />
+        <Kpi
+          label="Closed won"
+          value={stats.won}
+          tone="pos"
+          sub={money(stats.revenue)}
+        />
         <Kpi
           label="Referrals"
           value={stats.referrals}
           tone="brand"
-          sub={stats.owed ? `${money(stats.owed)} unpaid` : "nothing outstanding"}
+          sub={
+            stats.owed ? `${money(stats.owed)} unpaid` : "nothing outstanding"
+          }
         />
       </KpiRow>
 
@@ -355,15 +581,18 @@ export default function SalesFlow({
             { value: "booked", label: "Booked Calls" },
             { value: "deals", label: "Deal Desk" },
             { value: "referrals", label: "Referrals" },
+            { value: "stats", label: "Stats" },
           ]}
         />
-        <input
-          type="search"
-          value={query}
-          placeholder="Search name, email, partner…"
-          onChange={(e) => withReset(setQuery)(e.target.value)}
-          className="w-full max-w-[280px] rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-body text-[13px] text-fog outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-faint focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]"
-        />
+        {tab === "stats" ? null : (
+          <input
+            type="search"
+            value={query}
+            placeholder="Search name, email, partner…"
+            onChange={(e) => withReset(setQuery)(e.target.value)}
+            className="w-full max-w-[280px] rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-body text-[13px] text-fog outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-faint focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]"
+          />
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -383,6 +612,48 @@ export default function SalesFlow({
           </FilterSelect>
         </label>
 
+        {/* Only mounted while Custom is selected — two permanently-visible date
+            inputs would crowd a toolbar that already carries four controls. */}
+        {range === "custom" ? (
+          <label className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              value={custom.from}
+              max={custom.to || undefined}
+              aria-label="Range start"
+              onChange={(e) => {
+                setCustom((c) => ({ ...c, from: e.target.value }));
+                setVisible(PAGE);
+              }}
+              className="rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-mono text-[12.5px] tabular-nums text-fog outline-none transition-[border-color] duration-150 [color-scheme:dark] focus:border-magenta"
+            />
+            <span className="font-mono text-[11px] text-dusk">→</span>
+            <input
+              type="date"
+              value={custom.to}
+              min={custom.from || undefined}
+              aria-label="Range end"
+              onChange={(e) => {
+                setCustom((c) => ({ ...c, to: e.target.value }));
+                setVisible(PAGE);
+              }}
+              className="rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-mono text-[12.5px] tabular-nums text-fog outline-none transition-[border-color] duration-150 [color-scheme:dark] focus:border-magenta"
+            />
+            {custom.from || custom.to ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustom({ from: "", to: "" });
+                  setVisible(PAGE);
+                }}
+                className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
+              >
+                Clear
+              </button>
+            ) : null}
+          </label>
+        ) : null}
+
         <label className="flex items-center gap-2">
           <Mono className="text-dusk">Call</Mono>
           <FilterSelect
@@ -400,7 +671,75 @@ export default function SalesFlow({
           </FilterSelect>
         </label>
 
-        {archivedCount > 0 || showArchived ? (
+        {tab === "deals" ? (
+          <label className="flex items-center gap-2">
+            <Mono className="text-dusk">Service</Mono>
+            <FilterSelect
+              value={serviceFilter}
+              onChange={(v) => withReset(setServiceFilter)(v)}
+              width="w-[190px]"
+              ariaLabel="Service sold"
+            >
+              <option value="">All services</option>
+              {config.service
+                .filter((o) => !o.retired)
+                .map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+            </FilterSelect>
+          </label>
+        ) : null}
+
+        {tab === "referrals" ? (
+          <label className="flex items-center gap-2">
+            <Mono className="text-dusk">Referred by</Mono>
+            <FilterSelect
+              value={referrerFilter}
+              onChange={(v) => withReset(setReferrerFilter)(v)}
+              width="w-[180px]"
+              ariaLabel="Referred by"
+            >
+              <option value="">All partners</option>
+              {referrers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </FilterSelect>
+          </label>
+        ) : null}
+
+        {tab === "deals" || tab === "referrals" ? (
+          <label className="flex items-center gap-2">
+            <Mono className="text-dusk">Status</Mono>
+            <FilterSelect
+              value={statusFilter}
+              onChange={(v) => withReset(setStatusFilter)(v)}
+              width="w-[170px]"
+              ariaLabel="Deal status"
+            >
+              <option value="">All statuses</option>
+              {config.dealStatus.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </FilterSelect>
+          </label>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setEditingOptions(true)}
+          title="Edit dropdown options and referral partners"
+          className="cursor-pointer rounded-[10px] border border-edge-mid px-3 py-2 font-mono text-[11px] uppercase tracking-[0.8px] text-dusk transition-colors duration-150 hover:border-magenta hover:text-fog"
+        >
+          ⚙ Options
+        </button>
+
+        {tab !== "stats" && (archivedCount > 0 || showArchived) ? (
           <button
             type="button"
             onClick={() => withReset(setShowArchived)(!showArchived)}
@@ -416,7 +755,8 @@ export default function SalesFlow({
 
         {query.trim() ? (
           <span className="font-body text-[11.5px] text-dusk">
-            searching all {scoped.length.toLocaleString()} rows in {rangeLabel.toLowerCase()}
+            searching all {scoped.length.toLocaleString()} rows in{" "}
+            {rangeLabel.toLowerCase()}
           </span>
         ) : null}
       </div>
@@ -424,8 +764,9 @@ export default function SalesFlow({
       {undo ? (
         <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-edge-mid bg-panel-2 px-3.5 py-2.5 text-[12.5px] text-mist">
           <span>
-            Deleted <span className="font-medium text-fog">{undo.name}</span>. It&rsquo;s hidden
-            from all three tabs, and stays hidden through future Calendly syncs.
+            Deleted <span className="font-medium text-fog">{undo.name}</span>.
+            It&rsquo;s hidden from all three tabs, and stays hidden through
+            future Calendly syncs.
           </span>
           <button
             type="button"
@@ -451,81 +792,95 @@ export default function SalesFlow({
         </div>
       ) : null}
 
-      <Panel
-        title={
-          <>
-            {tab === "booked" ? "Booked calls"
-            : tab === "deals" ? "Deal desk"
-            : "Referrals"}
-            {showArchived ? <span className="ml-2 text-magenta">· deleted</span> : null}
-          </>
-        }
-        action={
-          <Mono className="text-dusk">
-            {page.length < rows.length
-              ? `${page.length} of ${rows.length.toLocaleString()}`
-              : `${rows.length.toLocaleString()} rows`}
-          </Mono>
-        }
-        bodyClassName="px-0 py-0"
-      >
-        {rows.length === 0 ? (
-          <p className="px-4 py-10 text-center text-[13px] text-dusk">
-            {calls.length === 0 ?
-              "No calls yet. Run the Calendly backfill, or wait for the next booking."
-            : showArchived && archivedCount === 0 ?
-              "Nothing deleted."
-            : scoped.length === 0 ?
-              `Nothing ${showArchived ? "deleted" : "booked"} in ${rangeLabel.toLowerCase()}. Try a wider date range.`
-            : "Nothing matches that filter."}
-          </p>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              {tab === "booked" ? (
-                <BookedTable
-                  rows={page}
-                  save={save}
-                  busy={busy}
-                  archive={archive}
-                  restore={restore}
-                  showArchived={showArchived}
-                />
-              ) : tab === "deals" ? (
-                <DealTable rows={page} save={save} busy={busy} />
-              ) : (
-                <ReferralTable
-                  rows={page}
-                  save={save}
-                  saveMany={saveMany}
-                  busy={busy}
-                  referrerOptions={referrerOptions}
-                  addReferrer={addReferrer}
-                />
-              )}
-            </div>
-
-            {page.length < rows.length ? (
-              <div className="flex items-center justify-center gap-3 border-t border-edge px-4 py-3.5">
-                <button
-                  type="button"
-                  onClick={() => setVisible((v) => v + PAGE)}
-                  className="cursor-pointer rounded-[10px] border border-edge-mid bg-panel-2 px-4 py-2 font-mono text-[11.5px] uppercase tracking-[0.8px] text-mist transition-colors duration-150 hover:border-magenta hover:text-fog"
-                >
-                  Load {Math.min(PAGE, rows.length - page.length)} more
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVisible(rows.length)}
-                  className="cursor-pointer font-body text-[12px] text-dusk hover:text-fog hover:underline"
-                >
-                  Show all {rows.length.toLocaleString()}
-                </button>
+      {tab === "stats" ? (
+        <SalesStats
+          rows={statsRows}
+          allRows={allTimeRows}
+          rangeLabel={rangeLabel}
+          config={config}
+        />
+      ) : (
+        <Panel
+          title={
+            <>
+              {tab === "booked"
+                ? "Booked calls"
+                : tab === "deals"
+                  ? "Deal desk"
+                  : "Referrals"}
+              {showArchived ? (
+                <span className="ml-2 text-magenta">· deleted</span>
+              ) : null}
+            </>
+          }
+          action={
+            <Mono className="text-dusk">
+              {page.length < rows.length
+                ? `${page.length} of ${rows.length.toLocaleString()}`
+                : `${rows.length.toLocaleString()} rows`}
+            </Mono>
+          }
+          bodyClassName="px-0 py-0"
+        >
+          {rows.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[13px] text-dusk">
+              {calls.length === 0
+                ? "No calls yet. Run the Calendly backfill, or wait for the next booking."
+                : showArchived && archivedCount === 0
+                  ? "Nothing deleted."
+                  : scoped.length === 0
+                    ? `Nothing ${showArchived ? "deleted" : "booked"} in ${rangeLabel.toLowerCase()}. Try a wider date range.`
+                    : "Nothing matches that filter."}
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                {tab === "booked" ? (
+                  <BookedTable
+                    rows={page}
+                    save={save}
+                    busy={busy}
+                    archive={archive}
+                    restore={restore}
+                    showArchived={showArchived}
+                  />
+                ) : tab === "deals" ? (
+                  <DealTable rows={page} save={save} busy={busy} config={config} />
+                ) : (
+                  <ReferralTable
+                    rows={page}
+                    save={save}
+                    saveMany={saveMany}
+                    busy={busy}
+                    config={config}
+                    referrerOptions={referrerOptions}
+                    addReferrer={addReferrer}
+                  />
+                )}
               </div>
-            ) : null}
-          </>
-        )}
-      </Panel>
+
+              {page.length < rows.length ? (
+                <div className="flex items-center justify-center gap-3 border-t border-edge px-4 py-3.5">
+                  <button
+                    type="button"
+                    onClick={() => setVisible((v) => v + PAGE)}
+                    className="cursor-pointer rounded-[10px] border border-edge-mid bg-panel-2 px-4 py-2 font-mono text-[11.5px] uppercase tracking-[0.8px] text-mist transition-colors duration-150 hover:border-magenta hover:text-fog"
+                  >
+                    Load {Math.min(PAGE, rows.length - page.length)} more
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisible(rows.length)}
+                    className="cursor-pointer font-body text-[12px] text-dusk hover:text-fog hover:underline"
+                  >
+                    Show all {rows.length.toLocaleString()}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </Panel>
+      )}
     </div>
   );
 }
@@ -575,14 +930,20 @@ interface TableProps {
   rows: SalesCallRow[];
   save: SaveFn;
   busy: BusyFn;
+  config: SalesOptionsConfig;
 }
 
 /** Name plus the identifying details that would otherwise need their own columns. */
 function Who({ row }: { row: SalesCallRow }) {
   return (
     <div className="min-w-[170px]">
-      <div className="font-body text-[13px] font-medium text-fog">{row.name || "—"}</div>
-      <div className="truncate font-body text-[11px] text-dusk" title={row.email}>
+      <div className="font-body text-[13px] font-medium text-fog">
+        {row.name || "—"}
+      </div>
+      <div
+        className="truncate font-body text-[11px] text-dusk"
+        title={row.email}
+      >
         {row.email || "—"}
       </div>
       {row.phone ? (
@@ -628,7 +989,7 @@ function BookedTable({
   archive,
   restore,
   showArchived,
-}: TableProps & {
+}: Omit<TableProps, "config"> & {
   archive: (row: SalesCallRow) => void;
   restore: (id: string) => void;
   showArchived: boolean;
@@ -646,7 +1007,9 @@ function BookedTable({
           <TableHead align="left">Sales</TableHead>
           <TableHead align="left">Referral</TableHead>
           <TableHead>
-            <span className="sr-only">{showArchived ? "Restore" : "Delete"}</span>
+            <span className="sr-only">
+              {showArchived ? "Restore" : "Delete"}
+            </span>
           </TableHead>
         </tr>
       </thead>
@@ -654,7 +1017,9 @@ function BookedTable({
         {rows.map((row) => (
           <tr key={row.id} className="align-top hover:bg-white/[0.02]">
             <TableCell align="left">
-              <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+              <span className="text-[12px] text-mist">
+                {shortDate(row.bookedAt)}
+              </span>
             </TableCell>
             <TableCell align="left">
               <CallTypeChip row={row} />
@@ -714,7 +1079,7 @@ function BookedTable({
 
 /* ═══════════════════════════ deal desk ═══════════════════════════ */
 
-function DealTable({ rows, save, busy }: TableProps) {
+function DealTable({ rows, save, busy, config }: TableProps) {
   return (
     <table className="w-full border-collapse text-[13px]">
       <thead>
@@ -736,7 +1101,9 @@ function DealTable({ rows, save, busy }: TableProps) {
         {rows.map((row) => (
           <tr key={row.id} className="align-top hover:bg-white/[0.02]">
             <TableCell align="left">
-              <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+              <span className="text-[12px] text-mist">
+                {shortDate(row.bookedAt)}
+              </span>
             </TableCell>
             <TableCell align="left">
               <CallTypeChip row={row} />
@@ -748,8 +1115,7 @@ function DealTable({ rows, save, busy }: TableProps) {
             <TableCell align="left">
               <SelectCell
                 value={row.leadSource}
-                options={LEAD_SOURCES}
-                labels={LEAD_SOURCE_LABELS}
+                items={config.leadSource}
                 saving={busy(row.id, "leadSource")}
                 title={row.leadSourceRaw ?? undefined}
                 onChange={(v) => save(row.id, "leadSource", v)}
@@ -757,9 +1123,11 @@ function DealTable({ rows, save, busy }: TableProps) {
               {/* Only while empty — a filled cell is the operator's answer. */}
               {!row.leadSource && row.suggestedLeadSource ? (
                 <Suggestion
-                  label={LEAD_SOURCE_LABELS[row.suggestedLeadSource]}
+                  label={optionLabel(config.leadSource, row.suggestedLeadSource)}
                   title={row.leadSourceRaw ?? undefined}
-                  onApply={() => save(row.id, "leadSource", row.suggestedLeadSource)}
+                  onApply={() =>
+                    save(row.id, "leadSource", row.suggestedLeadSource)
+                  }
                 />
               ) : null}
             </TableCell>
@@ -767,8 +1135,7 @@ function DealTable({ rows, save, busy }: TableProps) {
             <TableCell align="left">
               <SelectCell
                 value={row.showStatus}
-                options={SHOW_STATUSES}
-                labels={SHOW_STATUS_LABELS}
+                items={config.showStatus}
                 width="w-[120px]"
                 saving={busy(row.id, "showStatus")}
                 onChange={(v) => save(row.id, "showStatus", v)}
@@ -776,7 +1143,7 @@ function DealTable({ rows, save, busy }: TableProps) {
               {row.showStatus ? (
                 <div className="mt-1">
                   <Chip tone={SHOW_STATUS_META[row.showStatus]}>
-                    {SHOW_STATUS_LABELS[row.showStatus]}
+                    {optionLabel(config.showStatus, row.showStatus)}
                   </Chip>
                 </div>
               ) : null}
@@ -785,8 +1152,7 @@ function DealTable({ rows, save, busy }: TableProps) {
             <TableCell align="left">
               <SelectCell
                 value={row.status}
-                options={DEAL_STATUSES}
-                labels={DEAL_STATUS_LABELS}
+                items={config.dealStatus}
                 width="w-[165px]"
                 saving={busy(row.id, "status")}
                 onChange={(v) => save(row.id, "status", v)}
@@ -804,8 +1170,7 @@ function DealTable({ rows, save, busy }: TableProps) {
             <TableCell align="left">
               <SelectCell
                 value={row.paymentPlan}
-                options={PAYMENT_PLANS}
-                labels={PAYMENT_PLAN_LABELS}
+                items={config.paymentPlan}
                 width="w-[118px]"
                 saving={busy(row.id, "paymentPlan")}
                 onChange={(v) => save(row.id, "paymentPlan", v)}
@@ -815,8 +1180,7 @@ function DealTable({ rows, save, busy }: TableProps) {
             <TableCell align="left">
               <SelectCell
                 value={row.service}
-                options={SERVICES}
-                labels={SERVICE_LABELS}
+                items={config.service}
                 width="w-[210px]"
                 saving={busy(row.id, "service")}
                 onChange={(v) => save(row.id, "service", v)}
@@ -865,6 +1229,7 @@ function ReferralTable({
   save,
   saveMany,
   busy,
+  config,
   referrerOptions,
   addReferrer,
 }: TableProps & {
@@ -906,11 +1271,15 @@ function ReferralTable({
       <tbody>
         {rows.map((row) => {
           const total = commissionTotal(row);
-          const counts = row.status ? DEAL_STATUS_META[row.status].counts : false;
+          const counts = row.status
+            ? DEAL_STATUS_META[row.status].counts
+            : false;
           return (
             <tr key={row.id} className="align-top hover:bg-white/[0.02]">
               <TableCell align="left">
-                <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+                <span className="text-[12px] text-mist">
+                  {shortDate(row.bookedAt)}
+                </span>
               </TableCell>
               <TableCell align="left">
                 <Who row={row} />
@@ -930,8 +1299,7 @@ function ReferralTable({
               <TableCell align="left">
                 <SelectCell
                   value={row.referralKind}
-                  options={REFERRAL_KINDS}
-                  labels={REFERRAL_KIND_LABELS}
+                  items={config.referralKind}
                   width="w-[140px]"
                   saving={busy(row.id, "referralKind")}
                   onChange={(v) => save(row.id, "referralKind", v)}
@@ -941,8 +1309,7 @@ function ReferralTable({
               <TableCell align="left">
                 <SelectCell
                   value={row.status}
-                  options={DEAL_STATUSES}
-                  labels={DEAL_STATUS_LABELS}
+                  items={config.dealStatus}
                   width="w-[165px]"
                   saving={busy(row.id, "status")}
                   onChange={(v) => save(row.id, "status", v)}
@@ -954,7 +1321,10 @@ function ReferralTable({
                   value={row.commissionPreset ?? ""}
                   disabled={busy(row.id, "commissionPreset")}
                   onChange={(e) =>
-                    applyPreset(row, (e.target.value || null) as CommissionPreset | null)
+                    applyPreset(
+                      row,
+                      (e.target.value || null) as CommissionPreset | null,
+                    )
                   }
                   className="w-[110px] appearance-none rounded-[8px] border border-edge-mid bg-panel-2 py-1.5 pl-2 pr-6 font-body text-[12.5px] text-fog outline-none focus:border-magenta disabled:opacity-50"
                   style={{

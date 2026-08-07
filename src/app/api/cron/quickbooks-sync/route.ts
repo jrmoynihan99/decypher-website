@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse, type NextRequest } from "next/server";
 import { isQuickBooksConfigured } from "@/lib/quickbooks/oauth";
 import { syncAll } from "@/lib/quickbooks/sync";
@@ -64,6 +65,11 @@ export async function GET(request: NextRequest) {
       summary.results.filter((r) => !r.ok).map((r) => `${r.displayName}: ${r.message}`),
     );
   }
+
+  // The home page renders these figures (revenue graph + stat token), so a run
+  // that refreshed anything invalidates it — "live" within one sync rather
+  // than one ISR window. "/" is a real route, not the catch-all, so this works.
+  if (summary.attempted > 0) revalidatePath("/");
 
   // 200 as long as the RUN completed. Individual company failures are recorded
   // on their own rows, so a non-2xx here means "the cron itself is broken" —

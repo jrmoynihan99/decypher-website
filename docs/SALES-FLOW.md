@@ -69,6 +69,32 @@ silently wipes months of the client's manual work.
 
 ---
 
+## The Stats tab
+
+A fourth tab aggregating the same rows the grid edits — computed client-side in
+one pass (~800 rows), so it tracks the toolbar's date-range and call-type
+filters instantly. Archived rows are always excluded, even when the grid's
+"Deleted" view is open. One deliberate exception: the **By year** table ignores
+the date filter — its whole job is the multi-year comparison, and its header
+says so.
+
+Design notes that should survive future edits (full detail in `viz.tsx`):
+
+- **No pie charts.** Lead source has ten categories — past the point where
+  slices stay comparable, and no ten-colour palette can pass the CVD gates.
+  Ranked single-hue bars with printed values instead.
+- **The palette was validated, not eyeballed**, against the portal's real panel
+  surface (#141319) with the dataviz skill's validator. The brand's five accents
+  FAIL as a categorical set (ember vs danger measure ΔE 7.5 to *normal* vision),
+  which is why nearly everything is one magenta and magnitude is carried by bar
+  length. The one two-series chart (booked vs won by month) uses #d62368 +
+  #29a294 — a pair that passes all six checks, but sits in the CVD warn band, so
+  it must keep its legend, direct labels and 2px segment gap.
+- **Funnel stages wear an ordinal ramp** (#8f1a4d→#d62368→#ff5c96 — one hue,
+  monotone lightness), not categorical hues: the stages are ordered.
+- Charts are CSS divs, not SVG — the existing portal charts stretch a viewBox
+  (`preserveAspectRatio="none"`), which distorts labels; bars don't need SVG.
+
 ## Deleting rows
 
 The `×` on a Booked Calls row sets `archived: true`. It is **not** a document
@@ -236,12 +262,149 @@ Two related traps, both already hit once:
 
 ---
 
-## The leaderboard
+## The public leaderboard — /leaderboard
 
-Not built — the client has their own design coming. The data is shaped for it:
-group `salesCalls` where `isReferral && status counts` by `referrerId`, and use
-`partnerPayout()` for dollars or a plain count for volume. `referrerName` is
-denormalised onto each row so the aggregation needs no join.
+A real route at `src/app/(site)/leaderboard/page.tsx` (site chrome included),
+static with 5-minute ISR. **No manual entry and no admin view**: it aggregates
+`salesCalls` where `isReferral && DEAL_STATUS_META[status].counts`, grouped by
+`referrerId` — closing a referral in the portal IS the leaderboard update.
+"Race to Hawaii": top 10 ranked by closed count, `HAWAII_THRESHOLD = 10`,
+ranks 11+ in a searchable "Creators on the Rise" list, `?me=Name` pre-fills
+the search (read client-side — `searchParams` on the server page would
+de-static it).
+
+Photos: an explicit `sanityCreatorId` on the referrer doc wins; otherwise a
+conservative name/alias match against the Sanity creator roster; otherwise
+initials in a gradient ring. The link is set in the portal's referrer manager
+(⚙ Options), which also holds the `showOnLeaderboard` toggle — the way to keep
+out-of-network/gift-card referrers off the public board.
+
+`lib/sales/leaderboard.ts` is server-only; the client list imports constants
+and types from `lib/sales/leaderboard-types.ts`. "leaderboard" is in Sanity's
+RESERVED_SLUGS so an editor can't shadow the route.
+
+**It is built on the site's page grammar, not its own** — treat it like any
+other template (closest sibling: `CareersTemplate`, since both are "a list of
+dossier cards under a header"):
+
+| Piece | What it uses |
+|---|---|
+| Background | one `NeuralWeb` mesh over header→standings, 200px/280px mask fade, content in `relative z-[1]` |
+| Header | `PageHeader` — mono eyebrow, decrypting H1 over a `GlowOrb`, `Readout` with `**$750**` tokens |
+| Section heads | `SectionHeading` (`[ 02 // standings ]`, `[ 03 // on the rise ]`) |
+| Stats | `StatsGrid` — NumberFlow roll-up + redaction-bar wipe |
+| Rows | `LeaderRow` on the JobCard recipe: `rounded-[20px] border-edge bg-panel`, lift, magenta glow shadow, `useSpotlight` cursor spotlight, hover accent hairline |
+| Reveal | `SectionReveal` + per-row `Reveal delay={0.1 + Math.min(i * 0.08, 0.5)}` |
+| Close | `CtaSection` **outside** the mesh group |
+
+Two things worth not "fixing" later:
+
+- **Rows don't animate their numbers.** The roll-up moment belongs to
+  `StatsGrid` at the top, where it reads as one event rather than forty-nine
+  competing ones; the reveal stagger carries the motion in the list.
+- **`compactMoney()` feeds the stat tiles, not `toLocaleString`.** StatsGrid
+  splits values on `/^(\D*)([\d.]+)(.*)$/` and rolls the numeric part from
+  zero, so a comma-grouped `"$50,210"` parses as `50` + suffix `",210"` and
+  animates through `"$0,210"`. `"$50.2k"` rolls correctly.
+
+Only `RiseList` is client-side (the search). Phone layout: earnings stack under
+the referral count and the Hawaii gap renders as `3/10` — the full sentence
+wraps at that width, and forcing nowrap ran it under the numbers column.
+
+## Sanity-driven content + creator posts
+
+`/leaderboard` is a **singleton `leaderboardPage`** in Sanity (Pages → Referral
+Leaderboard). Two sources, cleanly split:
+
+- **Firestore** owns the standings — who's on the board, closed count,
+  earnings. Never editable in Sanity; an editable copy would immediately
+  disagree with the portal.
+- **Sanity** owns the wrapper — headings, copy, CTA, and the **spotlights**.
+
+Every Sanity field is optional with a code fallback, so the page renders
+correctly against an empty dataset. Seed with `npm run leaderboard:seed`
+(idempotent — only fills fields still missing, never overwrites edited copy).
+No slug and no `pageLink` field: the route is fixed, and that widget exists to
+mirror an editable Route field this document deliberately doesn't have.
+
+**Spotlights** attach a social post to a creator's row. Authored by display
+name (matched case- and punctuation-insensitively) because the referrer's
+Firestore id is invisible to an editor; an unmatched name is simply inert and
+starts working the day that creator closes a referral.
+
+**How a post renders.** Two Instagram surfaces, both login-free, both verified
+live:
+
+| Surface | Used for | Gotcha |
+|---|---|---|
+| `/p/<code>/embed/captioned/` | the full post, in the modal | framed in a lazy iframe — **not** the documented `embed.js` blockquote, which is ~100KB of third-party script that mutates the DOM. The endpoint returns 200 and sets no `frame-ancestors`. |
+| `/p/<code>/media/?size=m` | the poster thumbnail on the row | **CORP-blocked in the browser** — pointing an `<img>` straight at it fails with `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`, silently, as a blank tile. `/api/leaderboard/poster` makes the same request server-side (CORP binds browsers only) and streams the JPEG back same-origin, cached a day. |
+
+That route is **not a general proxy**: it builds the upstream URL from a
+validated short-code against one hard-coded host, so a caller can't supply a
+URL and there is no SSRF surface. Keep it that way. It's also why the tile
+isn't `next/image` — the upstream is a redirect to a signed, expiring CDN
+address, so the optimiser would cache precisely the URL that dies.
+
+**Placement.** A labelled 52px tile ("WATCH" beneath it) in its own row slot
+from `sm` up; a text chip beside the name below `sm`, where a row has no spare
+width. A row renders both — they're mutually exclusive by breakpoint, and
+there is deliberately no combined variant: the first attempt had one that
+emitted its own mobile chip, so rows that also placed one showed two.
+
+**Not on the Hawaii cards.** A qualifier keeps their place in the standings
+too, where the row already carries the tile; a second, larger copy doubled the
+poster and made the card tower over everything near it.
+
+The full iframe is mounted only once the modal opens — 49 always-live
+Instagram iframes would be unscrollable. Reels show a poster frame with
+hand-off to Instagram (no supported way to play off-platform), hence the
+permanent "Open on Instagram" link. A dead poster falls back to the chip;
+anything that isn't an Instagram post URL degrades to a plain link-out.
+
+## The Hawaii Club
+
+Creators at or past `HAWAII_THRESHOLD` get their own section **above** the
+standings, with portrait cards on a violet accent instead of the magenta row
+chrome — the whole page is a race toward this, and a qualifier reading as row
+eleven of a list would undersell it.
+
+**Qualifiers stay in the Top 10 as well.** They earned the rank; removing them
+would silently promote whoever placed 11th into a top ten they didn't finish
+in. The empty state names the closest contender and how far they have to go.
+
+## Editable dropdowns — ⚙ Options
+
+Every dropdown's entries live in Firestore (`salesConfig/options`), edited from
+the ⚙ Options button: rename, reorder (↑↓), and — on the open lists — retire
+and add. Two tiers, enforced server-side in `lib/sales/config.ts`:
+
+- **Open** (`leadSource`, `service`, `paymentPlan`): full editing. New options
+  get a slugged key; **keys are permanent** — the editor edits labels, never
+  keys, and "delete" is retire (hidden from new picks, historical rows keep
+  rendering theirs). A default key dropped from a submitted config is
+  re-appended as retired rather than lost.
+- **Closed** (`dealStatus`, `showStatus`, `referralKind`): rename + reorder
+  only. Their keys carry money semantics (`DEAL_STATUS_META.counts` decides
+  commissions and the leaderboard), so add/retire is a code change, not an edit.
+
+The PATCH route validates open-list values against the live config (a freshly
+added option saves without a deploy) and closed-list values against the static
+unions. An absent config doc means "the defaults" — no seeding step.
+
+The same editor manages **referral partners**: rename (propagates to the
+denormalised `referrerName` on every call row in a batch — how ALL-CAPS import
+names get fixed everywhere at once), Sanity photo link, public toggle, and
+delete (degrades to deactivate when calls reference the partner). No reorder —
+the picker is an alphabetical typeahead, so order isn't a property a partner
+has.
+
+## Per-tab segment filters
+
+On top of the global date-range and call-type filters: Deal Desk adds Service
+and Status; Referrals adds Referred-by and Status. Status is one shared
+selection across the two tabs because it's the same field. Booked Calls'
+segmentation is the global call-type filter.
 
 ---
 

@@ -426,7 +426,7 @@ export const careersPage = defineType({
  */
 
 /** Routes that aren't Sanity pages but would still shadow (or be shadowed by) one. */
-const RESERVED_SLUGS = ["studio", "portal", "api", "schedule-team"];
+const RESERVED_SLUGS = ["studio", "portal", "api", "schedule-team", "leaderboard"];
 
 const AFFILIATE_GROUPS = [
   { name: "hero", title: "Hero" },

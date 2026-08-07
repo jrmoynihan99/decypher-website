@@ -18,6 +18,7 @@ import {
   getThankYouRouting,
   slugToPath,
 } from "@/sanity/queries";
+import { creatorRevenueTimeline, withLiveStats } from "@/lib/quickbooks/public-stats";
 import { urlFor } from "@/sanity/image";
 import type { PageDoc } from "@/sanity/types";
 
@@ -29,12 +30,16 @@ import type { PageDoc } from "@/sanity/types";
 export async function renderPage(page: PageDoc) {
   switch (page._type) {
     case "homePage": {
-      const [settings, creators, services, testimonials] = await Promise.all([
-        getSiteSettings(),
-        getCreators(),
-        getServices(),
-        getTestimonials(),
-      ]);
+      // The stat token and the revenue graph share one snapshot read — see the
+      // cache() wrapper in public-stats.ts.
+      const [settings, creators, services, testimonials, revenue] =
+        await Promise.all([
+          getSiteSettings().then(withLiveStats),
+          getCreators(),
+          getServices(),
+          getTestimonials(),
+          creatorRevenueTimeline(),
+        ]);
       return (
         <HomeTemplate
           page={page}
@@ -42,6 +47,7 @@ export async function renderPage(page: PageDoc) {
           creators={creators}
           services={services}
           testimonials={testimonials}
+          revenue={revenue}
         />
       );
     }
@@ -59,7 +65,7 @@ export async function renderPage(page: PageDoc) {
     }
     case "schedulePage": {
       const [settings, testimonials, thankYou] = await Promise.all([
-        getSiteSettings(),
+        getSiteSettings().then(withLiveStats),
         getTestimonials(),
         // Where the form hands off once a call is booked. Resolved server-side
         // because the page doc holds a raw reference (blanket `...` fetch) and
@@ -81,7 +87,7 @@ export async function renderPage(page: PageDoc) {
     }
     case "affiliatePage": {
       const [settings, testimonials] = await Promise.all([
-        getSiteSettings(),
+        getSiteSettings().then(withLiveStats),
         getTestimonials(),
       ]);
       // Page docs are fetched with a blanket `...` spread, so the hero image

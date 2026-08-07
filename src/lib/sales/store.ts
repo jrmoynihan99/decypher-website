@@ -157,19 +157,22 @@ export async function listSalesCalls(limit = 2000): Promise<SalesCallRow[]> {
   return snap.docs.map((doc) => toRow(doc.id, doc.data()));
 }
 
+function toReferrer(id: string, d: FirebaseFirestore.DocumentData): ReferrerRow {
+  return {
+    id,
+    name: d.name ?? "",
+    aliases: Array.isArray(d.aliases) ? d.aliases : [],
+    active: d.active !== false,
+    showOnLeaderboard: d.showOnLeaderboard !== false,
+    sanityCreatorId: str(d.sanityCreatorId),
+    createdAt: iso(d.createdAt),
+  };
+}
+
 export async function listReferrers(): Promise<ReferrerRow[]> {
   if (!isConfigured()) return [];
   const snap = await adminDb().collection(REFERRERS).orderBy("name").get();
-  return snap.docs.map((doc) => {
-    const d = doc.data();
-    return {
-      id: doc.id,
-      name: d.name ?? "",
-      aliases: Array.isArray(d.aliases) ? d.aliases : [],
-      active: d.active !== false,
-      createdAt: iso(d.createdAt),
-    };
-  });
+  return snap.docs.map((doc) => toReferrer(doc.id, doc.data()));
 }
 
 /* ────────────────────────────── writes ────────────────────────────── */
@@ -349,18 +352,121 @@ export async function createReferrer(
 
   const doc = adminDb().collection(REFERRERS).doc(id);
   const existing = await doc.get();
-  if (existing.exists) {
-    const d = existing.data()!;
-    return {
-      id,
-      name: d.name ?? clean,
-      aliases: Array.isArray(d.aliases) ? d.aliases : [],
-      active: d.active !== false,
-      createdAt: iso(d.createdAt),
-    };
-  }
+  if (existing.exists) return toReferrer(id, existing.data()!);
 
   const createdAt = new Date();
-  await doc.set({ name: clean, aliases, active: true, createdAt });
-  return { id, name: clean, aliases, active: true, createdAt: createdAt.toISOString() };
+  await doc.set({
+    name: clean,
+    aliases,
+    active: true,
+    showOnLeaderboard: true,
+    sanityCreatorId: null,
+    createdAt,
+  });
+  return {
+    id,
+    name: clean,
+    aliases,
+    active: true,
+    showOnLeaderboard: true,
+    sanityCreatorId: null,
+    createdAt: createdAt.toISOString(),
+  };
+}
+
+/** The fields the referrer manager may change. */
+export interface ReferrerEdits {
+  name?: string;
+  aliases?: string[];
+  active?: boolean;
+  showOnLeaderboard?: boolean;
+  sanityCreatorId?: string | null;
+}
+
+/**
+ * Edit a partner.
+ *
+ * The document id is the slug of the ORIGINAL name and never changes on
+ * rename — it's the foreign key on every call row, and rewriting keys to
+ * chase a spelling would touch hundreds of documents for nothing. What does
+ * get rewritten is the denormalised `referrerName` on every call that points
+ * here, in one batch, so the grid and the leaderboard never show the old
+ * spelling. The Airtable import left names in ALL CAPS; this is how the
+ * client fixes "JUSTINE" to "Justine" everywhere at once.
+ */
+export async function updateReferrer(
+  id: string,
+  edits: ReferrerEdits,
+): Promise<ReferrerRow> {
+  if (!isConfigured()) throw new SalesStoreError("Firebase is not configured");
+  const doc = adminDb().collection(REFERRERS).doc(id);
+  const existing = await doc.get();
+  if (!existing.exists) throw new SalesStoreError("Unknown referrer");
+
+  const patch: Record<string, unknown> = {};
+  if (edits.name !== undefined) {
+    const clean = edits.name.trim().slice(0, 120);
+    if (!clean) throw new SalesStoreError("A referrer needs a name");
+    patch.name = clean;
+  }
+  if (edits.aliases !== undefined) {
+    patch.aliases = edits.aliases
+      .map((a) => String(a).trim().slice(0, 120))
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+  if (edits.active !== undefined) patch.active = Boolean(edits.active);
+  if (edits.showOnLeaderboard !== undefined) {
+    patch.showOnLeaderboard = Boolean(edits.showOnLeaderboard);
+  }
+  if (edits.sanityCreatorId !== undefined) {
+    const v = edits.sanityCreatorId;
+    patch.sanityCreatorId =
+      typeof v === "string" && v.trim() ? v.trim().slice(0, 100) : null;
+  }
+  if (!Object.keys(patch).length) throw new SalesStoreError("Nothing to change");
+
+  await doc.update(patch);
+
+  if (typeof patch.name === "string" && patch.name !== existing.data()?.name) {
+    // Propagate the rename to the denormalised copy on every call row.
+    const calls = await adminDb().collection(CALLS).where("referrerId", "==", id).get();
+    for (let i = 0; i < calls.docs.length; i += 400) {
+      const batch = adminDb().batch();
+      for (const c of calls.docs.slice(i, i + 400)) {
+        batch.update(c.ref, { referrerName: patch.name });
+      }
+      await batch.commit();
+    }
+  }
+
+  const after = await doc.get();
+  return toReferrer(after.id, after.data()!);
+}
+
+/**
+ * Delete a partner — really delete only when nothing references them.
+ *
+ * A partner with calls attached deactivates instead: the picker stops offering
+ * them, the leaderboard stops showing them, but the rows keep their name and
+ * their history. Hard-deleting a referenced partner would leave orphaned
+ * `referrerId`s pointing at nothing.
+ */
+export async function deleteReferrer(id: string): Promise<"deleted" | "deactivated"> {
+  if (!isConfigured()) throw new SalesStoreError("Firebase is not configured");
+  const doc = adminDb().collection(REFERRERS).doc(id);
+  if (!(await doc.get()).exists) throw new SalesStoreError("Unknown referrer");
+
+  const used = await adminDb()
+    .collection(CALLS)
+    .where("referrerId", "==", id)
+    .limit(1)
+    .get();
+
+  if (used.empty) {
+    await doc.delete();
+    return "deleted";
+  }
+  await doc.update({ active: false, showOnLeaderboard: false });
+  return "deactivated";
 }

@@ -3,17 +3,15 @@ import { guard } from "../../_guard";
 import {
   COMMISSION_PRESETS,
   DEAL_STATUSES,
-  LEAD_SOURCES,
-  PAYMENT_PLANS,
   REFERRAL_KINDS,
-  SERVICES,
   SHOW_STATUSES,
   asDate,
   asMoney,
   asOption,
 } from "@/lib/sales/options";
+import { getOptionsConfig, keysOf } from "@/lib/sales/config";
 import { SalesStoreError, updateSalesCall } from "@/lib/sales/store";
-import type { SalesCallEdits } from "@/lib/sales/types";
+import type { SalesCallEdits, SalesOptionsConfig } from "@/lib/sales/types";
 
 /**
  * Save one cell.
@@ -31,20 +29,28 @@ import type { SalesCallEdits } from "@/lib/sales/types";
 
 const PRESET_IDS = COMMISSION_PRESETS.map((p) => p.id);
 
-/** Field name → how to narrow whatever arrived for it. */
+/**
+ * Field name → how to narrow whatever arrived for it.
+ *
+ * Two validation regimes on purpose. The closed lists (status, show,
+ * referral kind, preset) validate against the static unions — code branches
+ * on those keys. The open lists (lead source, service, payment plan) validate
+ * against the live config, because the client can add options there and a
+ * freshly added key must save without a deploy.
+ */
 const PARSERS: {
-  [K in keyof SalesCallEdits]: (v: unknown) => SalesCallEdits[K];
+  [K in keyof SalesCallEdits]: (v: unknown, config: SalesOptionsConfig) => SalesCallEdits[K];
 } = {
-  isSales: Boolean,
-  isReferral: Boolean,
-  paid: Boolean,
-  archived: Boolean,
+  isSales: (v) => Boolean(v),
+  isReferral: (v) => Boolean(v),
+  paid: (v) => Boolean(v),
+  archived: (v) => Boolean(v),
 
-  leadSource: (v) => asOption(v, LEAD_SOURCES),
+  leadSource: (v, c) => asOption(v, keysOf(c, "leadSource")),
   showStatus: (v) => asOption(v, SHOW_STATUSES),
   status: (v) => asOption(v, DEAL_STATUSES),
-  paymentPlan: (v) => asOption(v, PAYMENT_PLANS),
-  service: (v) => asOption(v, SERVICES),
+  paymentPlan: (v, c) => asOption(v, keysOf(c, "paymentPlan")),
+  service: (v, c) => asOption(v, keysOf(c, "service")),
   referralKind: (v) => asOption(v, REFERRAL_KINDS),
   commissionPreset: (v) => asOption(v, PRESET_IDS),
 
@@ -88,12 +94,13 @@ export async function PATCH(
   }
 
   const raw = body as Record<string, unknown>;
+  const config = await getOptionsConfig();
   const edits: Partial<SalesCallEdits> = {};
   for (const field of FIELDS) {
     if (!(field in raw)) continue;
     // The index signature loses the per-key correlation TypeScript needs to see
     // that parser and slot agree; they do, by construction of PARSERS above.
-    (edits as Record<string, unknown>)[field] = PARSERS[field](raw[field]);
+    (edits as Record<string, unknown>)[field] = PARSERS[field](raw[field], config);
   }
 
   if (!Object.keys(edits).length) {

@@ -250,12 +250,16 @@ export function LineRow({
 export function TableHead({
   children,
   align = "right",
+  ariaSort,
 }: {
   children: React.ReactNode;
   align?: "left" | "right";
+  /** For sortable columns. Belongs on the th, not on the button inside it. */
+  ariaSort?: "ascending" | "descending" | "none";
 }) {
   return (
     <th
+      aria-sort={ariaSort}
       className={`whitespace-nowrap border-b border-edge-mid px-2.5 py-2.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.8px] text-dusk ${
         align === "left" ? "text-left" : "text-right"
       }`}

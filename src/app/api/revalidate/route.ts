@@ -42,6 +42,14 @@ function revalidateForDoc(doc: {
     return { strategy: "surgical", type, path };
   }
 
+  // Its own fixed route, no slug — the default full purge below would work,
+  // but this page is edited often enough during a campaign to be worth the
+  // surgical path.
+  if (type === "leaderboardPage") {
+    revalidatePath("/leaderboard");
+    return { strategy: "surgical", type, path: "/leaderboard" };
+  }
+
   // Legal pages route under /legal/, so slugToPath would send "privacy" to
   // "/privacy" and purge nothing that exists.
   if (type === "legalPage" && typeof slug === "string" && slug) {

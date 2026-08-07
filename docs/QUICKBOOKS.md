@@ -286,3 +286,61 @@ itself is broken, which is what makes Vercel's cron alerting worth anything.
 If a run hits its time budget it stops cleanly and logs how many companies were
 left. Nothing is lost — the sync queue is ordered oldest-synced-first, so the
 next run resumes exactly there.
+
+## Periods: specific years and all-time
+
+`PERIOD_KEYS` covers the relative windows; a specific fiscal year is the
+dynamic key **`year-YYYY`**, and **`all-time`** spans everything cached.
+
+`availableYears()` builds the selector from the months actually present in the
+snapshots, so the dropdown can never offer a year that slices to nothing. The
+payload carries them as `FinancesPayload.years`.
+
+**`HISTORY_YEARS` (periods.ts) is the ceiling.** It was 1 — the minimum "last
+full year" needs. It is now 5, which is what makes per-year selection and
+all-time possible without extra QuickBooks traffic: every period is still an
+exact slice of one cached fetch.
+
+Two limits worth knowing:
+
+- **"All time" means "as far back as HISTORY_YEARS reaches."** A company with
+  books predating the window reports from the window's start, not inception.
+- **Raising it is not free.** Every line item carries a monthly array, so ~40
+  lines × 72 months is ~30KB of JSON per company against Firestore's 1MB
+  document limit. Intuit's 400k-cell response cap is the looser constraint.
+  Re-check both before going much past 5.
+
+Existing snapshots hold the OLD narrow window until the next sync overwrites
+them — `saveSnapshot` uses `.set()` on a deterministic id, so there's no
+history to migrate. Years before the last sync simply read empty until then.
+
+## Public stats
+
+`lib/quickbooks/public-stats.ts` resolves a `{{creatorRevenue}}` token written
+as a stat *value* in Sanity → Site Settings → Stats, replacing it with total
+income across every connected creator, all time, compact-formatted so
+StatsGrid's roll-up animation parses it.
+
+Applied at the template-dispatch layer (`RenderPage` / `RenderThankYou`), not
+inside `getSiteSettings()` — the root layout calls that for the nav and footer,
+and resolving there would put a Firestore read behind every page on the site.
+
+If the figure can't be read the card is **dropped**, not rendered as `$0` or as
+the raw token: a missing card is a smaller lie than a wrong number on a
+marketing page. Pages carrying no token never touch QuickBooks at all.
+
+## Disconnecting a client
+
+Already supported, and has been: **per-creator tab → Disconnect**. It revokes
+the refresh token at Intuit, then blanks the stored credentials and marks the
+connection `disabled`. The document is kept — snapshots and history reference
+it, and a disabled connection is excluded from the sync queue and from the
+aggregate (deliberately off, not a failure).
+
+## All creators, sortable
+
+The roster's "All creators" panel is collapsed by default (`View all N`) and
+sortable on every column — income, expenses, net operating, net profit, margin,
+name — both directions. Rows with no readable books sink to the bottom in both
+directions: they aren't "worst", they're unknown, and letting them top a
+descending sort would misreport who is doing badly.

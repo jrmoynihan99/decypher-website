@@ -519,3 +519,87 @@ html[data-page-transition="zoom"]::view-transition-new(root) {
     animation-delay: 0s !important;
   }
 }
+
+/* ── Revenue graph (home stats section) ──
+   The settled tip's radar pulse, the header's live dot, and the value chip's
+   settle pop. SVG circles need transform-box:fill-box or the scale runs from
+   the SVG origin instead of the circle's own center. */
+.rvg-pulse {
+  fill: none;
+  stroke: var(--color-magenta);
+  stroke-width: 1.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rvg-pulse 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite;
+}
+@keyframes rvg-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+.rvg-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-teal);
+  animation: rvg-breathe 2.4s ease-in-out infinite;
+}
+@keyframes rvg-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 rgba(61, 214, 196, 0.4);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 8px 1px rgba(61, 214, 196, 0.35);
+  }
+}
+.rvg-pop {
+  animation: rvg-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+}
+@keyframes rvg-pop {
+  from {
+    scale: 0.94;
+  }
+  to {
+    scale: 1;
+  }
+}
+/* A replay ticker chip: pops in at the tip, drifts up, dissolves. The outer
+   wrapper owns centering (translate -50%); this animates its own translate so
+   the two never fight. */
+.rvg-float {
+  animation: rvg-float 2.6s cubic-bezier(0.2, 0.6, 0.3, 1) both;
+}
+@keyframes rvg-float {
+  0% {
+    opacity: 0;
+    translate: 0 10px;
+    scale: 0.9;
+  }
+  10%,
+  62% {
+    opacity: 1;
+    scale: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -46px;
+    scale: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rvg-pulse,
+  .rvg-live-dot,
+  .rvg-pop,
+  .rvg-float {
+    animation: none;
+  }
+}

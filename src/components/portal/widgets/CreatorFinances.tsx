@@ -247,7 +247,7 @@ export default function CreatorFinances({
   if (!payload.rows.length) {
     return (
       <div>
-        <Header period={period} onPeriod={changePeriod} disabled />
+        <Header period={period} onPeriod={changePeriod} years={payload.years ?? []} disabled />
         {banner ? <NoticeBanner notice={banner} onDismiss={() => setBanner(null)} /> : null}
         <FirstRun />
         <Disclaimer>
@@ -260,7 +260,12 @@ export default function CreatorFinances({
 
   return (
     <div>
-      <Header period={period} onPeriod={changePeriod} disabled={busy === "load"} />
+      <Header
+        period={period}
+        onPeriod={changePeriod}
+        years={payload.years ?? []}
+        disabled={busy === "load"}
+      />
 
       {banner ? <NoticeBanner notice={banner} onDismiss={() => setBanner(null)} /> : null}
       {error ? (
@@ -330,10 +335,13 @@ export default function CreatorFinances({
 function Header({
   period,
   onPeriod,
+  years,
   disabled,
 }: {
   period: PeriodKey;
   onPeriod: (p: PeriodKey) => void;
+  /** Fiscal years the cache can answer for, newest first. */
+  years: number[];
   disabled?: boolean;
 }) {
   // The page owns the title block (see the refund-calculator page); this is
@@ -347,11 +355,24 @@ function Header({
             disabled={disabled}
             onChange={(e) => onPeriod(e.target.value as PeriodKey)}
           >
-            {PERIOD_KEYS.map((key) => (
+            {/* Relative periods first, then the specific years the cache
+                actually holds. Years come from the payload rather than the
+                calendar so the list can't offer one that slices to nothing. */}
+            {PERIOD_KEYS.filter((k) => k !== "all-time").map((key) => (
               <option key={key} value={key}>
                 {PERIOD_LABELS[key]}
               </option>
             ))}
+            {years.length ? (
+              <optgroup label="Full year">
+                {years.map((y) => (
+                  <option key={y} value={`year-${y}`}>
+                    {y}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            <option value="all-time">{PERIOD_LABELS["all-time"]}</option>
           </SelectInput>
         </Field>
 
@@ -588,6 +609,8 @@ function Roster({
         </div>
       </Panel>
 
+      <AllCreatorsTable rows={payload.rows} onOpen={onOpen} />
+
       {attention.length ? (
         <Panel title={`Needs attention (${attention.length})`} bodyClassName="px-0 py-0">
           {attention.map((row) => (
@@ -656,6 +679,157 @@ function TotalCells({ totals }: { totals: ProfitAndLossTotals }) {
       </TableCell>
       <TableCell>{marginLabel(totals) ?? "—"}</TableCell>
     </>
+  );
+}
+
+/* ─────────────────────── all creators, sortable ─────────────────────── */
+
+type SortKey = "name" | "income" | "expenses" | "netOperatingIncome" | "netIncome" | "margin";
+
+const SORT_COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+  { key: "name", label: "Creator", align: "left" },
+  { key: "income", label: "Income", align: "right" },
+  { key: "expenses", label: "Expenses", align: "right" },
+  { key: "netOperatingIncome", label: "Net operating", align: "right" },
+  { key: "netIncome", label: "Net profit", align: "right" },
+  { key: "margin", label: "Margin", align: "right" },
+];
+
+/** Sort value for a row, or null when there are no readable books. */
+function sortValue(row: CreatorFinanceRow, key: SortKey): number | string | null {
+  if (key === "name") return row.displayName.toLowerCase();
+  const t = row.data;
+  if (!t) return null;
+  if (key === "expenses") return expensesOf(t);
+  if (key === "margin") return netMargin(t);
+  return t[key];
+}
+
+/**
+ * Every connected creator, one row each, sortable on any column.
+ *
+ * Collapsed by default and deliberately so — the panel above it exists because
+ * a wall of 150 rows is not a thing anyone scans, and that reasoning still
+ * holds for the DEFAULT view. What it didn't account for is the other job:
+ * "who are my top five by margin", which a picker genuinely cannot answer. So
+ * the table comes back as an explicit opt-in, sorted rather than alphabetical.
+ *
+ * Rows with no readable books always sink to the bottom regardless of
+ * direction — they aren't "worst", they're unknown, and letting them top a
+ * descending sort would be a lie about who is doing badly.
+ */
+function AllCreatorsTable({
+  rows,
+  onOpen,
+}: {
+  rows: CreatorFinanceRow[];
+  onOpen: (realmId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sort, setSort] = useState<SortKey>("income");
+  const [dir, setDir] = useState<"asc" | "desc">("desc");
+
+  const sorted = useMemo(() => {
+    const out = [...rows];
+    out.sort((a, b) => {
+      const va = sortValue(a, sort);
+      const vb = sortValue(b, sort);
+      // Unknowns last, both directions.
+      if (va == null && vb == null) return a.displayName.localeCompare(b.displayName);
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      const cmp =
+        typeof va === "string" && typeof vb === "string"
+          ? va.localeCompare(vb)
+          : Number(va) - Number(vb);
+      return dir === "asc" ? cmp : -cmp;
+    });
+    return out;
+  }, [rows, sort, dir]);
+
+  const toggle = (key: SortKey) => {
+    if (key === sort) {
+      setDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSort(key);
+      // Names read naturally A→Z; money reads naturally biggest-first.
+      setDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  return (
+    <Panel
+      title="All creators"
+      action={
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-magenta transition-colors duration-150 hover:text-fog"
+        >
+          {open ? "Hide" : `View all ${rows.length}`}
+        </button>
+      }
+      bodyClassName={open ? "px-0 py-0" : "px-4 py-3"}
+    >
+      {!open ? (
+        <p className="text-[12.5px] text-dusk">
+          Every connected creator in one table, sortable by any column.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr>
+                {SORT_COLUMNS.map((col) => {
+                  const active = sort === col.key;
+                  return (
+                    <TableHead
+                      key={col.key}
+                      align={col.align}
+                      ariaSort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggle(col.key)}
+                        className={`cursor-pointer font-mono uppercase tracking-[0.8px] transition-colors duration-150 hover:text-fog ${
+                          active ? "text-magenta" : "text-dusk"
+                        }`}
+                      >
+                        {col.label}
+                        <span aria-hidden className="ml-1">
+                          {active ? (dir === "asc" ? "↑" : "↓") : "↕"}
+                        </span>
+                      </button>
+                    </TableHead>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row) => (
+                <tr key={row.realmId} className="hover:bg-white/[0.02]">
+                  <TableCell align="left">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(row.realmId)}
+                      className="cursor-pointer text-left font-body text-[13px] text-fog transition-colors duration-150 hover:text-magenta"
+                    >
+                      {row.displayName}
+                    </button>
+                    {row.connection === "disabled" ? (
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-[1px] text-faint">
+                        disconnected
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  {row.data ? <TotalCells totals={row.data} /> : <BlankCells />}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 

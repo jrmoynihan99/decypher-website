@@ -11,6 +11,7 @@ import StatsSection from "@/components/home/StatsSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
 import VideoSection from "@/components/home/VideoSection";
 import type { Creator } from "@/lib/creators";
+import type { RevenueTimeline } from "@/lib/quickbooks/public-stats";
 import type {
   CmsService,
   CmsTestimonial,
@@ -24,12 +25,14 @@ export default function HomeTemplate({
   creators,
   services,
   testimonials,
+  revenue,
 }: {
   page: HomePageDoc;
   settings: SiteSettings | null;
   creators: Creator[];
   services: CmsService[];
   testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
+  revenue?: RevenueTimeline | null;
 }) {
   // Roster carousel: the creators picked in Studio (Home → Roster), in the
   // order they're listed there. Nothing picked → the first 16 by sort position,
@@ -65,6 +68,7 @@ export default function HomeTemplate({
           eyebrow={page.statsSection?.eyebrow}
           title={page.statsSection?.title}
           stats={settings?.stats ?? []}
+          revenue={revenue}
         />
       </div>
       <EstimatorSection content={page.estimatorSection ?? {}} />
