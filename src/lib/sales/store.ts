@@ -57,6 +57,7 @@ const REFERRERS = "salesReferrers";
 const BLANK_EDITS: SalesCallEdits = {
   isSales: false,
   isReferral: false,
+  archived: false,
   leadSource: null,
   showStatus: null,
   status: null,
@@ -115,6 +116,7 @@ function toRow(id: string, d: FirebaseFirestore.DocumentData): SalesCallRow {
 
     isSales: Boolean(d.isSales),
     isReferral: Boolean(d.isReferral),
+    archived: Boolean(d.archived),
     leadSource: d.leadSource ?? null,
     showStatus: d.showStatus ?? null,
     status: d.status ?? null,

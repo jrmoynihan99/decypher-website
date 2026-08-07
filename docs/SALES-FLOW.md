@@ -69,6 +69,27 @@ silently wipes months of the client's manual work.
 
 ---
 
+## Deleting rows
+
+The `×` on a Booked Calls row sets `archived: true`. It is **not** a document
+delete, and must not become one.
+
+Rows are keyed on the Calendly invitee UUID. A deleted document is recreated by
+the next `sales:backfill` run, and by any `invitee.canceled` or reschedule
+webhook for the same invitee — so a real delete would appear to work and then
+quietly undo itself, which is worse than not offering it. `archived` sits in the
+operator-owned zone, which sync is structurally forbidden from touching, so it
+survives every re-sync.
+
+Archived rows leave all three tabs *and* every KPI and total — an archived deal
+must not sit in closed-won revenue. The toolbar's "Deleted (N)" button switches
+to the archived view, where each row offers Restore. Deleting is two clicks
+(`×` arms, "Delete?" confirms, disarms itself after 4s) and the banner that
+follows offers an immediate undo.
+
+If a row genuinely needs to be gone forever — a test booking, say — delete it in
+Calendly first, then archive it here.
+
 ## Suggestions, not autofill
 
 The client was explicit: don't trust the auto-detected referrer or lead source.

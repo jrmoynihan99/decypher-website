@@ -24,6 +24,17 @@ export interface SalesCallEdits {
   isSales: boolean;
   isReferral: boolean;
 
+  /**
+   * Hidden from all three tabs. The "delete" the grid offers.
+   *
+   * Deliberately a flag rather than a document delete: rows are keyed on the
+   * Calendly invitee UUID, so a deleted one is recreated by the next backfill
+   * or by any reschedule/cancel webhook for the same invitee. A real delete
+   * would look like it worked and quietly undo itself. Being operator-owned,
+   * this survives every sync — see the ownership note in store.ts.
+   */
+  archived: boolean;
+
   leadSource: LeadSource | null;
   showStatus: ShowStatus | null;
   status: DealStatus | null;

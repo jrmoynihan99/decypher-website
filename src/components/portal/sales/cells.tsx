@@ -280,6 +280,86 @@ export function RawHint({ text }: { text: string }) {
   );
 }
 
+/* ─────────────────────────── delete ─────────────────────────── */
+
+/**
+ * Two-click delete: `×` arms it, "Delete?" confirms.
+ *
+ * A confirm dialog would be heavier than the action deserves and a bare `×`
+ * next to a checkbox is a misclick waiting to happen. Arming disarms itself
+ * after a few seconds so a stray first click doesn't leave a live trigger
+ * sitting in the row. The undo banner upstream is the real safety net.
+ */
+export function DeleteCell({
+  onDelete,
+  saving,
+  label,
+}: {
+  onDelete: () => void;
+  saving?: boolean;
+  label: string;
+}) {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  if (armed) {
+    return (
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => {
+          setArmed(false);
+          onDelete();
+        }}
+        className="cursor-pointer rounded-[6px] border border-danger/50 bg-danger/10 px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.8px] text-danger transition-colors duration-150 hover:bg-danger/20 disabled:opacity-40"
+      >
+        Delete?
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={saving}
+      aria-label={label}
+      title={label}
+      onClick={() => setArmed(true)}
+      className="cursor-pointer rounded-[6px] border border-transparent px-2 py-1 text-[14px] leading-none text-faint transition-colors duration-150 hover:border-danger/40 hover:text-danger disabled:opacity-40"
+    >
+      ×
+    </button>
+  );
+}
+
+/** Bring an archived row back. */
+export function RestoreCell({
+  onRestore,
+  saving,
+  label,
+}: {
+  onRestore: () => void;
+  saving?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={saving}
+      aria-label={label}
+      onClick={onRestore}
+      className="cursor-pointer rounded-[6px] border border-teal/40 px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.8px] text-teal transition-colors duration-150 hover:bg-teal/10 disabled:opacity-40"
+    >
+      Restore
+    </button>
+  );
+}
+
 /* ─────────────────────────── referrer ─────────────────────────── */
 
 /**
