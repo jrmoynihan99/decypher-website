@@ -67,14 +67,9 @@ export function niceStep(raw: number): number {
 
 /* ────────────────────────── paths ────────────────────────── */
 
-/**
- * Monotone cubic path (Steffen tangents): follows the data smoothly but can
- * never overshoot it. Matters for a cumulative series — a Catmull-Rom curve
- * would dip below a flat month and show revenue "un-earning" itself.
- */
-export function monotonePath(xs: number[], ys: number[]): string {
+/** Steffen tangents — shared by the path builder and the hover evaluator. */
+function steffenTangents(xs: number[], ys: number[]): number[] {
   const n = xs.length;
-  if (n < 2) return n ? `M ${r2(xs[0])} ${r2(ys[0])}` : "";
   const dx: number[] = [];
   const m: number[] = [];
   for (let i = 0; i < n - 1; i++) {
@@ -91,15 +86,71 @@ export function monotonePath(xs: number[], ys: number[]): string {
     }
   }
   t.push(m[n - 2]);
+  return t;
+}
+
+/**
+ * Monotone cubic path (Steffen tangents): follows the data smoothly but can
+ * never overshoot it. Matters for a cumulative series — a Catmull-Rom curve
+ * would dip below a flat month and show revenue "un-earning" itself.
+ */
+export function monotonePath(xs: number[], ys: number[]): string {
+  const n = xs.length;
+  if (n < 2) return n ? `M ${r2(xs[0])} ${r2(ys[0])}` : "";
+  const t = steffenTangents(xs, ys);
   let d = `M ${r2(xs[0])} ${r2(ys[0])}`;
   for (let i = 0; i < n - 1; i++) {
-    const h = dx[i] / 3;
+    const h = (xs[i + 1] - xs[i]) / 3;
     d +=
       ` C ${r2(xs[i] + h)} ${r2(ys[i] + t[i] * h)}` +
       ` ${r2(xs[i + 1] - h)} ${r2(ys[i + 1] - t[i + 1] * h)}` +
       ` ${r2(xs[i + 1])} ${r2(ys[i + 1])}`;
   }
   return d;
+}
+
+/**
+ * y at an arbitrary x on the SAME curve monotonePath draws — identical
+ * tangents, Hermite-evaluated — so a scrubbing cursor's dot never sits off
+ * the rendered line. Clamps outside the domain.
+ */
+export function monotoneYAt(xs: number[], ys: number[], x: number): number {
+  const n = xs.length;
+  if (!n) return 0;
+  if (n === 1 || x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  const t = steffenTangents(xs, ys);
+  let k = 0;
+  while (k < n - 2 && xs[k + 1] < x) k++;
+  const h = xs[k + 1] - xs[k];
+  const u = (x - xs[k]) / h;
+  const u2 = u * u;
+  const u3 = u2 * u;
+  return (
+    (2 * u3 - 3 * u2 + 1) * ys[k] +
+    (u3 - 2 * u2 + u) * h * t[k] +
+    (-2 * u3 + 3 * u2) * ys[k + 1] +
+    (u3 - u2) * h * t[k + 1]
+  );
+}
+
+/** Linear y-at-x over a pixel-space polyline (the jagged replay trace). */
+export function polylineYAt(
+  samples: readonly { x: number; y: number }[],
+  x: number,
+): number | null {
+  if (samples.length < 2) return samples[0]?.y ?? null;
+  if (x <= samples[0].x) return samples[0].y;
+  if (x >= samples[samples.length - 1].x) return samples[samples.length - 1].y;
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].x >= x) {
+      const a = samples[i - 1];
+      const b = samples[i];
+      const u = b.x === a.x ? 0 : (x - a.x) / (b.x - a.x);
+      return a.y + (b.y - a.y) * u;
+    }
+  }
+  return samples[samples.length - 1].y;
 }
 
 /* ────────────────────────── views ────────────────────────── */
@@ -295,7 +346,10 @@ export function accrueAt(
     }
     if (t < seg.t0) break;
     const p = (t - seg.t0) / (seg.t1 - seg.t0);
-    idx = seg.idxFrom + p;
+    // Scale by the segment's true x-span — the final partial month covers a
+    // sliver of axis, and advancing a full month-width here sends the tip
+    // sweeping past the chart's right edge.
+    idx = seg.idxFrom + p * (seg.idxTo - seg.idxFrom);
     cents = seg.baseCents + seg.backgroundCents * easeInOutQuad(p);
     for (const chip of seg.chips) {
       if (chip.t > t) break;

@@ -16,7 +16,9 @@ import {
   introView,
   lerpView,
   monotonePath,
+  monotoneYAt,
   niceStep,
+  polylineYAt,
   replayView,
   type ReplaySchedule,
   type View,
@@ -66,10 +68,14 @@ const HOLD_MS = 650;
 const ZOOM_MS = 1300;
 const REPLAY_MS = 56_000;
 const TICKER_LIFE_MS = 2600;
-/** How long the settled state breathes before the replay runs again. */
-const LOOP_DWELL_MS = 6500;
+/** How long the settled state breathes before the whole show reruns. */
+const LOOP_DWELL_MS = 4500;
+/** The fade-to-black between showings. */
+const FADE_MS = 550;
 
-type Phase = "idle" | "armed" | "drawing" | "zooming" | "replay" | "live";
+/** "fading" is the loop's curtain: content fades, state resets to idle, and
+    the intersection observer re-arms the full intro→zoom→replay from scratch. */
+type Phase = "idle" | "armed" | "drawing" | "zooming" | "replay" | "live" | "fading";
 
 type TickerChip = {
   id: number;
@@ -103,13 +109,14 @@ export default function RevenueGraph({
   const replayAreaRef = useRef<SVGPolygonElement>(null);
 
   const scheduleRef = useRef<ReplaySchedule | null>(null);
-  const samplesRef = useRef<string[]>([]);
-  const skipRef = useRef(false);
+  const samplesRef = useRef<{ x: number; y: number }[]>([]);
+  const sampleStrRef = useRef("");
   const chipSeq = useRef(0);
 
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  /** Continuous hover: cursor x, the curve's y there, fractional month index. */
+  const [scrub, setScrub] = useState<{ x: number; y: number; fi: number } | null>(null);
   const [syncedAgo, setSyncedAgo] = useState<string | null>(null);
   const [ticker, setTicker] = useState<TickerChip[]>([]);
   const [jagged, setJagged] = useState(false);
@@ -161,6 +168,7 @@ export default function RevenueGraph({
     if (!size) return;
     if (phase === "replay") {
       samplesRef.current = [];
+      sampleStrRef.current = "";
       return;
     }
     if (phase !== "live") return;
@@ -236,7 +244,8 @@ export default function RevenueGraph({
 
     return {
       w, h, plotW, plotB, xOf, yOf, valueAtY, ix,
-      histLine, histArea, tailLine, tailArea,
+      histXs, histYs, histLine, histArea,
+      tailXs, tailYs, tailLine, tailArea,
       grid, baselineY, ticks,
     };
   }, [size, points, view, anchorIndex, lastIdx]);
@@ -382,26 +391,27 @@ export default function RevenueGraph({
     const schedule = buildReplaySchedule(replay, points, lastIdx, REPLAY_MS, Math.random);
     scheduleRef.current = schedule;
     samplesRef.current = [];
-    skipRef.current = false;
+    sampleStrRef.current = "";
     const jaggedTimer = setTimeout(() => setJagged(true));
     let raf = 0;
     let start: number | null = null;
     let last = 0;
     let spawned = 0;
-    let prevElapsed = 0;
     let lastPx = -Infinity;
     let lastPy = -Infinity;
     const pushSample = (px: number, py: number, plotB: number) => {
       // only when the trace moved a visible amount
       if (Math.abs(px - lastPx) < 0.6 && Math.abs(py - lastPy) < 0.6) return;
-      samplesRef.current.push(`${Math.round(px * 10) / 10},${Math.round(py * 10) / 10}`);
+      const x = Math.round(px * 10) / 10;
+      const y = Math.round(py * 10) / 10;
+      samplesRef.current.push({ x, y });
+      sampleStrRef.current += `${sampleStrRef.current ? " " : ""}${x},${y}`;
       lastPx = px;
       lastPy = py;
-      const pts = samplesRef.current.join(" ");
-      replayLineRef.current?.setAttribute("points", pts);
+      replayLineRef.current?.setAttribute("points", sampleStrRef.current);
       replayAreaRef.current?.setAttribute(
         "points",
-        `${pts} ${lastPx},${plotB + 4} ${samplesRef.current[0]?.split(",")[0] ?? lastPx},${plotB + 4}`,
+        `${sampleStrRef.current} ${lastPx},${plotB + 4} ${samplesRef.current[0]?.x ?? lastPx},${plotB + 4}`,
       );
     };
     const frame = (t: number) => {
@@ -411,23 +421,12 @@ export default function RevenueGraph({
         return;
       }
       last = t;
-      const elapsed = skipRef.current ? REPLAY_MS : t - start;
+      const elapsed = t - start;
       const g = geoRef.current;
       if (!g) {
         raf = requestAnimationFrame(frame);
         return;
       }
-      // a skip is a fast-forward, not a teleport: backfill the trace densely
-      // so the finished line is the same jagged drawing a full run leaves
-      if (skipRef.current && prevElapsed < REPLAY_MS) {
-        for (let k = 1; k <= 140; k++) {
-          const tt = prevElapsed + ((REPLAY_MS - prevElapsed) * k) / 140;
-          const a = accrueAt(schedule, tt);
-          pushSample(g.xOf(a.idx), g.yOf(a.cents), g.plotB);
-        }
-        spawned = schedule.chips.length;
-      }
-      prevElapsed = elapsed;
       const { cents, idx } = accrueAt(schedule, Math.min(elapsed, REPLAY_MS));
       const px = g.xOf(idx);
       const py = g.yOf(cents);
@@ -489,11 +488,12 @@ export default function RevenueGraph({
     if (chipValRef.current) chipValRef.current.textContent = fmtExact(totalCents);
   }, [phase, geo, points, totalCents]);
 
-  /* the encore — while the section stays on screen (and nobody is mid-hover),
-     the replay runs itself again after a breather. A reload being coherent is
-     what the REPLAYING label buys; a loop is the same statement twice. */
+  /* the encore — while the section stays on screen (and nobody is mid-scrub),
+     the whole show reruns after a breather: curtain-fade, then a fresh reveal
+     from idle, exactly like a reload. A reload being coherent is what the
+     REPLAYING label buys; a loop is the same statement twice. */
   useEffect(() => {
-    if (phase !== "live" || !replay || hoverIdx != null || prefersReducedMotion())
+    if (phase !== "live" || !replay || scrub != null || prefersReducedMotion())
       return;
     const el = rootRef.current;
     if (!el) return;
@@ -501,7 +501,7 @@ export default function RevenueGraph({
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
-          timer ??= setTimeout(() => setPhase("replay"), LOOP_DWELL_MS);
+          timer ??= setTimeout(() => setPhase("fading"), LOOP_DWELL_MS);
         } else {
           clearTimeout(timer);
           timer = undefined;
@@ -514,23 +514,69 @@ export default function RevenueGraph({
       io.disconnect();
       clearTimeout(timer);
     };
-  }, [phase, replay, hoverIdx]);
+  }, [phase, replay, scrub]);
 
-  /* hover — enabled once the theatre is over */
+  /* the curtain: once faded, reset everything and hand back to idle — the
+     intersection observer re-arms and the full intro runs again */
+  useEffect(() => {
+    if (phase !== "fading") return;
+    const timer = setTimeout(() => {
+      samplesRef.current = [];
+      sampleStrRef.current = "";
+      setTicker([]);
+      setJagged(false);
+      setView(vIntro);
+      setPhase("idle");
+    }, FADE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  /* the scrub — continuous, Robinhood-style: the crosshair follows the cursor
+     pixel-for-pixel and the dot rides the drawn curve itself (same tangents as
+     the path; linear over the jagged trace), values interpolated between
+     months. Enabled once the theatre is over. */
   const onPointerMove = (e: React.PointerEvent) => {
-    if (phase !== "live" || !geo) return;
-    const rect = stageRef.current!.getBoundingClientRect();
-    const px = e.clientX - rect.left;
+    if (phase !== "live") return;
+    const g = geoRef.current;
+    const el = stageRef.current;
+    if (!g || !el) return;
     const [x0, x1] = view.xd;
-    const i = Math.round(x0 + (px / geo.plotW) * (x1 - x0));
-    const clamped = Math.max(Math.max(0, Math.ceil(x0)), Math.min(points.length - 1, i));
-    const y = geo.yOf(points[clamped].total);
-    setHoverIdx(y >= PAD_TOP - 12 && y <= geo.plotB + 4 ? clamped : null);
+    const n = points.length;
+    const minX = Math.max(g.xOf(0), 0);
+    const maxX = g.xOf(lastIdx);
+    const px = Math.min(Math.max(e.clientX - el.getBoundingClientRect().left, minX), maxX);
+    // pixel → fractional data index; the final slot is compressed to lastIdx
+    const xi = x0 + (px / g.plotW) * (x1 - x0);
+    const fi =
+      xi <= n - 2
+        ? xi
+        : n - 2 + Math.min(1, (xi - (n - 2)) / Math.max(lastIdx - (n - 2), 1e-6));
+    const anchorX = g.xOf(g.ix(anchorIndex));
+    const y =
+      px <= anchorX || anchorIndex === n - 1
+        ? monotoneYAt(g.histXs, g.histYs, px)
+        : jagged
+          ? polylineYAt(samplesRef.current, px)
+          : monotoneYAt(g.tailXs, g.tailYs, px);
+    if (y == null) return;
+    setScrub({ x: px, y, fi: Math.max(0, Math.min(n - 1, fi)) });
   };
 
   const revealed = phase !== "idle";
   const gridShown = revealed && phase !== "zooming";
-  const hover = phase === "live" && hoverIdx != null && geo ? hoverIdx : null;
+  const hover = phase === "live" && scrub != null && geo ? scrub : null;
+  /** The month being earned where the cursor sits (segment i→i+1 is i+1). */
+  const hoverMonth =
+    hover != null
+      ? points[Math.min(points.length - 1, Math.max(0, Math.ceil(hover.fi - 1e-4)))]
+      : null;
+  const hoverCents =
+    hover != null && geo
+      ? hover.fi >= points.length - 1 - 1e-4
+        ? totalCents
+        : Math.max(0, Math.round(geo.valueAtY(hover.y)))
+      : 0;
   const replayMonthsLabel = replay
     ? replay.months.length > 1
       ? `${monthShortLabel(replay.months[0].month)}–${monthShortLabel(replay.months[replay.months.length - 1].month)} ’${replay.months[replay.months.length - 1].month.slice(2, 4)}`
@@ -560,7 +606,11 @@ export default function RevenueGraph({
         </span>
       </div>
 
-      <div ref={stageRef} className="relative h-[230px] md:h-[320px]">
+      <div
+        ref={stageRef}
+        className="relative h-[230px] transition-opacity duration-500 md:h-[320px]"
+        style={{ opacity: phase === "fading" ? 0 : 1 }}
+      >
         {/* masked chart layer — the fade IS the frame */}
         <div
           className="absolute inset-0"
@@ -732,21 +782,16 @@ export default function RevenueGraph({
               {hover != null && (
                 <g>
                   <line
-                    x1={geo.xOf(geo.ix(hover))}
-                    x2={geo.xOf(geo.ix(hover))}
+                    x1={hover.x}
+                    x2={hover.x}
                     y1={PAD_TOP - 10}
                     y2={geo.plotB}
                     stroke="rgba(255,255,255,0.14)"
                   />
+                  <circle cx={hover.x} cy={hover.y} r={7} fill="rgba(255,45,120,0.18)" />
                   <circle
-                    cx={geo.xOf(geo.ix(hover))}
-                    cy={geo.yOf(points[hover].total)}
-                    r={7}
-                    fill="rgba(255,45,120,0.18)"
-                  />
-                  <circle
-                    cx={geo.xOf(geo.ix(hover))}
-                    cy={geo.yOf(points[hover].total)}
+                    cx={hover.x}
+                    cy={hover.y}
                     r={3}
                     fill="#ff2d78"
                     stroke="#fff"
@@ -813,39 +858,34 @@ export default function RevenueGraph({
           </div>
         ))}
 
-        {/* hover tooltip */}
-        {hover != null && geo && (
+        {/* scrub tooltip — value read off the curve, month being earned */}
+        {hover != null && hoverMonth != null && geo && (
           <div
             className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-white/10 bg-panel/90 px-3 py-2 backdrop-blur-md"
             style={{
-              left: Math.min(Math.max(geo.xOf(geo.ix(hover)), 78), geo.w - 82),
-              top: geo.yOf(points[hover].total) - 16,
+              left: Math.min(Math.max(hover.x, 78), geo.w - 82),
+              top: hover.y - 16,
             }}
           >
             <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-dusk">
-              {monthLabel(points[hover].month)}
+              {monthLabel(hoverMonth.month)}
             </div>
             <div className="mt-1 font-mono text-[13px] font-semibold tabular-nums leading-none text-fog">
-              {fmtExact(points[hover].total)}
+              {fmtExact(hoverCents)}
             </div>
             <div className="mt-1 font-mono text-[9.5px] tracking-[0.1em] text-mist">
-              {fmtDelta(points[hover].income)}
+              {fmtDelta(hoverMonth.income)}
               <span className="text-dusk"> that month</span>
             </div>
           </div>
         )}
 
-        {/* pointer surface — hover when settled, click-to-skip during replay */}
+        {/* pointer surface — scrubbing only, once the show has settled */}
         <div
           className="absolute inset-0"
-          style={{
-            pointerEvents: phase === "live" || phase === "replay" ? "auto" : "none",
-          }}
+          style={{ pointerEvents: phase === "live" ? "auto" : "none" }}
           onPointerMove={onPointerMove}
-          onPointerLeave={() => setHoverIdx(null)}
-          onClick={() => {
-            if (phase === "replay") skipRef.current = true;
-          }}
+          onPointerLeave={() => setScrub(null)}
         />
       </div>
     </div>
