@@ -38,6 +38,7 @@ const PARSERS: {
   isSales: Boolean,
   isReferral: Boolean,
   paid: Boolean,
+  archived: Boolean,
 
   leadSource: (v) => asOption(v, LEAD_SOURCES),
   showStatus: (v) => asOption(v, SHOW_STATUSES),

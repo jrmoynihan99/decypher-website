@@ -61,8 +61,10 @@ import {
 import {
   CheckCell,
   DateCell,
+  DeleteCell,
   MoneyCell,
   ReferrerCell,
+  RestoreCell,
   SelectCell,
   Suggestion,
   TextCell,
@@ -129,6 +131,9 @@ export default function SalesFlow({
   const [range, setRange] = useState<RangeId>("ytd");
   const [callType, setCallType] = useState<CallType | "all">("all");
   const [visible, setVisible] = useState(PAGE);
+  const [showArchived, setShowArchived] = useState(false);
+  /** The last row archived, so it can be put straight back. */
+  const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** `${id}:${field}` while a write is in flight, so one cell greys, not the row. */
   const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -222,6 +227,22 @@ export default function SalesFlow({
     [saveMany],
   );
 
+  const archive = useCallback(
+    (row: SalesCallRow) => {
+      setUndo({ id: row.id, name: row.name || row.email || "that row" });
+      void saveMany(row.id, { archived: true });
+    },
+    [saveMany],
+  );
+
+  const restore = useCallback(
+    (id: string) => {
+      setUndo(null);
+      void saveMany(id, { archived: false });
+    },
+    [saveMany],
+  );
+
   const addReferrer = useCallback(async (name: string): Promise<string | null> => {
     setError(null);
     try {
@@ -258,9 +279,14 @@ export default function SalesFlow({
    * what's findable.
    */
 
+  const archivedCount = useMemo(() => calls.filter((c) => c.archived).length, [calls]);
+
   const scoped = useMemo(() => {
     const start = rangeStart(range);
     return calls.filter((c) => {
+      // Archived rows are out of every tab, every count and every total until
+      // explicitly asked for — an archived deal must not show up in revenue.
+      if (c.archived !== showArchived) return false;
       if (callType !== "all" && c.callType !== callType) return false;
       if (start == null) return true;
       // Rows are ordered by bookedAt in Firestore, so a null can't reach here;
@@ -268,7 +294,7 @@ export default function SalesFlow({
       if (!c.bookedAt) return false;
       return new Date(c.bookedAt).getTime() >= start;
     });
-  }, [calls, range, callType]);
+  }, [calls, range, callType, showArchived]);
 
   const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -374,12 +400,50 @@ export default function SalesFlow({
           </FilterSelect>
         </label>
 
+        {archivedCount > 0 || showArchived ? (
+          <button
+            type="button"
+            onClick={() => withReset(setShowArchived)(!showArchived)}
+            className={`cursor-pointer rounded-[10px] border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.8px] transition-colors duration-150 ${
+              showArchived
+                ? "border-magenta/50 bg-magenta/10 text-magenta"
+                : "border-edge-mid text-dusk hover:text-fog"
+            }`}
+          >
+            {showArchived ? "← Back to active" : `Deleted (${archivedCount})`}
+          </button>
+        ) : null}
+
         {query.trim() ? (
           <span className="font-body text-[11.5px] text-dusk">
             searching all {scoped.length.toLocaleString()} rows in {rangeLabel.toLowerCase()}
           </span>
         ) : null}
       </div>
+
+      {undo ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-edge-mid bg-panel-2 px-3.5 py-2.5 text-[12.5px] text-mist">
+          <span>
+            Deleted <span className="font-medium text-fog">{undo.name}</span>. It&rsquo;s hidden
+            from all three tabs, and stays hidden through future Calendly syncs.
+          </span>
+          <button
+            type="button"
+            onClick={() => restore(undo.id)}
+            className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.8px] text-magenta hover:underline"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => setUndo(null)}
+            className="ml-auto cursor-pointer text-[13px] text-dusk hover:text-fog"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-[10px] border border-danger/40 bg-danger/10 px-3.5 py-2.5 text-[12.5px] text-danger">
@@ -389,9 +453,12 @@ export default function SalesFlow({
 
       <Panel
         title={
-          tab === "booked" ? "Booked calls"
-          : tab === "deals" ? "Deal desk"
-          : "Referrals"
+          <>
+            {tab === "booked" ? "Booked calls"
+            : tab === "deals" ? "Deal desk"
+            : "Referrals"}
+            {showArchived ? <span className="ml-2 text-magenta">· deleted</span> : null}
+          </>
         }
         action={
           <Mono className="text-dusk">
@@ -406,15 +473,24 @@ export default function SalesFlow({
           <p className="px-4 py-10 text-center text-[13px] text-dusk">
             {calls.length === 0 ?
               "No calls yet. Run the Calendly backfill, or wait for the next booking."
+            : showArchived && archivedCount === 0 ?
+              "Nothing deleted."
             : scoped.length === 0 ?
-              `Nothing booked in ${rangeLabel.toLowerCase()}. Try a wider date range.`
+              `Nothing ${showArchived ? "deleted" : "booked"} in ${rangeLabel.toLowerCase()}. Try a wider date range.`
             : "Nothing matches that filter."}
           </p>
         ) : (
           <>
             <div className="overflow-x-auto">
               {tab === "booked" ? (
-                <BookedTable rows={page} save={save} busy={busy} />
+                <BookedTable
+                  rows={page}
+                  save={save}
+                  busy={busy}
+                  archive={archive}
+                  restore={restore}
+                  showArchived={showArchived}
+                />
               ) : tab === "deals" ? (
                 <DealTable rows={page} save={save} busy={busy} />
               ) : (
@@ -545,7 +621,18 @@ function CallTypeChip({ row }: { row: SalesCallRow }) {
  * Discovery Call — and both stay editable, which is the point. The client was
  * explicit that the auto-detection is a starting position, not a verdict.
  */
-function BookedTable({ rows, save, busy }: TableProps) {
+function BookedTable({
+  rows,
+  save,
+  busy,
+  archive,
+  restore,
+  showArchived,
+}: TableProps & {
+  archive: (row: SalesCallRow) => void;
+  restore: (id: string) => void;
+  showArchived: boolean;
+}) {
   return (
     <table className="w-full border-collapse text-[13px]">
       <thead>
@@ -553,9 +640,14 @@ function BookedTable({ rows, save, busy }: TableProps) {
           <TableHead align="left">Booked</TableHead>
           <TableHead align="left">Call</TableHead>
           <TableHead align="left">Name</TableHead>
-          <TableHead align="left">Socials</TableHead>
-          <TableHead>Sales</TableHead>
-          <TableHead>Referral</TableHead>
+          {/* The two checkboxes are the point of this tab, so they sit against
+              the name rather than across the table from it — left-aligned and
+              narrow so the eye travels name → sales → referral in one move. */}
+          <TableHead align="left">Sales</TableHead>
+          <TableHead align="left">Referral</TableHead>
+          <TableHead>
+            <span className="sr-only">{showArchived ? "Restore" : "Delete"}</span>
+          </TableHead>
         </tr>
       </thead>
       <tbody>
@@ -571,28 +663,47 @@ function BookedTable({ rows, save, busy }: TableProps) {
               <Who row={row} />
             </TableCell>
             <TableCell align="left">
+              <span className="flex w-[52px] justify-center">
+                <CheckCell
+                  checked={row.isSales}
+                  saving={busy(row.id, "isSales")}
+                  label={`Sales call for ${row.name}`}
+                  onChange={(v) => save(row.id, "isSales", v)}
+                />
+              </span>
+            </TableCell>
+            <TableCell align="left">
+              <span className="flex w-[62px] justify-center">
+                <CheckCell
+                  checked={row.isReferral}
+                  saving={busy(row.id, "isReferral")}
+                  label={`Referral for ${row.name}`}
+                  onChange={(v) => save(row.id, "isReferral", v)}
+                />
+              </span>
+            </TableCell>
+            <TableCell align="left">
               <span
                 title={row.socials ?? ""}
-                className="block max-w-[190px] truncate font-body text-[11.5px] text-dusk"
+                className="block max-w-[240px] truncate font-body text-[11.5px] text-dusk"
               >
                 {row.socials || "—"}
               </span>
             </TableCell>
             <TableCell>
-              <CheckCell
-                checked={row.isSales}
-                saving={busy(row.id, "isSales")}
-                label={`Sales call for ${row.name}`}
-                onChange={(v) => save(row.id, "isSales", v)}
-              />
-            </TableCell>
-            <TableCell>
-              <CheckCell
-                checked={row.isReferral}
-                saving={busy(row.id, "isReferral")}
-                label={`Referral for ${row.name}`}
-                onChange={(v) => save(row.id, "isReferral", v)}
-              />
+              {showArchived ? (
+                <RestoreCell
+                  onRestore={() => restore(row.id)}
+                  saving={busy(row.id, "archived")}
+                  label={`Restore ${row.name}`}
+                />
+              ) : (
+                <DeleteCell
+                  onDelete={() => archive(row)}
+                  saving={busy(row.id, "archived")}
+                  label={`Delete ${row.name || row.email}`}
+                />
+              )}
             </TableCell>
           </tr>
         ))}
