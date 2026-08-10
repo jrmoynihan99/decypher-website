@@ -15,6 +15,7 @@
     "start": "next start",
     "lint": "eslint",
     "portal:admin": "node scripts/portal-admin.mjs",
+    "portal:grant": "node scripts/grant-permission.mjs",
     "legal:seed": "node scripts/seed-legal.mjs",
     "thankyou:seed": "node scripts/seed-thank-you.mjs",
     "qb:check": "node scripts/quickbooks-parse-check.mjs",

@@ -110,6 +110,47 @@ Grant changes take effect on the user's next request — no re-invite, no new
 cookie — because permissions live in Firestore, not in the session cookie, same
 as `role`.
 
+### Shipping a new tab
+
+Grandfathering only covers docs with **no** `permissions` field. Every account
+created through the Staff page has an explicit array, so a key added to
+`PERMISSION_KEYS` arrives switched **off** for all of them. Backfill it:
+
+```bash
+npm run portal:grant -- <permission-key> --dry   # see who'd change
+npm run portal:grant -- <permission-key>
+```
+
+Idempotent, and it deliberately skips docs with no `permissions` field — writing
+an array there would opt them out of grandfathering for the *next* tab. Run it
+after the deploy, not before: until the new key is in the deployed
+`PERMISSION_KEYS`, an admin editing anyone's access from the Staff page PATCHes
+the array back without it.
+
+## Tools Hub
+
+`/portal/tools-hub` — a directory of every piece of software the team uses,
+grouped by department. Read gate `tools-hub`; the catalog is **admin-write
+only**, because it's one document the whole team renders from.
+
+- Catalog: `toolsHub/catalog` in Firestore, via `src/lib/tools-hub/store.ts`.
+  Absent means "the shipped defaults" in `src/lib/tools-hub/catalog.ts`, so the
+  doc only exists once an admin saves, and an un-edited install still picks up
+  changes made in code. `sanitizeCatalog` runs on read as well as write — every
+  URL is parsed, not pattern-matched, since these all become `href`s.
+- A tool CAN be deleted outright, unlike a sales dropdown option: nothing
+  historical is written in a tool id.
+- Per-user department show/hide and section collapse are localStorage
+  (`toolshub:prefs:v1:<uid>`), stored as deviations from "everything shown" so a
+  department added later isn't hidden from people who set prefs today.
+- Search deliberately spans departments the pills have switched off; a matching
+  hidden department surfaces with a `hidden` marker on its header.
+- Logos: drop an SVG in `public/logos/` and point a tool's Logo URL at it.
+  Without one, the card shows the vendor's monogram over a tint of its accent.
+- **Known placeholders in the seeded list**, ported as the client wrote them —
+  `https://taxgpt.internal/`, `https://timeoff.decypher.internal/` and the
+  `notion.so/decypher/*-sop` links don't resolve. Fix them in Edit tools.
+
 ## Inbox tabs
 
 **Leads** (`/portal/leads`) reads `leadMagnetLeads` via `listLeads()` in
@@ -126,3 +167,7 @@ opens the collections to the browser.
 `permissions: PermissionKey[]` (absent on pre-permissions docs = full access),
 `createdAt`, `createdBy`. Authoritative for access; the Firebase Auth record is
 only the password store.
+
+`toolsHub/catalog` — `departments: {id, label}[]`, `tools: ToolEntry[]`,
+`updatedAt`, `updatedBy`. One document, written whole. Absent = shipped
+defaults.

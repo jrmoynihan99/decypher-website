@@ -17,6 +17,11 @@ filters over `salesCalls`, not three tables:
 | Deal Desk | `isSales \|\| isReferral` | the money |
 | Referrals | `isReferral` | attribution and commission |
 
+Every consequence of that model falls out for free rather than being
+implemented: one status field that can't disagree with itself, and one `×` that
+removes a row from all three tabs and every total no matter which tab you press
+it on.
+
 Airtable models these as three tables and pays for it. A referred deal's status
 is typed into `DEAL Desk` **and** into `REFERRALS`, and the two drift: the
 import found 187 deals marked `WON Closed` in Deal Desk but 198 rows whose
@@ -35,7 +40,22 @@ The client's own data justified the collapse: of 4,532 Booked Calls rows, all
 Calendly ──webhook──▶ /api/calendly/webhook ──▶ salesCalls
          └─backfill──▶ scripts/sales-backfill.mjs ──┘
 Airtable ──one-off──▶ scripts/sales-import-airtable.mjs ──▶ (operator fields only)
+Operator ──"＋ Add row"──▶ POST /api/portal/sales/calls ──▶ (id prefixed `manual-`)
 ```
+
+**Manual rows carry a `manual-<uuid>` id, and the prefix is load-bearing.**
+Calendly rows are keyed on the invitee UUID and `upsertFromCalendly` addresses
+documents by it, so the prefix puts hand-added rows outside that address space
+entirely — no sync can adopt, overwrite or resurrect one. `source: "manual"` is
+what a *reader* goes by; the prefix is what the machinery goes by, and the two
+must not be conflated. The form collects the Calendly-owned identity fields
+only; everything on Deal Desk and Referrals is filled in through PATCH like any
+other row.
+
+Duplicates are **warned about, not blocked**: a matching email surfaces the rows
+it matched with their dates, and a human decides. The same person legitimately
+books twice, and a second discovery call six months later is a second row
+everywhere else in this system.
 
 Only three Calendly event types count as pipeline. The org runs ~41; the rest
 is client delivery (QBO onboarding, tax manager, "Catch up w/OT") and is
@@ -74,31 +94,61 @@ silently wipes months of the client's manual work.
 A fourth tab aggregating the same rows the grid edits — computed client-side in
 one pass (~800 rows), so it tracks the toolbar's date-range and call-type
 filters instantly. Archived rows are always excluded, even when the grid's
-"Deleted" view is open. One deliberate exception: the **By year** table ignores
-the date filter — its whole job is the multi-year comparison, and its header
-says so.
+"Deleted" view is open. One deliberate exception: the **breakdown table** at the
+bottom ignores the date filter — its whole job is the multi-period comparison,
+and its header says so.
 
 Design notes that should survive future edits (full detail in `viz.tsx`):
 
 - **No pie charts.** Lead source has ten categories — past the point where
   slices stay comparable, and no ten-colour palette can pass the CVD gates.
-  Ranked single-hue bars with printed values instead.
+  Ranked bars with printed values instead.
 - **The palette was validated, not eyeballed**, against the portal's real panel
   surface (#141319) with the dataviz skill's validator. The brand's five accents
   FAIL as a categorical set (ember vs danger measure ΔE 7.5 to *normal* vision),
-  which is why nearly everything is one magenta and magnitude is carried by bar
-  length. The one two-series chart (booked vs won by month) uses #d62368 +
-  #29a294 — a pair that passes all six checks, but sits in the CVD warn band, so
-  it must keep its legend, direct labels and 2px segment gap.
+  which is why magnitude is carried by bar length. The one two-series chart
+  (booked vs won by month) uses #d62368 + #29a294 — a pair that passes all six
+  checks, but sits in the CVD warn band, so it must keep its legend, direct
+  labels and 2px segment gap.
 - **Funnel stages wear an ordinal ramp** (#8f1a4d→#d62368→#ff5c96 — one hue,
   monotone lightness), not categorical hues: the stages are ordered.
 - Charts are CSS divs, not SVG — the existing portal charts stretch a viewBox
   (`preserveAspectRatio="none"`), which distorts labels; bars don't need SVG.
 
+### Comparing periods
+
+The toolbar's **Compare** selector adds a second window: previous period, same
+period last year, or a custom one. The KPI strip grows deltas and a **Period
+comparison** table appears under it.
+
+"Previous period" means the previous **calendar** unit for the calendar-anchored
+ranges (this/last quarter, YTD, last year) and an equal-length window
+immediately before for everything else. The distinction is the whole feature: a
+span shift applied to "This quarter" on 15 November gives 17 Aug – 30 Sep, a
+45-day window straddling two quarters that answers nothing. Shifting back one
+quarter gives 1 Jul – 15 Aug — the same many days into the previous quarter.
+Owned by `CALENDAR_SHIFT` in `SalesFlow.tsx`.
+
+A range with an unbounded start (All time, or a custom range with no From) has
+no comparable predecessor, so those options disable rather than invent one.
+
+**Rates compare in points, not percent.** "Close rate up 12%" from a base of 40%
+is ambiguous — 52% or 44.8%? The rate rows print the point movement.
+
+The breakdown table at the bottom toggles **Years / Quarters** and carries its
+own vs-previous column, which is where "how did Q3 go against Q2" gets answered
+without touching the toolbar at all.
+
 ## Deleting rows
 
-The `×` on a Booked Calls row sets `archived: true`. It is **not** a document
-delete, and must not become one.
+The `×` on a row — **on any of the three tabs** — sets `archived: true`. It is
+**not** a document delete, and must not become one.
+
+Deleting from Deal Desk or Referrals removes the row from Booked Calls too, and
+from every KPI, because there was only ever one document: the three tabs are
+filters, so there is no second copy to fall out of step. That is the same
+property the shared status field has, and it comes free from the data model
+rather than from any code that propagates anything.
 
 Rows are keyed on the Calendly invitee UUID. A deleted document is recreated by
 the next `sales:backfill` run, and by any `invitee.canceled` or reschedule
@@ -115,6 +165,24 @@ follows offers an immediate undo.
 
 If a row genuinely needs to be gone forever — a test booking, say — delete it in
 Calendly first, then archive it here.
+
+## Notes open in a dialog
+
+The Deal Desk notes cell is a preview that opens a real textarea, portalled to
+`document.body`. A one-line `<input>` in a grid column shows about six words of
+what is actually a paragraph, has nowhere to put a line break, and widening the
+column to fix that costs every other column on the row.
+
+Two things it does differently from every other cell here, both deliberate:
+
+- **It commits on Save, not on change.** Prose typed over a minute would
+  otherwise fire a write per character, and unlike a dropdown there is no
+  natural "done" moment until the editor closes. Escape and the backdrop
+  discard.
+- **It portals.** The grid's ancestors carry transforms and `will-change`,
+  either of which re-roots a `position: fixed` element to that container instead
+  of the viewport — the dialog would end up trapped inside a scrolling table
+  cell. This has bitten the codebase before (LeadModal).
 
 ## Suggestions, not autofill
 
@@ -217,6 +285,54 @@ filter, both applied on every tab. The KPI strip counts the filtered set, so
 "Closed won" means *within the current range*.
 
 Only `PAGE` (75) rows are rendered at a time, with Load more / Show all.
+
+Columns are **drag-resizable** from the right edge of any header (double-click a
+handle to reset that one; "↔ Reset widths" in the panel header resets the lot).
+Widths persist per table in localStorage — the three tabs keep separate sets,
+because a "Name" column that's right for triage isn't right for the money view.
+
+Two things in `grid.tsx` that look incidental and aren't:
+
+- **Widths live in CSS custom properties, not React state.** The drag writes
+  `--c-<id>` straight onto the wrapper and the `<col>` elements read it; nothing
+  re-renders until pointerup. State-per-pointermove re-renders 75 rows and ~900
+  form controls per frame, and the drag visibly lags the cursor.
+- **There is a trailing unsized `<col>`.** `table-fixed` is what makes a `<col>`
+  width authoritative, but a fixed-layout table still stretches to `width: 100%`
+  and distributes the slack across the columns — so shrinking one would silently
+  widen the others, the opposite of "resize this column". The slack column
+  absorbs it, and collapses once the real columns exceed the panel, at which
+  point the wrapper scrolls. Every row needs its `<SlackCell />`.
+
+Stored widths are read through `useSyncExternalStore`, not copied into state by
+an effect: localStorage *is* external state, and it gets the SSR split right for
+free (`getServerSnapshot` returns defaults, so hydration matches).
+
+### The horizontal scrollbar floats, and is hand-drawn
+
+A scroll container's scrollbar sits at the bottom of the *container*. Deal Desk
+is thirteen columns and seventy-five rows, so "scroll right" meant scrolling
+down past two thousand pixels of table to reach the bar, dragging it, and
+scrolling back up.
+
+So the container's own bar is hidden (`.scrollbar-none`) and replaced by a
+`position: sticky; bottom: 0` bar that stays at the bottom of the viewport for
+as long as any of the table is on screen, and comes to rest under the last row
+when you scroll past. It only renders when the columns actually overflow.
+
+**The thumb is a `<div>`, not a real scrollbar, and that is not decoration.**
+macOS renders overlay scrollbars that fade out when you stop scrolling — a proxy
+built from one would be invisible until you already knew to scroll, which is
+exactly the knowledge it exists to supply. Drawing it also means it looks the
+same on every platform and can be screenshotted in a headless browser, which a
+native scrollbar cannot.
+
+It supports drag, click-to-jump, and it never triggers a React render: the thumb
+is positioned by writing `transform` from the container's scroll handler and
+from the column-resize handler, the same discipline the widths follow. `sticky`
+survives the `overflow-x: clip` on `<html>`/`<body>` — `clip` doesn't create a
+scroll container the way `hidden` would, which is the reason that rule is
+written the way it is.
 
 This is not cosmetic. Two things made the tab slow at 824 rows:
 
@@ -376,21 +492,62 @@ in. The empty state names the closest contender and how far they have to go.
 ## Editable dropdowns — ⚙ Options
 
 Every dropdown's entries live in Firestore (`salesConfig/options`), edited from
-the ⚙ Options button: rename, reorder (↑↓), and — on the open lists — retire
-and add. Two tiers, enforced server-side in `lib/sales/config.ts`:
+the ⚙ Options button: rename, recolour, reorder (↑↓), and — on the open lists —
+retire and add. Two tiers, enforced server-side in `lib/sales/config.ts`:
 
-- **Open** (`leadSource`, `service`, `paymentPlan`): full editing. New options
-  get a slugged key; **keys are permanent** — the editor edits labels, never
-  keys, and "delete" is retire (hidden from new picks, historical rows keep
-  rendering theirs). A default key dropped from a submitted config is
+- **Open** (`leadSource`, `service`, `paymentPlan`, `objection`): full editing.
+  New options get a slugged key; **keys are permanent** — the editor edits
+  labels, never keys, and "delete" is retire (hidden from new picks, historical
+  rows keep rendering theirs). A default key dropped from a submitted config is
   re-appended as retired rather than lost.
-- **Closed** (`dealStatus`, `showStatus`, `referralKind`): rename + reorder
-  only. Their keys carry money semantics (`DEAL_STATUS_META.counts` decides
-  commissions and the leaderboard), so add/retire is a code change, not an edit.
+- **Closed** (`dealStatus`, `showStatus`, `referralKind`): rename, recolour and
+  reorder only. Their keys carry money semantics (`DEAL_STATUS_META.counts`
+  decides commissions and the leaderboard), so add/retire is a code change, not
+  an edit.
+
+Colour is presentation, so it's editable on both tiers.
 
 The PATCH route validates open-list values against the live config (a freshly
 added option saves without a deploy) and closed-list values against the static
-unions. An absent config doc means "the defaults" — no seeding step.
+unions. An absent config doc means "the defaults" — no seeding step. **A list
+absent from a stored document means "never edited" and returns the defaults
+verbatim**, which is not the same as an empty one: an empty list run through
+`sanitizeList` comes back with every default retired, so adding a new list to
+the defaults would otherwise arrive switched off on every install that had
+already saved a config.
+
+### Colours
+
+`OptionItem.color` holds a **swatch key from `OPTION_COLORS`, never a raw hex**,
+and `sanitizeConfig` drops anything else.
+
+The swatch set exists because these colours do two jobs. In the grid they tint a
+control whose label is printed inside it, where almost any colour would do. On
+the Stats tab they become the bars, where two adjacent categories separated by
+nothing but hue is exactly what a free colour field produces and a colourblind
+reader can't resolve. Ten swatches, checked against the panel surface and
+against each other; ten is also the ceiling past which a categorical palette
+stops being discriminable however it's chosen.
+
+Storing the key rather than the hex means the palette can be retuned without
+migrating every config document.
+
+`dealStatus`, `showStatus` and `referralKind` ship with colours seeded from
+their existing `*_META` tones, so status reads as colour before anyone opens the
+editor. `sanitizeList` re-applies a default colour when a submitted item carries
+none — without it, config documents written before colours existed would come
+back grey, a visible regression from a change nobody made.
+
+### The objection column
+
+Deal Desk's `objection` records why a deal didn't close. Not from Airtable — the
+base has no such column, which is why the client asked for one. An open list
+(nothing branches on its keys) seeded with ten reasons including "Other", so an
+unclassifiable no still gets recorded rather than left blank.
+
+The Stats tab's **"Why deals don't close"** panel prints how many
+decided-and-not-won deals have *no* objection recorded. That number is the point
+of the panel — the chart above it is only worth reading once it's small.
 
 The same editor manages **referral partners**: rename (propagates to the
 denormalised `referrerName` on every call row in a batch — how ALL-CAPS import
@@ -418,8 +575,10 @@ segmentation is the global call-type filter.
 | `src/lib/calendly.ts` | event types, `listScheduledEvents`, `listInvitees` |
 | `src/app/api/portal/sales/**` | list / patch / referrers |
 | `src/app/api/calendly/webhook/route.ts` | signed ingestion |
-| `src/components/portal/sales/SalesFlow.tsx` | the three tabs |
+| `src/components/portal/sales/SalesFlow.tsx` | the three tabs, ranges, comparison windows |
+| `src/components/portal/sales/grid.tsx` | resizable columns, `GridTable` / `GridCell` / `SlackCell` |
 | `src/components/portal/sales/cells.tsx` | editable cell primitives |
+| `src/components/portal/sales/AddCallRow.tsx` | the manual-row form |
 | `scripts/sales-backfill.mjs` | Calendly → pipeline |
 | `scripts/sales-import-airtable.mjs` | Airtable → pipeline (one-off) |
 | `scripts/calendly-webhook.mjs` | subscription management |

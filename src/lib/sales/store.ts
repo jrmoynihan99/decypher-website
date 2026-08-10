@@ -1,7 +1,9 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import {
   type Answer,
+  CALL_TYPE_LABELS,
   type CallType,
   handleAnswer,
   leadSourceAnswer,
@@ -65,6 +67,7 @@ const BLANK_EDITS: SalesCallEdits = {
   paymentPlan: null,
   service: null,
   onboardingDate: null,
+  objection: null,
   notes: null,
   referrerId: null,
   referralKind: null,
@@ -124,6 +127,7 @@ function toRow(id: string, d: FirebaseFirestore.DocumentData): SalesCallRow {
     paymentPlan: d.paymentPlan ?? null,
     service: d.service ?? null,
     onboardingDate: str(d.onboardingDate),
+    objection: d.objection ?? null,
     notes: str(d.notes),
 
     referrerId: str(d.referrerId),
@@ -318,6 +322,91 @@ export async function upsertFromCalendly(booking: CalendlyBooking): Promise<"cre
 
   await doc.set(payload, { merge: true });
   return "updated";
+}
+
+/* ─────────────────────────── manual rows ─────────────────────────── */
+
+/** What the operator types into the "add a row" form. */
+export interface ManualCallInput {
+  name: string;
+  email: string;
+  phone: string | null;
+  socials: string | null;
+  callType: CallType;
+  /** ISO yyyy-mm-dd. The pipeline sorts on this, so it isn't optional. */
+  bookedAt: string;
+  isSales: boolean;
+  isReferral: boolean;
+}
+
+/**
+ * A row that never came from Calendly — a call booked over DM, a deal typed in
+ * from memory, a lead that arrived by phone.
+ *
+ * THE ID PREFIX IS LOAD-BEARING. Calendly rows are keyed on the invitee UUID,
+ * and `upsertFromCalendly` addresses documents by that id. A `manual-` prefix
+ * puts these outside that address space entirely, so no sync can ever adopt,
+ * overwrite or resurrect one — the same guarantee that lets the backfill be
+ * re-run at will.
+ *
+ * `source: "manual"` is what a reader of the document goes by; the prefix is
+ * what the *machinery* goes by, and they must not be conflated.
+ *
+ * Deliberately NOT deduplicated against existing rows by email. The same person
+ * legitimately books more than once, and a second discovery call six months
+ * later is a second row in every other part of this system. The grid warns
+ * about a matching email before submitting — a human decision, made with the
+ * matching row on screen, rather than a silent merge.
+ */
+export async function createManualCall(
+  input: ManualCallInput,
+  actor: string,
+): Promise<SalesCallRow> {
+  if (!isConfigured()) throw new SalesStoreError("Firebase is not configured");
+
+  const name = input.name.trim().slice(0, 200);
+  const email = input.email.trim().toLowerCase().slice(0, 200);
+  if (!name && !email) throw new SalesStoreError("A row needs a name or an email");
+
+  const bookedAt = new Date(`${input.bookedAt}T12:00:00Z`);
+  if (Number.isNaN(bookedAt.getTime())) throw new SalesStoreError("That date isn't valid");
+
+  const id = `manual-${randomUUID()}`;
+  const now = new Date();
+
+  await adminDb()
+    .collection(CALLS)
+    .doc(id)
+    .set({
+      ...BLANK_EDITS,
+      isSales: input.isSales,
+      isReferral: input.isReferral,
+      source: "manual",
+      callType: input.callType,
+      callName: CALL_TYPE_LABELS[input.callType],
+      name,
+      email,
+      phone: input.phone?.trim().slice(0, 60) || null,
+      socials: input.socials?.trim().slice(0, 300) || null,
+      revenueBand: null,
+      timezone: null,
+      bookedAt,
+      // No separate meeting time to record: whoever types a row in already
+      // knows when the call was, and inventing one would look like Calendly data.
+      scheduledAt: bookedAt,
+      calendlyStatus: null,
+      rescheduled: false,
+      answers: [],
+      leadSourceRaw: null,
+      referrerRaw: null,
+      suggestedLeadSource: null,
+      createdAt: now,
+      updatedAt: now,
+      updatedBy: actor,
+    });
+
+  const after = await adminDb().collection(CALLS).doc(id).get();
+  return toRow(after.id, after.data()!);
 }
 
 /* ───────────────────────────── referrers ───────────────────────────── */

@@ -17,6 +17,10 @@
  * justified the collapse — of 4,532 booked calls, every one of the 130 flagged
  * Referral is also flagged Sales.
  *
+ * That single-document model is also why delete works from every tab: there is
+ * one row to archive, so removing it from Deal Desk removes it from Booked
+ * Calls, from Referrals, and from every total, because they were never copies.
+ *
  * Everything saves on change. No Save button, because the thing being replaced
  * doesn't have one.
  */
@@ -29,7 +33,6 @@ import {
   type CallType,
   COMMISSION_PRESETS,
   DEAL_STATUS_META,
-  SHOW_STATUS_META,
   type CommissionPreset,
   commissionTotal,
   optionLabel,
@@ -44,26 +47,32 @@ import type {
   SalesOptionsConfig,
 } from "@/lib/sales/types";
 import {
-  Chip,
   Kpi,
   KpiRow,
   Mono,
   Panel,
   Segmented,
-  TableCell,
-  TableHead,
 } from "@/components/portal/widgets/ui";
 import {
   CheckCell,
   DateCell,
   DeleteCell,
   MoneyCell,
+  NotesCell,
   ReferrerCell,
   RestoreCell,
   SelectCell,
   Suggestion,
-  TextCell,
 } from "./cells";
+import {
+  type ColumnDef,
+  type ColumnWidths,
+  GridCell,
+  GridTable,
+  SlackCell,
+  useColumnWidths,
+} from "./grid";
+import AddCallRow, { type ManualCallDraft } from "./AddCallRow";
 import SalesStats from "./SalesStats";
 import OptionsEditor from "./OptionsEditor";
 
@@ -80,6 +89,13 @@ const shortDate = (iso: string | null) =>
       })
     : "—";
 
+const longDate = (ms: number) =>
+  new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
 /**
  * How many rows to put in the DOM at once.
  *
@@ -90,12 +106,22 @@ const shortDate = (iso: string | null) =>
  */
 const PAGE = 75;
 
+/**
+ * The date presets.
+ *
+ * The four calendar-anchored ones (this/last quarter, year to date, last year)
+ * exist for the comparison selector below: "this quarter vs last quarter" is
+ * only a meaningful question if a quarter is something the toolbar can name.
+ */
 const RANGES = [
   { id: "7d", label: "Last 7 days" },
   { id: "30d", label: "Last 30 days" },
   { id: "3m", label: "Last 3 months" },
   { id: "6m", label: "Last 6 months" },
+  { id: "qtd", label: "This quarter" },
+  { id: "lastq", label: "Last quarter" },
   { id: "ytd", label: "Year to date" },
+  { id: "lasty", label: "Last year" },
   { id: "12m", label: "Last 12 months" },
   { id: "all", label: "All time" },
   { id: "custom", label: "Custom range…" },
@@ -110,6 +136,14 @@ const RANGE_DAYS: Partial<Record<RangeId, number>> = {
   "12m": 365,
 };
 
+export interface Bounds {
+  start: number | null;
+  end: number | null;
+}
+
+const quarterStart = (d: Date) =>
+  new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1);
+
 /**
  * Epoch ms bounds for a range. `null` on either side means unbounded.
  *
@@ -118,10 +152,7 @@ const RANGE_DAYS: Partial<Record<RangeId, number>> = {
  * The end is pushed to the end of its day: a bookedAt timestamp of 14:30 on
  * the chosen end date is inside the range a human means by it.
  */
-function rangeBounds(
-  id: RangeId,
-  custom: { from: string; to: string },
-): { start: number | null; end: number | null } {
+function rangeBounds(id: RangeId, custom: { from: string; to: string }): Bounds {
   if (id === "custom") {
     const start = custom.from ? new Date(`${custom.from}T00:00:00`).getTime() : null;
     const end = custom.to ? new Date(`${custom.to}T23:59:59.999`).getTime() : null;
@@ -131,13 +162,100 @@ function rangeBounds(
     };
   }
   if (id === "all") return { start: null, end: null };
-  if (id === "ytd") {
-    const now = new Date();
-    return { start: new Date(now.getFullYear(), 0, 1).getTime(), end: null };
+
+  const now = new Date();
+  if (id === "ytd") return { start: new Date(now.getFullYear(), 0, 1).getTime(), end: null };
+  if (id === "lasty") {
+    return {
+      start: new Date(now.getFullYear() - 1, 0, 1).getTime(),
+      end: new Date(now.getFullYear(), 0, 1).getTime() - 1,
+    };
+  }
+  if (id === "qtd") return { start: quarterStart(now).getTime(), end: null };
+  if (id === "lastq") {
+    const qs = quarterStart(now);
+    return {
+      start: new Date(qs.getFullYear(), qs.getMonth() - 3, 1).getTime(),
+      end: qs.getTime() - 1,
+    };
   }
   const days = RANGE_DAYS[id];
   return { start: days ? Date.now() - days * 86_400_000 : null, end: null };
 }
+
+const COMPARISONS = [
+  { id: "none", label: "No comparison" },
+  { id: "prev", label: "Previous period" },
+  { id: "prev-year", label: "Same period, last year" },
+  { id: "custom", label: "Custom period…" },
+] as const;
+type CompareId = (typeof COMPARISONS)[number]["id"];
+
+/**
+ * "Previous period" means the previous CALENDAR unit for the calendar-anchored
+ * ranges, and an equal-length window immediately before for everything else.
+ *
+ * The distinction is the whole point of the feature. A span shift applied to
+ * "This quarter" on 15 November gives 17 August – 30 September — a 45-day
+ * window straddling two quarters, which answers nothing anyone asked. Shifting
+ * the window back one quarter gives 1 July – 15 August: the same many days into
+ * the previous quarter, which is the like-for-like the question implies.
+ */
+const CALENDAR_SHIFT: Partial<Record<RangeId, { months?: number; years?: number }>> = {
+  qtd: { months: 3 },
+  lastq: { months: 3 },
+  ytd: { years: 1 },
+  lasty: { years: 1 },
+};
+
+function shift(ms: number, by: { months?: number; years?: number }): number {
+  const d = new Date(ms);
+  if (by.years) d.setFullYear(d.getFullYear() - by.years);
+  if (by.months) d.setMonth(d.getMonth() - by.months);
+  return d.getTime();
+}
+
+/**
+ * The window to measure the current range against, or null for "don't".
+ *
+ * An unbounded start (All time, or a custom range with no From) has no
+ * comparable predecessor, so it returns null rather than inventing one — the
+ * selector disables itself and says why.
+ */
+function comparisonBounds(
+  range: RangeId,
+  base: Bounds,
+  mode: CompareId,
+  compareCustom: { from: string; to: string },
+): Bounds | null {
+  if (mode === "none") return null;
+  if (mode === "custom") {
+    const b = rangeBounds("custom", compareCustom);
+    return b.start == null && b.end == null ? null : b;
+  }
+  if (base.start == null) return null;
+  const end = base.end ?? Date.now();
+
+  if (mode === "prev-year") {
+    return { start: shift(base.start, { years: 1 }), end: shift(end, { years: 1 }) };
+  }
+  const calendar = CALENDAR_SHIFT[range];
+  if (calendar) {
+    return { start: shift(base.start, calendar), end: shift(end, calendar) };
+  }
+  return { start: base.start - (end - base.start) - 1, end: base.start - 1 };
+}
+
+const inBounds = (iso: string | null, { start, end }: Bounds) => {
+  if (start == null && end == null) return true;
+  // Rows are ordered by bookedAt in Firestore, so a null can't reach here;
+  // excluding one would be right anyway — it can't be placed in a range.
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (start != null && t < start) return false;
+  if (end != null && t > end) return false;
+  return true;
+};
 
 export default function SalesFlow({
   initialCalls,
@@ -154,10 +272,13 @@ export default function SalesFlow({
   const [referrers, setReferrers] = useState(initialReferrers);
   const [config, setConfig] = useState(initialConfig);
   const [editingOptions, setEditingOptions] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [tab, setTab] = useState<Tab>("booked");
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<RangeId>("ytd");
   const [custom, setCustom] = useState({ from: "", to: "" });
+  const [compare, setCompare] = useState<CompareId>("none");
+  const [compareCustom, setCompareCustom] = useState({ from: "", to: "" });
   const [callType, setCallType] = useState<CallType | "all">("all");
   const [visible, setVisible] = useState(PAGE);
   const [showArchived, setShowArchived] = useState(false);
@@ -292,6 +413,39 @@ export default function SalesFlow({
     },
     [saveMany],
   );
+
+  /**
+   * Add a row that never came from Calendly.
+   *
+   * Spliced into place by bookedAt rather than appended: the list is sorted
+   * newest-first everywhere else, and a back-dated row landing at the top would
+   * look like a bug until the next reload moved it.
+   */
+  const addCall = useCallback(async (draft: ManualCallDraft): Promise<boolean> => {
+    setError(null);
+    try {
+      const res = await fetch("/api/portal/sales/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.message ?? "Couldn't add that row");
+      const call = body.call as SalesCallRow;
+      setCalls((rows) => {
+        const next = [...rows, call];
+        next.sort(
+          (a, b) =>
+            new Date(b.bookedAt ?? 0).getTime() - new Date(a.bookedAt ?? 0).getTime(),
+        );
+        return next;
+      });
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't add that row");
+      return false;
+    }
+  }, []);
 
   const addReferrer = useCallback(
     async (name: string): Promise<string | null> => {
@@ -428,21 +582,17 @@ export default function SalesFlow({
     [calls],
   );
 
+  const bounds = useMemo(() => rangeBounds(range, custom), [range, custom]);
+
   /** Date range + call type, archived state not yet applied. */
-  const inRange = useMemo(() => {
-    const { start, end } = rangeBounds(range, custom);
-    return calls.filter((c) => {
-      if (callType !== "all" && c.callType !== callType) return false;
-      if (start == null && end == null) return true;
-      // Rows are ordered by bookedAt in Firestore, so a null can't reach here;
-      // excluding one would be right anyway — it can't be placed in a range.
-      if (!c.bookedAt) return false;
-      const t = new Date(c.bookedAt).getTime();
-      if (start != null && t < start) return false;
-      if (end != null && t > end) return false;
-      return true;
-    });
-  }, [calls, range, callType, custom]);
+  const inRange = useMemo(
+    () =>
+      calls.filter(
+        (c) =>
+          (callType === "all" || c.callType === callType) && inBounds(c.bookedAt, bounds),
+      ),
+    [calls, callType, bounds],
+  );
 
   // Archived rows are out of every tab, every count and every total until
   // explicitly asked for — an archived deal must not show up in revenue.
@@ -470,11 +620,32 @@ export default function SalesFlow({
     [calls, callType],
   );
 
+  /* ── the comparison window ── */
+
+  const compareTo = useMemo(
+    () => comparisonBounds(range, bounds, compare, compareCustom),
+    [range, bounds, compare, compareCustom],
+  );
+
+  /** Same filters as `statsRows`, over the comparison window. */
+  const compareRows = useMemo(() => {
+    if (!compareTo) return null;
+    return calls.filter(
+      (c) =>
+        !c.archived &&
+        (callType === "all" || c.callType === callType) &&
+        inBounds(c.bookedAt, compareTo),
+    );
+  }, [calls, callType, compareTo]);
+
+  /** True when the current range has no predecessor to measure against. */
+  const compareImpossible = bounds.start == null;
+
   const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
     return scoped.filter((c) =>
-      [c.name, c.email, c.phone, c.referrerName, c.callName, c.socials]
+      [c.name, c.email, c.phone, c.referrerName, c.callName, c.socials, c.notes]
         .filter(Boolean)
         .some((v) => v!.toLowerCase().includes(q)),
     );
@@ -516,19 +687,30 @@ export default function SalesFlow({
     };
   }, [scoped]);
 
+  const boundsLabel = useCallback((b: Bounds) => {
+    if (b.start == null && b.end == null) return "All time";
+    if (b.start != null && b.end != null) return `${longDate(b.start)} – ${longDate(b.end)}`;
+    if (b.start != null) return `Since ${longDate(b.start)}`;
+    return `Up to ${longDate(b.end!)}`;
+  }, []);
+
   const rangeLabel = useMemo(() => {
     if (range !== "custom") return RANGES.find((r) => r.id === range)?.label ?? "";
-    const nice = (d: string) =>
-      new Date(`${d}T00:00:00`).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    if (custom.from && custom.to) return `${nice(custom.from)} – ${nice(custom.to)}`;
-    if (custom.from) return `Since ${nice(custom.from)}`;
-    if (custom.to) return `Up to ${nice(custom.to)}`;
-    return "Custom range";
-  }, [range, custom]);
+    return boundsLabel(bounds) === "All time" ? "Custom range" : boundsLabel(bounds);
+  }, [range, bounds, boundsLabel]);
+
+  const compareLabel = useMemo(
+    () => (compareTo ? boundsLabel(compareTo) : null),
+    [compareTo, boundsLabel],
+  );
+
+  /* ── column widths, one saved set per table ── */
+
+  const bookedCols = useColumnWidths("booked", BOOKED_COLUMNS);
+  const dealCols = useColumnWidths("deals", DEAL_COLUMNS);
+  const referralCols = useColumnWidths("referrals", REFERRAL_COLUMNS);
+  const activeCols =
+    tab === "deals" ? dealCols : tab === "referrals" ? referralCols : bookedCols;
 
   if (editingOptions) {
     return (
@@ -615,43 +797,13 @@ export default function SalesFlow({
         {/* Only mounted while Custom is selected — two permanently-visible date
             inputs would crowd a toolbar that already carries four controls. */}
         {range === "custom" ? (
-          <label className="flex flex-wrap items-center gap-2">
-            <input
-              type="date"
-              value={custom.from}
-              max={custom.to || undefined}
-              aria-label="Range start"
-              onChange={(e) => {
-                setCustom((c) => ({ ...c, from: e.target.value }));
-                setVisible(PAGE);
-              }}
-              className="rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-mono text-[12.5px] tabular-nums text-fog outline-none transition-[border-color] duration-150 [color-scheme:dark] focus:border-magenta"
-            />
-            <span className="font-mono text-[11px] text-dusk">→</span>
-            <input
-              type="date"
-              value={custom.to}
-              min={custom.from || undefined}
-              aria-label="Range end"
-              onChange={(e) => {
-                setCustom((c) => ({ ...c, to: e.target.value }));
-                setVisible(PAGE);
-              }}
-              className="rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-mono text-[12.5px] tabular-nums text-fog outline-none transition-[border-color] duration-150 [color-scheme:dark] focus:border-magenta"
-            />
-            {custom.from || custom.to ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setCustom({ from: "", to: "" });
-                  setVisible(PAGE);
-                }}
-                className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
-              >
-                Clear
-              </button>
-            ) : null}
-          </label>
+          <DateRange
+            value={custom}
+            onChange={(next) => {
+              setCustom(next);
+              setVisible(PAGE);
+            }}
+          />
         ) : null}
 
         <label className="flex items-center gap-2">
@@ -670,6 +822,36 @@ export default function SalesFlow({
             ))}
           </FilterSelect>
         </label>
+
+        {/* The comparison only means anything against aggregates, so it lives
+            with the Stats tab rather than in the permanent toolbar. */}
+        {tab === "stats" ? (
+          <label className="flex items-center gap-2">
+            <Mono className="text-dusk">Compare</Mono>
+            <FilterSelect
+              value={compare}
+              onChange={(v) => setCompare(v as CompareId)}
+              width="w-[200px]"
+              ariaLabel="Compare against"
+            >
+              {COMPARISONS.map((c) => (
+                <option
+                  key={c.id}
+                  value={c.id}
+                  // "All time" has nothing before it, and neither does a custom
+                  // range with an open start.
+                  disabled={compareImpossible && c.id !== "none" && c.id !== "custom"}
+                >
+                  {c.label}
+                </option>
+              ))}
+            </FilterSelect>
+          </label>
+        ) : null}
+
+        {tab === "stats" && compare === "custom" ? (
+          <DateRange value={compareCustom} onChange={setCompareCustom} />
+        ) : null}
 
         {tab === "deals" ? (
           <label className="flex items-center gap-2">
@@ -730,10 +912,24 @@ export default function SalesFlow({
           </label>
         ) : null}
 
+        {tab !== "stats" && !showArchived ? (
+          <button
+            type="button"
+            onClick={() => setAdding((v) => !v)}
+            className={`cursor-pointer rounded-[10px] border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.8px] transition-colors duration-150 ${
+              adding
+                ? "border-magenta/50 bg-magenta/10 text-magenta"
+                : "border-edge-mid text-dusk hover:border-magenta hover:text-fog"
+            }`}
+          >
+            ＋ Add row
+          </button>
+        ) : null}
+
         <button
           type="button"
           onClick={() => setEditingOptions(true)}
-          title="Edit dropdown options and referral partners"
+          title="Edit dropdown options, colours and referral partners"
           className="cursor-pointer rounded-[10px] border border-edge-mid px-3 py-2 font-mono text-[11px] uppercase tracking-[0.8px] text-dusk transition-colors duration-150 hover:border-magenta hover:text-fog"
         >
           ⚙ Options
@@ -760,6 +956,10 @@ export default function SalesFlow({
           </span>
         ) : null}
       </div>
+
+      {adding && tab !== "stats" ? (
+        <AddCallRow calls={calls} onAdd={addCall} onClose={() => setAdding(false)} />
+      ) : null}
 
       {undo ? (
         <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-edge-mid bg-panel-2 px-3.5 py-2.5 text-[12.5px] text-mist">
@@ -796,6 +996,8 @@ export default function SalesFlow({
         <SalesStats
           rows={statsRows}
           allRows={allTimeRows}
+          compareRows={compareRows}
+          compareLabel={compareLabel}
           rangeLabel={rangeLabel}
           config={config}
         />
@@ -814,11 +1016,23 @@ export default function SalesFlow({
             </>
           }
           action={
-            <Mono className="text-dusk">
-              {page.length < rows.length
-                ? `${page.length} of ${rows.length.toLocaleString()}`
-                : `${rows.length.toLocaleString()} rows`}
-            </Mono>
+            <span className="flex items-center gap-3">
+              {activeCols.customised ? (
+                <button
+                  type="button"
+                  onClick={activeCols.reset}
+                  title="Put every column back to its default width"
+                  className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1.2px] text-dusk hover:text-fog"
+                >
+                  ↔ Reset widths
+                </button>
+              ) : null}
+              <Mono className="text-dusk">
+                {page.length < rows.length
+                  ? `${page.length} of ${rows.length.toLocaleString()}`
+                  : `${rows.length.toLocaleString()} rows`}
+              </Mono>
+            </span>
           }
           bodyClassName="px-0 py-0"
         >
@@ -834,30 +1048,42 @@ export default function SalesFlow({
             </p>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                {tab === "booked" ? (
-                  <BookedTable
-                    rows={page}
-                    save={save}
-                    busy={busy}
-                    archive={archive}
-                    restore={restore}
-                    showArchived={showArchived}
-                  />
-                ) : tab === "deals" ? (
-                  <DealTable rows={page} save={save} busy={busy} config={config} />
-                ) : (
-                  <ReferralTable
-                    rows={page}
-                    save={save}
-                    saveMany={saveMany}
-                    busy={busy}
-                    config={config}
-                    referrerOptions={referrerOptions}
-                    addReferrer={addReferrer}
-                  />
-                )}
-              </div>
+              {tab === "booked" ? (
+                <BookedTable
+                  rows={page}
+                  widths={bookedCols}
+                  save={save}
+                  busy={busy}
+                  archive={archive}
+                  restore={restore}
+                  showArchived={showArchived}
+                />
+              ) : tab === "deals" ? (
+                <DealTable
+                  rows={page}
+                  widths={dealCols}
+                  save={save}
+                  busy={busy}
+                  config={config}
+                  archive={archive}
+                  restore={restore}
+                  showArchived={showArchived}
+                />
+              ) : (
+                <ReferralTable
+                  rows={page}
+                  widths={referralCols}
+                  save={save}
+                  saveMany={saveMany}
+                  busy={busy}
+                  config={config}
+                  referrerOptions={referrerOptions}
+                  addReferrer={addReferrer}
+                  archive={archive}
+                  restore={restore}
+                  showArchived={showArchived}
+                />
+              )}
 
               {page.length < rows.length ? (
                 <div className="flex items-center justify-center gap-3 border-t border-edge px-4 py-3.5">
@@ -919,6 +1145,48 @@ function FilterSelect({
   );
 }
 
+/** A from/to pair. Either side may be empty — an open-ended range is valid. */
+function DateRange({
+  value,
+  onChange,
+}: {
+  value: { from: string; to: string };
+  onChange: (next: { from: string; to: string }) => void;
+}) {
+  const cls =
+    "rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-mono text-[12.5px] tabular-nums text-fog outline-none transition-[border-color] duration-150 [color-scheme:dark] focus:border-magenta";
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <input
+        type="date"
+        value={value.from}
+        max={value.to || undefined}
+        aria-label="Range start"
+        onChange={(e) => onChange({ ...value, from: e.target.value })}
+        className={cls}
+      />
+      <span className="font-mono text-[11px] text-dusk">→</span>
+      <input
+        type="date"
+        value={value.to}
+        min={value.from || undefined}
+        aria-label="Range end"
+        onChange={(e) => onChange({ ...value, to: e.target.value })}
+        className={cls}
+      />
+      {value.from || value.to ? (
+        <button
+          type="button"
+          onClick={() => onChange({ from: "", to: "" })}
+          className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
+        >
+          Clear
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
 type SaveFn = <K extends keyof SalesCallEdits>(
   id: string,
   field: K,
@@ -928,16 +1196,46 @@ type BusyFn = (id: string, field: string) => boolean;
 
 interface TableProps {
   rows: SalesCallRow[];
+  widths: ColumnWidths;
   save: SaveFn;
   busy: BusyFn;
   config: SalesOptionsConfig;
 }
 
+/** Delete and restore, on every tab — there is one row behind all three. */
+interface RowActionProps {
+  archive: (row: SalesCallRow) => void;
+  restore: (id: string) => void;
+  showArchived: boolean;
+}
+
+function RowActions({
+  row,
+  busy,
+  archive,
+  restore,
+  showArchived,
+}: RowActionProps & { row: SalesCallRow; busy: BusyFn }) {
+  return showArchived ? (
+    <RestoreCell
+      onRestore={() => restore(row.id)}
+      saving={busy(row.id, "archived")}
+      label={`Restore ${row.name}`}
+    />
+  ) : (
+    <DeleteCell
+      onDelete={() => archive(row)}
+      saving={busy(row.id, "archived")}
+      label={`Delete ${row.name || row.email}`}
+    />
+  );
+}
+
 /** Name plus the identifying details that would otherwise need their own columns. */
 function Who({ row }: { row: SalesCallRow }) {
   return (
-    <div className="min-w-[170px]">
-      <div className="font-body text-[13px] font-medium text-fog">
+    <div className="min-w-0">
+      <div className="truncate font-body text-[13px] font-medium text-fog">
         {row.name || "—"}
       </div>
       <div
@@ -947,7 +1245,7 @@ function Who({ row }: { row: SalesCallRow }) {
         {row.email || "—"}
       </div>
       {row.phone ? (
-        <div className="font-mono text-[10.5px] text-faint">{row.phone}</div>
+        <div className="truncate font-mono text-[10.5px] text-faint">{row.phone}</div>
       ) : null}
     </div>
   );
@@ -956,10 +1254,10 @@ function Who({ row }: { row: SalesCallRow }) {
 function CallTypeChip({ row }: { row: SalesCallRow }) {
   const canceled = row.calendlyStatus === "canceled";
   return (
-    <div className="min-w-[112px]">
+    <div className="min-w-0">
       <span
         title={row.callName || CALL_TYPE_LABELS[row.callType]}
-        className="font-body text-[12px] text-mist"
+        className="block truncate font-body text-[12px] text-mist"
       >
         {CALL_TYPE_SHORT[row.callType] ?? row.callType}
       </span>
@@ -968,11 +1266,28 @@ function CallTypeChip({ row }: { row: SalesCallRow }) {
           canceled
         </span>
       ) : null}
+      {/* Manual rows have no Calendly behind them; say so rather than let a
+          reader assume the booking is verifiable upstream. */}
+      {row.source === "manual" ? (
+        <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[1px] text-faint">
+          added by hand
+        </span>
+      ) : null}
     </div>
   );
 }
 
 /* ═══════════════════════════ booked calls ═══════════════════════════ */
+
+const BOOKED_COLUMNS: ColumnDef[] = [
+  { id: "booked", label: "Booked", width: 92, align: "left" },
+  { id: "call", label: "Call", width: 130, align: "left" },
+  { id: "name", label: "Name", width: 210, align: "left" },
+  { id: "sales", label: "Sales", width: 66, align: "left" },
+  { id: "referral", label: "Referral", width: 80, align: "left" },
+  { id: "socials", label: "Website / social", width: 220, align: "left" },
+  { id: "actions", label: "Delete", width: 84, align: "right", hiddenLabel: true },
+];
 
 /**
  * The triage tab. Its whole job is the two checkboxes: everything else is
@@ -984,135 +1299,115 @@ function CallTypeChip({ row }: { row: SalesCallRow }) {
  */
 function BookedTable({
   rows,
+  widths,
   save,
   busy,
   archive,
   restore,
   showArchived,
-}: Omit<TableProps, "config"> & {
-  archive: (row: SalesCallRow) => void;
-  restore: (id: string) => void;
-  showArchived: boolean;
-}) {
+}: Omit<TableProps, "config"> & RowActionProps) {
   return (
-    <table className="w-full border-collapse text-[13px]">
-      <thead>
-        <tr>
-          <TableHead align="left">Booked</TableHead>
-          <TableHead align="left">Call</TableHead>
-          <TableHead align="left">Name</TableHead>
-          {/* The two checkboxes are the point of this tab, so they sit against
-              the name rather than across the table from it — left-aligned and
-              narrow so the eye travels name → sales → referral in one move. */}
-          <TableHead align="left">Sales</TableHead>
-          <TableHead align="left">Referral</TableHead>
-          <TableHead>
-            <span className="sr-only">
-              {showArchived ? "Restore" : "Delete"}
-            </span>
-          </TableHead>
-        </tr>
-      </thead>
+    <GridTable columns={BOOKED_COLUMNS} widths={widths}>
       <tbody>
         {rows.map((row) => (
           <tr key={row.id} className="align-top hover:bg-white/[0.02]">
-            <TableCell align="left">
-              <span className="text-[12px] text-mist">
-                {shortDate(row.bookedAt)}
-              </span>
-            </TableCell>
-            <TableCell align="left">
+            <GridCell>
+              <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+            </GridCell>
+            <GridCell>
               <CallTypeChip row={row} />
-            </TableCell>
-            <TableCell align="left">
+            </GridCell>
+            <GridCell>
               <Who row={row} />
-            </TableCell>
-            <TableCell align="left">
-              <span className="flex w-[52px] justify-center">
-                <CheckCell
-                  checked={row.isSales}
-                  saving={busy(row.id, "isSales")}
-                  label={`Sales call for ${row.name}`}
-                  onChange={(v) => save(row.id, "isSales", v)}
-                />
-              </span>
-            </TableCell>
-            <TableCell align="left">
-              <span className="flex w-[62px] justify-center">
-                <CheckCell
-                  checked={row.isReferral}
-                  saving={busy(row.id, "isReferral")}
-                  label={`Referral for ${row.name}`}
-                  onChange={(v) => save(row.id, "isReferral", v)}
-                />
-              </span>
-            </TableCell>
-            <TableCell align="left">
+            </GridCell>
+            {/* The two checkboxes are the point of this tab, so they sit against
+                the name rather than across the table from it — the eye travels
+                name → sales → referral in one move. */}
+            <GridCell>
+              <CheckCell
+                checked={row.isSales}
+                saving={busy(row.id, "isSales")}
+                label={`Sales call for ${row.name}`}
+                onChange={(v) => save(row.id, "isSales", v)}
+              />
+            </GridCell>
+            <GridCell>
+              <CheckCell
+                checked={row.isReferral}
+                saving={busy(row.id, "isReferral")}
+                label={`Referral for ${row.name}`}
+                onChange={(v) => save(row.id, "isReferral", v)}
+              />
+            </GridCell>
+            <GridCell>
               <span
                 title={row.socials ?? ""}
-                className="block max-w-[240px] truncate font-body text-[11.5px] text-dusk"
+                className="block truncate font-body text-[11.5px] text-dusk"
               >
                 {row.socials || "—"}
               </span>
-            </TableCell>
-            <TableCell>
-              {showArchived ? (
-                <RestoreCell
-                  onRestore={() => restore(row.id)}
-                  saving={busy(row.id, "archived")}
-                  label={`Restore ${row.name}`}
-                />
-              ) : (
-                <DeleteCell
-                  onDelete={() => archive(row)}
-                  saving={busy(row.id, "archived")}
-                  label={`Delete ${row.name || row.email}`}
-                />
-              )}
-            </TableCell>
+            </GridCell>
+            <GridCell align="right">
+              <RowActions
+                row={row}
+                busy={busy}
+                archive={archive}
+                restore={restore}
+                showArchived={showArchived}
+              />
+            </GridCell>
+            <SlackCell />
           </tr>
         ))}
       </tbody>
-    </table>
+    </GridTable>
   );
 }
 
 /* ═══════════════════════════ deal desk ═══════════════════════════ */
 
-function DealTable({ rows, save, busy, config }: TableProps) {
+const DEAL_COLUMNS: ColumnDef[] = [
+  { id: "booked", label: "Booked", width: 92, align: "left" },
+  { id: "call", label: "Call", width: 130, align: "left" },
+  { id: "name", label: "Name", width: 200, align: "left" },
+  { id: "leadSource", label: "Lead source", width: 160, align: "left" },
+  { id: "show", label: "Show", width: 130, align: "left" },
+  { id: "status", label: "Status", width: 165, align: "left" },
+  { id: "offer", label: "Offer", width: 100, align: "right" },
+  { id: "paymentPlan", label: "Pmt plan", width: 122, align: "left" },
+  { id: "service", label: "Service sold", width: 200, align: "left" },
+  { id: "objection", label: "Objection", width: 175, align: "left" },
+  { id: "onboarding", label: "Onboarding", width: 136, align: "left" },
+  { id: "notes", label: "Notes", width: 150, align: "left" },
+  { id: "actions", label: "Delete", width: 84, align: "right", hiddenLabel: true },
+];
+
+function DealTable({
+  rows,
+  widths,
+  save,
+  busy,
+  config,
+  archive,
+  restore,
+  showArchived,
+}: TableProps & RowActionProps) {
   return (
-    <table className="w-full border-collapse text-[13px]">
-      <thead>
-        <tr>
-          <TableHead align="left">Booked</TableHead>
-          <TableHead align="left">Call</TableHead>
-          <TableHead align="left">Name</TableHead>
-          <TableHead align="left">Lead source</TableHead>
-          <TableHead align="left">Show</TableHead>
-          <TableHead align="left">Status</TableHead>
-          <TableHead>Offer</TableHead>
-          <TableHead align="left">Pmt plan</TableHead>
-          <TableHead align="left">Service sold</TableHead>
-          <TableHead align="left">Onboarding</TableHead>
-          <TableHead align="left">Notes</TableHead>
-        </tr>
-      </thead>
+    <GridTable columns={DEAL_COLUMNS} widths={widths}>
       <tbody>
         {rows.map((row) => (
           <tr key={row.id} className="align-top hover:bg-white/[0.02]">
-            <TableCell align="left">
-              <span className="text-[12px] text-mist">
-                {shortDate(row.bookedAt)}
-              </span>
-            </TableCell>
-            <TableCell align="left">
+            <GridCell>
+              <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+            </GridCell>
+            <GridCell>
               <CallTypeChip row={row} />
-            </TableCell>
-            <TableCell align="left">
+            </GridCell>
+            <GridCell>
               <Who row={row} />
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            <GridCell>
               <SelectCell
                 value={row.leadSource}
                 items={config.leadSource}
@@ -1130,86 +1425,113 @@ function DealTable({ rows, save, busy, config }: TableProps) {
                   }
                 />
               ) : null}
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            {/* One control, not a control and a chip restating it — the colour
+                is on the select itself. See the note on SelectCell. */}
+            <GridCell>
               <SelectCell
                 value={row.showStatus}
                 items={config.showStatus}
-                width="w-[120px]"
                 saving={busy(row.id, "showStatus")}
                 onChange={(v) => save(row.id, "showStatus", v)}
               />
-              {row.showStatus ? (
-                <div className="mt-1">
-                  <Chip tone={SHOW_STATUS_META[row.showStatus]}>
-                    {optionLabel(config.showStatus, row.showStatus)}
-                  </Chip>
-                </div>
-              ) : null}
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            <GridCell>
               <SelectCell
                 value={row.status}
                 items={config.dealStatus}
-                width="w-[165px]"
                 saving={busy(row.id, "status")}
                 onChange={(v) => save(row.id, "status", v)}
               />
-            </TableCell>
+            </GridCell>
 
-            <TableCell>
+            <GridCell align="right">
               <MoneyCell
                 value={row.offer}
                 saving={busy(row.id, "offer")}
                 onChange={(v) => save(row.id, "offer", v)}
               />
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            <GridCell>
               <SelectCell
                 value={row.paymentPlan}
                 items={config.paymentPlan}
-                width="w-[118px]"
                 saving={busy(row.id, "paymentPlan")}
                 onChange={(v) => save(row.id, "paymentPlan", v)}
               />
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            <GridCell>
               <SelectCell
                 value={row.service}
                 items={config.service}
-                width="w-[210px]"
                 saving={busy(row.id, "service")}
                 onChange={(v) => save(row.id, "service", v)}
               />
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
+            <GridCell>
+              <SelectCell
+                value={row.objection}
+                items={config.objection}
+                saving={busy(row.id, "objection")}
+                onChange={(v) => save(row.id, "objection", v)}
+              />
+            </GridCell>
+
+            <GridCell>
               <DateCell
                 value={row.onboardingDate}
                 saving={busy(row.id, "onboardingDate")}
                 onChange={(v) => save(row.id, "onboardingDate", v)}
               />
-            </TableCell>
+            </GridCell>
 
-            <TableCell align="left">
-              <TextCell
+            <GridCell>
+              <NotesCell
                 value={row.notes}
                 saving={busy(row.id, "notes")}
+                who={row.name || row.email || "this row"}
                 onChange={(v) => save(row.id, "notes", v)}
               />
-            </TableCell>
+            </GridCell>
+
+            <GridCell align="right">
+              <RowActions
+                row={row}
+                busy={busy}
+                archive={archive}
+                restore={restore}
+                showArchived={showArchived}
+              />
+            </GridCell>
+            <SlackCell />
           </tr>
         ))}
       </tbody>
-    </table>
+    </GridTable>
   );
 }
 
 /* ═══════════════════════════ referrals ═══════════════════════════ */
+
+const REFERRAL_COLUMNS: ColumnDef[] = [
+  { id: "booked", label: "Booked", width: 92, align: "left" },
+  { id: "name", label: "Name", width: 200, align: "left" },
+  { id: "referredBy", label: "Referred by", width: 215, align: "left" },
+  { id: "kind", label: "Type", width: 145, align: "left" },
+  { id: "status", label: "Status", width: 165, align: "left" },
+  { id: "structure", label: "Structure", width: 122, align: "left" },
+  { id: "partner", label: "Partner", width: 104, align: "right" },
+  { id: "referee", label: "Referee", width: 104, align: "right" },
+  { id: "payout", label: "Payout", width: 128, align: "right" },
+  { id: "due", label: "Due", width: 112, align: "left" },
+  { id: "paid", label: "Paid", width: 62, align: "right" },
+  { id: "actions", label: "Delete", width: 84, align: "right", hiddenLabel: true },
+];
 
 /**
  * Attribution and payout.
@@ -1226,17 +1548,22 @@ function DealTable({ rows, save, busy, config }: TableProps) {
  */
 function ReferralTable({
   rows,
+  widths,
   save,
   saveMany,
   busy,
   config,
   referrerOptions,
   addReferrer,
-}: TableProps & {
-  saveMany: (id: string, patch: Partial<SalesCallEdits>) => void;
-  referrerOptions: { value: string; label: string }[];
-  addReferrer: (name: string) => Promise<string | null>;
-}) {
+  archive,
+  restore,
+  showArchived,
+}: TableProps &
+  RowActionProps & {
+    saveMany: (id: string, patch: Partial<SalesCallEdits>) => void;
+    referrerOptions: { value: string; label: string }[];
+    addReferrer: (name: string) => Promise<string | null>;
+  }) {
   const applyPreset = (row: SalesCallRow, preset: CommissionPreset | null) => {
     const patch: Partial<SalesCallEdits> = { commissionPreset: preset };
     const hit = COMMISSION_PRESETS.find((p) => p.id === preset);
@@ -1252,40 +1579,21 @@ function ReferralTable({
   };
 
   return (
-    <table className="w-full border-collapse text-[13px]">
-      <thead>
-        <tr>
-          <TableHead align="left">Booked</TableHead>
-          <TableHead align="left">Name</TableHead>
-          <TableHead align="left">Referred by</TableHead>
-          <TableHead align="left">Type</TableHead>
-          <TableHead align="left">Status</TableHead>
-          <TableHead align="left">Structure</TableHead>
-          <TableHead>Partner</TableHead>
-          <TableHead>Referee</TableHead>
-          <TableHead>Payout</TableHead>
-          <TableHead align="left">Due</TableHead>
-          <TableHead>Paid</TableHead>
-        </tr>
-      </thead>
+    <GridTable columns={REFERRAL_COLUMNS} widths={widths}>
       <tbody>
         {rows.map((row) => {
           const total = commissionTotal(row);
-          const counts = row.status
-            ? DEAL_STATUS_META[row.status].counts
-            : false;
+          const counts = row.status ? DEAL_STATUS_META[row.status].counts : false;
           return (
             <tr key={row.id} className="align-top hover:bg-white/[0.02]">
-              <TableCell align="left">
-                <span className="text-[12px] text-mist">
-                  {shortDate(row.bookedAt)}
-                </span>
-              </TableCell>
-              <TableCell align="left">
+              <GridCell>
+                <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
+              </GridCell>
+              <GridCell>
                 <Who row={row} />
-              </TableCell>
+              </GridCell>
 
-              <TableCell align="left">
+              <GridCell>
                 <ReferrerCell
                   value={row.referrerId}
                   options={referrerOptions}
@@ -1294,39 +1602,38 @@ function ReferralTable({
                   onChange={(v) => save(row.id, "referrerId", v)}
                   onCreate={addReferrer}
                 />
-              </TableCell>
+              </GridCell>
 
-              <TableCell align="left">
+              <GridCell>
                 <SelectCell
                   value={row.referralKind}
                   items={config.referralKind}
-                  width="w-[140px]"
                   saving={busy(row.id, "referralKind")}
                   onChange={(v) => save(row.id, "referralKind", v)}
                 />
-              </TableCell>
+              </GridCell>
 
-              <TableCell align="left">
+              <GridCell>
                 <SelectCell
                   value={row.status}
                   items={config.dealStatus}
-                  width="w-[165px]"
                   saving={busy(row.id, "status")}
                   onChange={(v) => save(row.id, "status", v)}
                 />
-              </TableCell>
+              </GridCell>
 
-              <TableCell align="left">
+              <GridCell>
                 <select
                   value={row.commissionPreset ?? ""}
                   disabled={busy(row.id, "commissionPreset")}
+                  aria-label={`Commission structure for ${row.name}`}
                   onChange={(e) =>
                     applyPreset(
                       row,
                       (e.target.value || null) as CommissionPreset | null,
                     )
                   }
-                  className="w-[110px] appearance-none rounded-[8px] border border-edge-mid bg-panel-2 py-1.5 pl-2 pr-6 font-body text-[12.5px] text-fog outline-none focus:border-magenta disabled:opacity-50"
+                  className="w-full appearance-none rounded-[8px] border border-edge-mid bg-panel-2 py-1.5 pl-2 pr-6 font-body text-[12.5px] text-fog outline-none focus:border-magenta disabled:opacity-50"
                   style={{
                     backgroundImage:
                       "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='none' stroke='%238f88a0' stroke-width='2'%3E%3Cpath d='M1 3l4 4 4-4'/%3E%3C/svg%3E\")",
@@ -1341,24 +1648,24 @@ function ReferralTable({
                     </option>
                   ))}
                 </select>
-              </TableCell>
+              </GridCell>
 
-              <TableCell>
+              <GridCell align="right">
                 <MoneyCell
                   value={row.partnerCommission}
                   saving={busy(row.id, "partnerCommission")}
                   onChange={(v) => save(row.id, "partnerCommission", v)}
                 />
-              </TableCell>
-              <TableCell>
+              </GridCell>
+              <GridCell align="right">
                 <MoneyCell
                   value={row.refereeCommission}
                   saving={busy(row.id, "refereeCommission")}
                   onChange={(v) => save(row.id, "refereeCommission", v)}
                 />
-              </TableCell>
+              </GridCell>
 
-              <TableCell>
+              <GridCell align="right">
                 {/* Zero until the deal actually closes — a lost referral pays
                     nothing however the amounts are filled in. */}
                 <span
@@ -1370,30 +1677,41 @@ function ReferralTable({
                   {counts && total ? money(total) : "—"}
                 </span>
                 {counts && total ? (
-                  <span className="mt-0.5 block font-mono text-[10px] text-faint">
+                  <span className="mt-0.5 block truncate font-mono text-[10px] text-faint">
                     {money(partnerPayout(row))} to partner
                   </span>
                 ) : null}
-              </TableCell>
+              </GridCell>
 
-              <TableCell align="left">
+              <GridCell>
                 <span className="font-mono text-[11.5px] text-dusk">
                   {counts ? (payoutDate(row.bookedAt) ?? "—") : "—"}
                 </span>
-              </TableCell>
+              </GridCell>
 
-              <TableCell>
+              <GridCell align="right">
                 <CheckCell
                   checked={row.paid}
                   saving={busy(row.id, "paid")}
                   label={`Commission paid for ${row.name}`}
                   onChange={(v) => save(row.id, "paid", v)}
                 />
-              </TableCell>
+              </GridCell>
+
+              <GridCell align="right">
+                <RowActions
+                  row={row}
+                  busy={busy}
+                  archive={archive}
+                  restore={restore}
+                  showArchived={showArchived}
+                />
+              </GridCell>
+              <SlackCell />
             </tr>
           );
         })}
       </tbody>
-    </table>
+    </GridTable>
   );
 }

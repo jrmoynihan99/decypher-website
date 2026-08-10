@@ -26,6 +26,16 @@ export type PortalWidget = {
 
 export const PORTAL_WIDGETS: PortalWidget[] = [
   {
+    href: "/portal/tools-hub",
+    name: "Tools Hub",
+    blurb:
+      "Every piece of software the team uses, grouped by department, one click from here.",
+    note: "Admins keep the list current",
+    icon: "M12 2.5 21 7.5v9L12 21.5 3 16.5v-9zM3 7.5l9 5 9-5M12 12.5v9",
+    permission: "tools-hub",
+    live: true,
+  },
+  {
     href: "/portal/tax-strategy",
     name: "Tax Strategy",
     blurb:

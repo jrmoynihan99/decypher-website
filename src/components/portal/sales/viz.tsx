@@ -377,6 +377,49 @@ export function Meter({
   );
 }
 
+/* ─────────────────────────────── delta ─────────────────────────────── */
+
+/**
+ * This period against the one it's being compared with.
+ *
+ * The arrow and the sign both carry the direction, so the colour is the third
+ * encoding rather than the only one — the same rule the rest of this file
+ * follows. Percentages are of the previous value, which is what "up 20%" means
+ * to everyone except a statistician.
+ *
+ * A previous value of zero has no percentage — dividing by it yields infinity,
+ * and "+∞%" is worse than useless next to a real number. It reports the raw
+ * move instead.
+ */
+export function Delta({
+  value,
+  previous,
+  format = (n: number) => n.toLocaleString(),
+  goodWhenUp = true,
+}: {
+  value: number;
+  previous: number;
+  format?: (n: number) => string;
+  /** False where a rise is bad — nothing yet, but commission owed would be. */
+  goodWhenUp?: boolean;
+}) {
+  const diff = value - previous;
+  const flat = Math.abs(diff) < 0.0001;
+  const up = diff > 0;
+  const color = flat ? "#8f88a0" : (up === goodWhenUp ? VIZ.series2 : "#ff6b7a");
+  const pct = previous !== 0 ? Math.round((diff / Math.abs(previous)) * 100) : null;
+
+  return (
+    <span className="inline-flex items-baseline gap-1.5 font-mono text-[11px] tabular-nums">
+      <span style={{ color }}>
+        {flat ? "→" : up ? "▲" : "▼"}{" "}
+        {pct != null ? `${Math.abs(pct)}%` : format(Math.abs(diff))}
+      </span>
+      <span className="text-faint">vs {format(previous)}</span>
+    </span>
+  );
+}
+
 /* ─────────────────────────────── legend ─────────────────────────────── */
 
 /** Always present for two or more series — identity is never colour alone. */

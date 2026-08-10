@@ -11,10 +11,17 @@
  * Saving is per-cell, not per-row. Two people editing different columns of the
  * same deal is normal here, and a row-shaped write would make the second save
  * silently undo the first.
+ *
+ * Every cell defaults to `w-full` and takes its size from the column it sits
+ * in — the grid's columns are drag-resizable, so a width baked into a control
+ * would just refuse to follow its header.
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { SearchSelect, type SearchOption } from "@/components/portal/widgets/ui";
+import { useHydrated } from "@/hooks/useHydrated";
+import { itemColorHex } from "@/lib/sales/options";
 import type { OptionItem } from "@/lib/sales/types";
 
 /** Shared select styling, sized for a dense grid rather than a form. */
@@ -33,13 +40,26 @@ const cellInputCls =
 
 /* ───────────────────────────── select ───────────────────────────── */
 
+/**
+ * A dropdown that wears its option's colour.
+ *
+ * The colour is on the CONTROL, not on a chip beneath it. The first version of
+ * the Show column rendered both — a select to change the value and a pill
+ * restating it — which is what the client meant by the column "stacking
+ * entries": two things saying one thing, in double the row height. Tinting the
+ * control itself gives the scannability the chip was there for and gives the
+ * row back its height.
+ *
+ * The label always prints inside the tint, so colour is never carrying the
+ * meaning by itself.
+ */
 export function SelectCell<T extends string = string>({
   value,
   items,
   onChange,
   saving,
   placeholder = "—",
-  width = "w-[150px]",
+  width = "w-full",
   title,
 }: {
   value: T | null;
@@ -57,6 +77,7 @@ export function SelectCell<T extends string = string>({
   const current = value ? items.find((i) => i.key === value) : undefined;
   const offered = items.filter((i) => !i.retired || i.key === value);
   const unknown = value && !current;
+  const tint = itemColorHex(items, value);
 
   return (
     <select
@@ -65,7 +86,13 @@ export function SelectCell<T extends string = string>({
       title={title}
       onChange={(e) => onChange((e.target.value || null) as T | null)}
       className={`${cellSelectCls} ${width}`}
-      style={caret}
+      style={
+        tint
+          ? // Hex + alpha suffix: 0d ≈ 5% fill, 66 ≈ 40% border. Light enough
+            // that a full row of tinted cells still reads as a table.
+            { ...caret, color: tint, borderColor: `${tint}66`, backgroundColor: `${tint}0d` }
+          : caret
+      }
     >
       <option value="">{placeholder}</option>
       {offered.map((o) => (
@@ -92,7 +119,7 @@ export function MoneyCell({
   value,
   onChange,
   saving,
-  width = "w-[92px]",
+  width = "w-full",
 }: {
   value: number | null;
   onChange: (v: number | null) => void;
@@ -163,7 +190,7 @@ export function DateCell({
       value={value ?? ""}
       disabled={saving}
       onChange={(e) => onChange(e.target.value || null)}
-      className={`${cellInputCls} w-[132px] [color-scheme:dark]`}
+      className={`${cellInputCls} w-full [color-scheme:dark]`}
     />
   );
 }
@@ -200,7 +227,7 @@ export function TextCell({
   onChange,
   saving,
   placeholder = "—",
-  width = "w-[180px]",
+  width = "w-full",
 }: {
   value: string | null;
   onChange: (v: string | null) => void;
@@ -242,6 +269,146 @@ export function TextCell({
       }}
       className={`${cellInputCls} ${width} font-body placeholder:text-faint`}
     />
+  );
+}
+
+/* ─────────────────────────── notes ─────────────────────────── */
+
+/**
+ * Notes, as a preview that opens into something you can actually write in.
+ *
+ * A one-line `<input>` in a grid column is fine for a phone number and useless
+ * for the paragraph a deal note actually is: you can see about six words of it,
+ * there's nowhere to put a line break, and widening the column to fix that
+ * costs every other column on the row. The client asked for a popup; the popup
+ * is also the only way this column can be narrow.
+ *
+ * Committed on Save, not on keystroke — the opposite of every other cell here,
+ * and deliberately. Multi-line prose typed over a minute would otherwise fire a
+ * write per character, and unlike a dropdown there's no natural moment that
+ * means "done" until the editor is closed. Escape and the backdrop discard.
+ */
+export function NotesCell({
+  value,
+  onChange,
+  saving,
+  who,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  saving?: boolean;
+  /** Whose note this is — the editor's heading. */
+  who: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(value ?? "");
+  // createPortal needs a real document.body, which the server render hasn't got.
+  const hydrated = useHydrated();
+
+  const start = () => {
+    setText(value ?? "");
+    setOpen(true);
+  };
+
+  const commit = () => {
+    const next = text.trim() || null;
+    if (next !== value) onChange(next);
+    setOpen(false);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={start}
+        title={value ?? "Add a note"}
+        className={`w-full truncate rounded-[8px] border px-2 py-1.5 text-left font-body text-[12.5px] transition-colors duration-150 disabled:opacity-50 ${
+          value
+            ? "border-edge-mid bg-panel-2 text-mist hover:border-magenta"
+            : "border-dashed border-edge-mid text-faint hover:border-magenta hover:text-dusk"
+        }`}
+      >
+        {value || "+ note"}
+      </button>
+
+      {/* Portalled to the body: the grid's ancestors carry transforms and
+          `will-change`, either of which re-roots a fixed element to that
+          container instead of the viewport — the modal would end up trapped
+          inside a scrolling table cell. */}
+      {open && hydrated
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setOpen(false);
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Notes for ${who}`}
+                className="w-full max-w-[560px] rounded-[16px] border border-edge-mid bg-panel shadow-2xl"
+              >
+                <header className="flex items-center justify-between gap-3 border-b border-edge px-4 py-3">
+                  <h3 className="truncate font-mono text-[11px] font-bold uppercase tracking-[1.4px] text-muted">
+                    Notes — {who}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    aria-label="Close"
+                    className="cursor-pointer text-[15px] leading-none text-dusk hover:text-fog"
+                  >
+                    ✕
+                  </button>
+                </header>
+                <div className="px-4 py-4">
+                  <textarea
+                    autoFocus
+                    rows={9}
+                    value={text}
+                    placeholder="What happened on the call, what they need, what to do next…"
+                    onChange={(e) => setText(e.target.value)}
+                    className="w-full resize-y rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2.5 font-body text-[13px] leading-relaxed text-fog outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-faint focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]"
+                  />
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="font-mono text-[10.5px] text-faint">
+                      {text.length}/2000
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setOpen(false)}
+                        className="cursor-pointer rounded-[10px] border border-edge-mid px-4 py-2 font-mono text-[11px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={commit}
+                        className="cursor-pointer rounded-[10px] bg-magenta px-5 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.8px] text-white"
+                      >
+                        Save note
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -413,7 +580,7 @@ export function ReferrerCell({
 
   if (adding) {
     return (
-      <div className="flex w-[200px] items-center gap-1">
+      <div className="flex w-full items-center gap-1">
         <input
           autoFocus
           value={name}
@@ -452,7 +619,7 @@ export function ReferrerCell({
   }
 
   return (
-    <div className="w-[200px]">
+    <div className="w-full">
       <SearchSelect
         value={value ?? ""}
         onChange={(v) => onChange(v || null)}

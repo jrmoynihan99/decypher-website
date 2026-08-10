@@ -256,6 +256,44 @@ export const SERVICE_BY_LABEL: Record<string, Service> = {
   "x. thinking about it": "none",
 };
 
+/* ────────────────────────── objection reason ────────────────────────── */
+
+/**
+ * Why a deal didn't close. Not from Airtable — the base has no such column,
+ * which is exactly why the client asked for one.
+ *
+ * An OPEN list: these are seeds, not a fixed vocabulary. Nothing in the code
+ * branches on an objection key, so the client can add, rename and retire them
+ * freely, and "Other" exists so an unclassifiable no still gets recorded rather
+ * than left blank.
+ */
+export const OBJECTIONS = [
+  "price",
+  "timing",
+  "spouse-partner",
+  "thinking",
+  "diy",
+  "has-provider",
+  "too-early",
+  "trust",
+  "ghosted",
+  "other",
+] as const;
+export type Objection = (typeof OBJECTIONS)[number];
+
+export const OBJECTION_LABELS: Record<Objection, string> = {
+  price: "Price / budget",
+  timing: "Bad timing",
+  "spouse-partner": "Needs spouse / partner buy-in",
+  thinking: "Wants to think about it",
+  diy: "Doing it themselves",
+  "has-provider": "Already has a CPA / provider",
+  "too-early": "Too early — revenue too low",
+  trust: "Trust / not convinced",
+  ghosted: "Went dark",
+  other: "Other",
+};
+
 /* ─────────────────────────── referrals ─────────────────────────── */
 
 /** Airtable REFERRALS → Referral Type. */
@@ -484,14 +522,107 @@ export function asOption<T extends string>(
     : null;
 }
 
+/* ─────────────────────────── option colours ─────────────────────────── */
+
+import type { EditableList, OptionItem, SalesOptionsConfig } from "./types";
+
+/**
+ * The colours an option may wear — a fixed set, not a colour picker.
+ *
+ * These do double duty: a tinted control in the grid (where the label is always
+ * printed beside the colour) and a bar in the stats charts (where, on a ranked
+ * list, colour is the only thing separating two neighbouring rows). The second
+ * job is what rules out a free hex field. Every swatch here clears 3:1 against
+ * the portal's panel surface (#141319) and no two sit close enough to collapse
+ * into each other under deuteranopia — which the brand's own five accents do
+ * not manage (ember vs danger measure ΔE 7.5 to *normal* vision).
+ *
+ * Ten is the ceiling on purpose. Past that, a categorical palette stops being
+ * discriminable no matter how it's chosen, and the honest answer is bar length.
+ */
+export const OPTION_COLORS = [
+  { key: "magenta", label: "Magenta", hex: "#ff4d8d" },
+  { key: "rose", label: "Rose", hex: "#ff6b7a" },
+  { key: "ember", label: "Ember", hex: "#ff8a4c" },
+  { key: "amber", label: "Amber", hex: "#f0c04d" },
+  { key: "lime", label: "Lime", hex: "#9ed45a" },
+  { key: "teal", label: "Teal", hex: "#3fc9b6" },
+  { key: "sky", label: "Sky", hex: "#4fb3f5" },
+  { key: "indigo", label: "Indigo", hex: "#8f9bff" },
+  { key: "violet", label: "Violet", hex: "#b98cff" },
+  { key: "slate", label: "Slate", hex: "#9a93ac" },
+] as const;
+
+export type OptionColor = (typeof OPTION_COLORS)[number]["key"];
+
+export const OPTION_COLOR_KEYS = OPTION_COLORS.map((c) => c.key);
+
+const COLOR_HEX: Record<string, string> = Object.fromEntries(
+  OPTION_COLORS.map((c) => [c.key, c.hex]),
+);
+
+/** Hex for a swatch key, or null for "no colour" and for keys we don't know. */
+export function optionColorHex(key: string | null | undefined): string | null {
+  return key ? (COLOR_HEX[key] ?? null) : null;
+}
+
+/** The colour an option is currently wearing, by key. */
+export function itemColorHex(items: OptionItem[], key: string | null): string | null {
+  if (!key) return null;
+  return optionColorHex(items.find((i) => i.key === key)?.color);
+}
+
+/**
+ * Colours the closed lists ship with, so status and attendance read as colour
+ * out of the box rather than waiting for someone to open ⚙ Options.
+ *
+ * These mirror the existing DEAL_STATUS_META / SHOW_STATUS_META tones — the
+ * chips were already green-for-won, red-for-lost, and changing that on the way
+ * in would make the tool look different for no reason. `won-backed-out` is the
+ * one place they diverge: it shares `neg` with `lost` in the tone map, but as a
+ * colour it has to be distinguishable, because "sold then refunded" and "never
+ * sold" are not the same row to scan for.
+ */
+const DEFAULT_COLORS: Partial<Record<EditableList, Record<string, OptionColor>>> = {
+  dealStatus: {
+    won: "teal",
+    lost: "rose",
+    thinking: "amber",
+    "won-backed-out": "ember",
+    "not-a-fit": "slate",
+    "follow-up-later": "sky",
+  },
+  showStatus: {
+    showed: "teal",
+    "no-show": "rose",
+    cancelled: "slate",
+    "we-missed": "ember",
+  },
+  referralKind: {
+    client: "sky",
+    outside: "violet",
+  },
+};
+
+/** The seeded colour for a key, or undefined where the list ships uncoloured. */
+export function defaultColorFor(
+  list: EditableList,
+  key: string,
+): OptionColor | undefined {
+  return DEFAULT_COLORS[list]?.[key];
+}
+
 /* ───────────────────── editable dropdown defaults ───────────────────── */
 
-import type { OptionItem, SalesOptionsConfig } from "./types";
-
 const toItems = <T extends string>(
+  list: EditableList,
   keys: readonly T[],
   labels: Record<T, string>,
-): OptionItem[] => keys.map((key) => ({ key, label: labels[key] }));
+): OptionItem[] =>
+  keys.map((key) => {
+    const color = defaultColorFor(list, key);
+    return color ? { key, label: labels[key], color } : { key, label: labels[key] };
+  });
 
 /**
  * What `salesConfig/options` holds before anyone edits it — the same lists
@@ -503,12 +634,13 @@ const toItems = <T extends string>(
  */
 export function defaultOptionsConfig(): SalesOptionsConfig {
   return {
-    leadSource: toItems(LEAD_SOURCES, LEAD_SOURCE_LABELS),
-    service: toItems(SERVICES, SERVICE_LABELS),
-    paymentPlan: toItems(PAYMENT_PLANS, PAYMENT_PLAN_LABELS),
-    dealStatus: toItems(DEAL_STATUSES, DEAL_STATUS_LABELS),
-    showStatus: toItems(SHOW_STATUSES, SHOW_STATUS_LABELS),
-    referralKind: toItems(REFERRAL_KINDS, REFERRAL_KIND_LABELS),
+    leadSource: toItems("leadSource", LEAD_SOURCES, LEAD_SOURCE_LABELS),
+    service: toItems("service", SERVICES, SERVICE_LABELS),
+    paymentPlan: toItems("paymentPlan", PAYMENT_PLANS, PAYMENT_PLAN_LABELS),
+    objection: toItems("objection", OBJECTIONS, OBJECTION_LABELS),
+    dealStatus: toItems("dealStatus", DEAL_STATUSES, DEAL_STATUS_LABELS),
+    showStatus: toItems("showStatus", SHOW_STATUSES, SHOW_STATUS_LABELS),
+    referralKind: toItems("referralKind", REFERRAL_KINDS, REFERRAL_KIND_LABELS),
   };
 }
 

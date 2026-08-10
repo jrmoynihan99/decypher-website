@@ -31,6 +31,16 @@ export interface OptionItem {
   key: string;
   label: string;
   retired?: boolean;
+  /**
+   * A key from OPTION_COLORS — never a raw hex.
+   *
+   * The swatches were checked against the portal's panel surface; a free colour
+   * field would let an editor pick two neighbouring hues that are one bar apart
+   * in the stats charts and indistinguishable to a colourblind reader. Storing
+   * the swatch key also means the palette can be retuned without migrating
+   * every config document.
+   */
+  color?: string;
 }
 
 /**
@@ -48,6 +58,7 @@ export interface SalesOptionsConfig {
   leadSource: OptionItem[];
   service: OptionItem[];
   paymentPlan: OptionItem[];
+  objection: OptionItem[];
   dealStatus: OptionItem[];
   showStatus: OptionItem[];
   referralKind: OptionItem[];
@@ -55,7 +66,12 @@ export interface SalesOptionsConfig {
 
 export type EditableList = keyof SalesOptionsConfig;
 /** The lists where adding and retiring keys is allowed. */
-export const OPEN_LISTS = ["leadSource", "service", "paymentPlan"] as const;
+export const OPEN_LISTS = [
+  "leadSource",
+  "service",
+  "paymentPlan",
+  "objection",
+] as const;
 
 /** The fields an operator may change. Exactly what PATCH accepts. */
 export interface SalesCallEdits {
@@ -83,6 +99,14 @@ export interface SalesCallEdits {
   service: string | null;
   /** Onboarding date, ISO yyyy-mm-dd. Airtable's OB Date. */
   onboardingDate: string | null;
+  /**
+   * Why the deal didn't close — a key from the editable `objection` list.
+   *
+   * An open list rather than a union: the reasons a creator says no are the
+   * client's own vocabulary and they will want to add to it. Nothing branches
+   * on these keys, so nothing breaks when they do.
+   */
+  objection: string | null;
   notes: string | null;
 
   referrerId: string | null;
