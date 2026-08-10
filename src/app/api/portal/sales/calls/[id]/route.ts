@@ -51,6 +51,7 @@ const PARSERS: {
   status: (v) => asOption(v, DEAL_STATUSES),
   paymentPlan: (v, c) => asOption(v, keysOf(c, "paymentPlan")),
   service: (v, c) => asOption(v, keysOf(c, "service")),
+  objection: (v, c) => asOption(v, keysOf(c, "objection")),
   referralKind: (v) => asOption(v, REFERRAL_KINDS),
   commissionPreset: (v) => asOption(v, PRESET_IDS),
 

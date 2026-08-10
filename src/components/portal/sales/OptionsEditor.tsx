@@ -17,8 +17,8 @@
  * semantics — DEAL_STATUS_META.counts decides what a commission pays).
  */
 
-import { useState } from "react";
-import { optionKey } from "@/lib/sales/options";
+import { useEffect, useRef, useState } from "react";
+import { OPTION_COLORS, optionColorHex, optionKey } from "@/lib/sales/options";
 import {
   OPEN_LISTS,
   type CreatorOption,
@@ -33,6 +33,7 @@ const LIST_TITLES: Record<EditableList, string> = {
   leadSource: "Lead source",
   service: "Service sold",
   paymentPlan: "Payment plan",
+  objection: "Objection reason",
   dealStatus: "Deal status",
   showStatus: "Attendance",
   referralKind: "Referral type",
@@ -42,6 +43,7 @@ const LIST_ORDER: EditableList[] = [
   "leadSource",
   "service",
   "paymentPlan",
+  "objection",
   "dealStatus",
   "showStatus",
   "referralKind",
@@ -100,10 +102,12 @@ export default function OptionsEditor({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-[12.5px] leading-relaxed text-muted">
-          Rename, reorder and retire the options every dropdown offers. Retiring
-          hides an option from new picks — rows that already use it keep it.
-          Statuses can be renamed and reordered but not added or removed: the
-          money math (what counts as won, what pays commission) is tied to them.
+          Rename, recolour, reorder and retire the options every dropdown
+          offers. A colour follows its option everywhere — the grid cell and the
+          bars on the Stats tab. Retiring hides an option from new picks; rows
+          that already use it keep it. Statuses can be renamed, recoloured and
+          reordered but not added or removed: the money math (what counts as
+          won, what pays commission) is tied to them.
         </p>
         <div className="flex gap-2">
           <button
@@ -178,9 +182,17 @@ function ListEditor({
 
   const toggleRetired = (i: number) => {
     const next = [...items];
-    next[i] = next[i].retired
-      ? { key: next[i].key, label: next[i].label }
-      : { ...next[i], retired: true };
+    const { retired, ...rest } = next[i];
+    next[i] = retired ? rest : { ...next[i], retired: true };
+    onChange(next);
+  };
+
+  const recolour = (i: number, color: string | null) => {
+    const next = [...items];
+    const item = { ...next[i] };
+    if (color) item.color = color;
+    else delete item.color;
+    next[i] = item;
     onChange(next);
   };
 
@@ -216,6 +228,11 @@ function ListEditor({
             >
               ↓
             </button>
+            <ColorPicker
+              value={item.color ?? null}
+              label={item.label}
+              onChange={(c) => recolour(i, c)}
+            />
             <input
               value={item.label}
               onChange={(e) => rename(i, e.target.value)}
@@ -258,6 +275,113 @@ function ListEditor({
         </div>
       ) : null}
     </Panel>
+  );
+}
+
+/* ─────────────────────────── colour ─────────────────────────── */
+
+/**
+ * Pick an option's colour from the fixed palette.
+ *
+ * A swatch grid rather than an `<input type="color">` on purpose. These colours
+ * don't only tint a cell — they become the bars on the Stats tab, where two
+ * adjacent categories separated by nothing but hue is the exact situation a
+ * free colour field produces and a colourblind reader can't resolve. The ten
+ * swatches were checked against the panel surface and against each other; the
+ * picker's job is to make choosing one of them easy, not to allow more.
+ */
+function ColorPicker({
+  value,
+  label,
+  onChange,
+}: {
+  value: string | null;
+  label: string;
+  onChange: (color: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const hex = optionColorHex(value);
+
+  // Click-away and Escape, so an open palette can't be left behind while the
+  // list scrolls under it.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative flex-none">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={`Colour for ${label}`}
+        aria-expanded={open}
+        title={hex ? "Change colour" : "No colour — click to pick one"}
+        className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[6px] border border-edge-mid transition-colors duration-150 hover:border-edge-bright"
+      >
+        <span
+          aria-hidden
+          className="h-[13px] w-[13px] rounded-full border"
+          style={
+            hex
+              ? { background: hex, borderColor: hex }
+              : {
+                  borderColor: "rgba(255,255,255,0.22)",
+                  // A diagonal hairline: the universal "nothing set", and it
+                  // can't be mistaken for a very dark swatch.
+                  backgroundImage:
+                    "linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.3) 45%, rgba(255,255,255,0.3) 55%, transparent 55%)",
+                }
+          }
+        />
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 top-[30px] z-30 w-[168px] rounded-[10px] border border-edge-mid bg-panel p-2 shadow-2xl">
+          <div className="grid grid-cols-5 gap-1.5">
+            {OPTION_COLORS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                title={c.label}
+                aria-label={c.label}
+                aria-pressed={value === c.key}
+                onClick={() => {
+                  onChange(c.key);
+                  setOpen(false);
+                }}
+                className={`h-[24px] w-[24px] cursor-pointer rounded-[6px] border-2 transition-transform duration-150 hover:scale-110 ${
+                  value === c.key ? "border-fog" : "border-transparent"
+                }`}
+                style={{ background: c.hex }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className="mt-2 w-full cursor-pointer rounded-[6px] border border-edge-mid py-1 font-mono text-[10px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
+          >
+            No colour
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -413,6 +413,7 @@ export function NumInput({
   align = "right",
   className = "",
   id,
+  ariaLabel,
 }: {
   value: string;
   onChange: (raw: string) => void;
@@ -421,6 +422,8 @@ export function NumInput({
   align?: "left" | "right";
   className?: string;
   id?: string;
+  /** For inputs not wrapped in a `Field` — e.g. the Allocator's dual controls. */
+  ariaLabel?: string;
 }) {
   const { ref, handleChange } = useGroupedInput(onChange);
   return (
@@ -433,6 +436,7 @@ export function NumInput({
       <input
         ref={ref}
         id={id}
+        aria-label={ariaLabel}
         type="text"
         inputMode="decimal"
         value={withCommas(value)}

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The Tax Strategy tab: four tools behind one permission.
+ * The Tax Strategy tab: five tools behind one permission.
  *
  * Every tool here is client-facing: the tab gets screen-shared on a call, so
  * the copy inside speaks to the creator ("your numbers"), never about them.
@@ -24,6 +24,7 @@ import SavingsWizard from "@/components/portal/widgets/SavingsWizard";
 import ShelterEngine from "@/components/portal/widgets/ShelterEngine";
 import ScorpAnalyzer from "@/components/portal/widgets/ScorpAnalyzer";
 import DealDesk from "@/components/portal/widgets/DealDesk";
+import MoneyAllocator from "@/components/portal/widgets/MoneyAllocator";
 
 /** `icon` is an SVG path `d` on a 24×24 stroke grid, as in nav-items. */
 const TOOLS = [
@@ -53,6 +54,15 @@ const TOOLS = [
     tag: "Entity",
     icon: "M3 21h18M5 21V8l7-5 7 5v13M10 21v-5h4v5",
     Component: ScorpAnalyzer,
+  },
+  {
+    id: "allocator",
+    name: "Money Allocator",
+    blurb:
+      "Where every dollar of this month's income goes — taxes and ops off the top, then a priority waterfall through owner pay, and what the investing line is worth by retirement.",
+    tag: "Cash flow",
+    icon: "M12 3v18M8 7h8M6 12h12M9 17h6",
+    Component: MoneyAllocator,
   },
   {
     id: "deal",
@@ -117,7 +127,7 @@ export default function TaxStrategyWorkbench() {
       </div>
 
       <p className="mt-2 max-w-xl text-sm text-muted">
-        Four tools for modelling strategies against your numbers, live on the
+        Five tools for modelling strategies against your numbers, live on the
         call. Nothing here is saved — the figures are for the conversation, not
         your return.
       </p>
