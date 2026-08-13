@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import StatsSection from "@/components/home/StatsSection";
-import TestimonialsSection from "@/components/home/TestimonialsSection";
 import Reveal from "@/components/reveal/Reveal";
 import VideoWall from "@/components/thankyou/VideoWall";
 import AutoplayVideo from "@/components/ui/AutoplayVideo";
@@ -14,7 +13,6 @@ import {
   getAllJobSlugs,
   getJobBySlug,
   getSiteSettings,
-  getTestimonials,
   getThankYouSharedSections,
   getVideoTestimonials,
 } from "@/sanity/queries";
@@ -27,17 +25,31 @@ import {
  * so a role whose editor never opened that section still gets a real page —
  * the whole point is that the applicant knows exactly what happens next.
  *
- * Below that sit the same three proof sections the booking thank-you pages
- * use — creator videos, the review carousel, the stats — pulled from the same
- * shared source (Book a Call + the collections) rather than copied, so a stat
- * corrected once is corrected everywhere. An applicant who just committed to
- * the idea of working here is exactly who should see what the firm does.
+ * The creator-video wall and the results stats close the page. The written
+ * review carousel is deliberately NOT here — it's pitched at prospects
+ * deciding whether to hire the firm, which isn't the question an applicant is
+ * asking; the videos and the numbers say what the place is like to work at.
+ * The wall's heading and its videos can be set per role, falling back to the
+ * careers copy below / the Video Testimonials collection, so a role nobody has
+ * configured still closes on something finished.
  */
 
 // Safety net only — content updates land instantly via the Sanity webhook.
 export const revalidate = 86400;
 
 type Props = { params: Promise<{ slug: string }> };
+
+/**
+ * The video wall's careers copy. Deliberately NOT the shared Book a Call
+ * heading the campaign thank-you pages use — that one is pitched at prospects
+ * ("the receipts", "REAL CLIENTS. REAL RESULTS"), and an applicant is asking a
+ * different question. Any of the three is overridable per role in the Studio.
+ */
+const WALL_DEFAULTS = {
+  eyebrow: "[ the team ]",
+  title: "Hear it from our team",
+  sub: "// TAP A VIDEO TO PLAY.",
+};
 
 export async function generateStaticParams() {
   const slugs = await getAllJobSlugs();
@@ -60,12 +72,11 @@ export default async function JobThankYouPage({ params }: Props) {
   const job = await getJobBySlug(slug);
   if (!job) notFound();
 
-  // Same four reads the campaign thank-you pages make; identical GROQ calls
-  // within one render are deduped by Next's fetch memoization.
-  const [settings, shared, testimonials, videos] = await Promise.all([
+  // Identical GROQ calls within one render are deduped by Next's fetch
+  // memoization, so this costs the same as the campaign pages' own reads.
+  const [settings, shared, sharedVideos] = await Promise.all([
     getSiteSettings().then(withLiveStats),
     getThankYouSharedSections(),
-    getTestimonials(),
     getVideoTestimonials(),
   ]);
 
@@ -73,6 +84,16 @@ export default async function JobThankYouPage({ params }: Props) {
   // No steps in the Studio means no section — not a stand-in list. An invented
   // hiring process is worse than none.
   const steps = ty?.steps ?? [];
+
+  // Per-role video wall, falling back field by field rather than all-or-
+  // nothing: setting just a title shouldn't cost you the eyebrow.
+  const wall = ty?.videoWall;
+  const wallVideos = wall?.videos?.length ? wall.videos : sharedVideos;
+  const wallContent = {
+    eyebrow: wall?.eyebrow || WALL_DEFAULTS.eyebrow,
+    title: wall?.title || WALL_DEFAULTS.title,
+    sub: wall?.sub || WALL_DEFAULTS.sub,
+  };
 
   return (
     <main className="relative">
@@ -151,7 +172,14 @@ export default async function JobThankYouPage({ params }: Props) {
             </>
           ) : null}
 
-          <div className="mt-12 flex flex-wrap items-center gap-4">
+          {/* The top margin belongs to the steps above it. Without steps the
+              section's own pt already supplies the gap under the video, and
+              keeping both stacks two gaps into one dead band. */}
+          <div
+            className={`flex flex-wrap items-center gap-4 ${
+              steps.length ? "mt-12" : ""
+            }`}
+          >
             <Link
               href="/careers"
               className="rounded-full border border-white/15 px-5 py-2.5 font-mono text-[12px] uppercase tracking-[1.2px] text-mist no-underline transition-colors duration-150 hover:border-mist hover:text-fog"
@@ -167,15 +195,10 @@ export default async function JobThankYouPage({ params }: Props) {
           </div>
         </section>
 
-        {/* The same proof stack the booking thank-you pages close with, from
-            the same shared source — see the note at the top of this file. */}
-        <VideoWall content={shared.videoWallSection} videos={videos} />
-
-        <TestimonialsSection
-          content={shared.testimonialsSection ?? {}}
-          rowA={testimonials.rowA}
-          rowB={testimonials.rowB}
-        />
+        {/* Videos then numbers, no review carousel — see the note at the top.
+            StatsSection brings its own bottom padding, so it can close the
+            page the same way it does on the booking thank-you pages. */}
+        <VideoWall content={wallContent} videos={wallVideos} />
 
         <StatsSection
           eyebrow={shared.statsSection?.eyebrow}

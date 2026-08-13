@@ -279,6 +279,13 @@ export interface CmsJob {
     body?: string;
     videoUrl?: string;
     steps?: { title: string; body?: string }[];
+    /** Per-role overrides for the creator-video wall; each falls back to shared. */
+    videoWall?: {
+      eyebrow?: string;
+      title?: string;
+      sub?: string;
+      videos?: CmsVideoTestimonial[];
+    };
   };
 }
 
