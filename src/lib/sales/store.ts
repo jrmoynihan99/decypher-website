@@ -205,7 +205,7 @@ export async function updateSalesCall(
   id: string,
   edits: Partial<SalesCallEdits>,
   actor: string,
-): Promise<SalesCallRow> {
+): Promise<{ call: SalesCallRow; previousStatus: SalesCallRow["status"] }> {
   if (!isConfigured()) throw new SalesStoreError("Firebase is not configured");
 
   const patch: Record<string, unknown> = {};
@@ -229,15 +229,22 @@ export async function updateSalesCall(
   patch.updatedBy = actor;
 
   const doc = adminDb().collection(CALLS).doc(id);
-  // update() rather than set(merge) so editing a row that no longer exists is
-  // an error the operator sees, not a resurrection of a deleted document.
+  // The pre-read exists for the caller: a status flipping INTO "won" is what
+  // rings the onboarding channel, and only the pre-image can tell a close
+  // apart from an edit to an already-won deal.
+  const before = await doc.get();
+  if (!before.exists) throw new SalesStoreError("That call no longer exists");
+  const previousStatus = (before.data()?.status ?? null) as SalesCallRow["status"];
+
+  // update() rather than set(merge) so editing a row deleted between the read
+  // above and now is an error the operator sees, not a resurrection.
   try {
     await doc.update(patch);
   } catch {
     throw new SalesStoreError("That call no longer exists");
   }
   const after = await doc.get();
-  return toRow(after.id, after.data()!);
+  return { call: toRow(after.id, after.data()!), previousStatus };
 }
 
 /** What ingestion knows about a booking. Everything here is Calendly-owned. */

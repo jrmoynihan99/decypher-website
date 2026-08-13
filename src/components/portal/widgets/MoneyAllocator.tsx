@@ -810,62 +810,71 @@ function MoneyMap({
         here is editable — it&rsquo;s the same figure the breakdown holds.
       </p>
 
-      {/* income */}
-      <div className="mx-auto max-w-[280px] rounded-[16px] border border-magenta/40 bg-magenta/[0.08] px-4 py-3 text-center">
-        <Mono className="text-magenta">Business income</Mono>
-        <div className="mt-0.5 font-display text-[24px] font-bold tabular-nums text-fog">
-          {money(r.income)}
-        </div>
-      </div>
-
-      <Trunk />
-      <Bus />
-
-      {/* tier one */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
-        <MapTile
-          label="Taxes / Savings"
-          amount={r.business.taxes}
-          income={income}
-          onChange={bind.bindPct(bind.setTaxPct)}
-        />
-        <div className="rounded-[16px] border border-magenta/40 bg-magenta/[0.07] px-3 py-3 text-center">
-          <Mono className="text-magenta">Owner pay</Mono>
-          <div className="mt-1 font-display text-[19px] font-bold tabular-nums text-fog">
-            {money(r.business.ownerPay)}
+      {/* The tree is three columns wide at its narrowest and a phone can't give
+          each one enough room for a dollar field — the labels truncate and the
+          amounts clip. So it keeps its own width and scrolls inside the panel,
+          rather than the page scrolling sideways. The negative inset bleeds the
+          scroll area out to the panel's edges so nothing looks cut off. */}
+      <div className="-mx-4 overflow-x-auto px-4">
+        <div className="min-w-[520px]">
+          {/* income */}
+          <div className="mx-auto max-w-[280px] rounded-[16px] border border-magenta/40 bg-magenta/[0.08] px-4 py-3 text-center">
+            <Mono className="text-magenta">Business income</Mono>
+            <div className="mt-0.5 font-display text-[24px] font-bold tabular-nums text-fog">
+              {money(r.income)}
+            </div>
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-dusk">
-            {pctLabel(r.business.ownerPayPct)}
+
+          <Trunk />
+          <Bus />
+
+          {/* tier one */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <MapTile
+              label="Taxes / Savings"
+              amount={r.business.taxes}
+              income={income}
+              onChange={bind.bindPct(bind.setTaxPct)}
+            />
+            <div className="rounded-[16px] border border-magenta/40 bg-magenta/[0.07] px-3 py-3 text-center">
+              <Mono className="text-magenta">Owner pay</Mono>
+              <div className="mt-1 font-display text-[19px] font-bold tabular-nums text-fog">
+                {money(r.business.ownerPay)}
+              </div>
+              <div className="mt-0.5 font-mono text-[10.5px] text-dusk">
+                {pctLabel(r.business.ownerPayPct)}
+              </div>
+            </div>
+            <MapTile
+              label="Business Ops"
+              amount={r.business.ops}
+              income={income}
+              onChange={bind.bindPct(bind.setOpsPct)}
+            />
+          </div>
+
+          {/* owner pay drops into the buckets */}
+          <Trunk />
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-edge-mid" />
+            <Mono className="flex-none text-faint">funded in this order</Mono>
+            <div className="h-px flex-1 bg-edge-mid" />
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+            {leaves.map((leaf, i) => (
+              <MapTile
+                key={leaf.label + i}
+                step={i + 1}
+                label={leaf.label}
+                amount={leaf.amount.target}
+                funded={leaf.amount.funded}
+                income={income}
+                onChange={leaf.onChange}
+              />
+            ))}
           </div>
         </div>
-        <MapTile
-          label="Business Ops"
-          amount={r.business.ops}
-          income={income}
-          onChange={bind.bindPct(bind.setOpsPct)}
-        />
-      </div>
-
-      {/* owner pay drops into the buckets */}
-      <div className="mx-auto h-6 w-px bg-edge-mid" />
-      <div className="flex items-center gap-3">
-        <div className="h-px flex-1 bg-edge-mid" />
-        <Mono className="flex-none text-faint">funded in this order</Mono>
-        <div className="h-px flex-1 bg-edge-mid" />
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-        {leaves.map((leaf, i) => (
-          <MapTile
-            key={leaf.label + i}
-            step={i + 1}
-            label={leaf.label}
-            amount={leaf.amount.target}
-            funded={leaf.amount.funded}
-            income={income}
-            onChange={leaf.onChange}
-          />
-        ))}
       </div>
     </Panel>
   );
@@ -876,7 +885,15 @@ function Trunk() {
   return <div className="mx-auto h-6 w-px bg-edge-mid" />;
 }
 
-/** Three-way split: one rule in, three rules out, aligned to the columns below. */
+/**
+ * Three-way split: one rule in, three drops out, each landing on the centre of
+ * a column in the grid below.
+ *
+ * Laid out as the same 3-column grid so the drops line up with the tiles
+ * whatever the gap is. The horizontal segments overhang into the gutters by
+ * exactly the gap (the negative insets), which is what joins them into one
+ * continuous rule instead of three floating dashes.
+ */
 function Bus() {
   return (
     <div aria-hidden className="grid grid-cols-3 gap-2 sm:gap-4">
@@ -884,9 +901,9 @@ function Bus() {
         <div key={i} className="relative h-6">
           <div
             className={`absolute top-0 h-px bg-edge-mid ${
-              i === 0 ? "left-1/2 right-0"
-              : i === 2 ? "left-0 right-1/2"
-              : "inset-x-0"
+              i === 0 ? "left-1/2 -right-2 sm:-right-4"
+              : i === 2 ? "-left-2 right-1/2 sm:-left-4"
+              : "-left-2 -right-2 sm:-left-4 sm:-right-4"
             }`}
           />
           <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-edge-mid" />
@@ -1046,6 +1063,7 @@ function Projection({
               xLabel={(i) => `Age ${start + i}`}
               labelForIndex={(i) => `Age ${start + i}`}
               fillFirst
+              endLabel={money(final)}
               height={260}
             />
             <Note>

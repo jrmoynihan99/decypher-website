@@ -49,6 +49,11 @@ export const CATEGORY_KEYS = [
   "education",
   "cost-of-sales",
   "other-expense",
+  /* Owner spending that runs through the business books but isn't an
+     operating expense. No subtype maps here by default — it's assigned
+     through the mapping screen's overrides — and the expense ledger lists
+     it separately so operating spend stays clean. */
+  "personal",
   // ── the fallback, valid on either side ──
   "uncategorized",
 ] as const;
@@ -80,6 +85,7 @@ export const CATEGORY_LABELS: Record<CategoryKey, string> = {
   education: "Education & training",
   "cost-of-sales": "Cost of sales",
   "other-expense": "Other expenses",
+  personal: "Personal (non-operating)",
   uncategorized: "Uncategorised",
 };
 
@@ -110,6 +116,7 @@ export const CATEGORY_SIDE: Record<CategoryKey, CategorySide | "both"> = {
   education: "expense",
   "cost-of-sales": "expense",
   "other-expense": "expense",
+  personal: "expense",
   uncategorized: "both",
 };
 

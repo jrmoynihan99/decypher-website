@@ -1,51 +1,17 @@
 import { NextResponse } from "next/server";
-import { isConfigured } from "@/lib/firebase/admin";
-import { getSession } from "@/lib/firebase/session";
+import { gate } from "./_gate";
 import { ToolsHubError, getCatalog, saveCatalog } from "@/lib/tools-hub/store";
 
 /**
- * The shared tool catalog.
- *
- * Two different gates, and the split is the point: everyone with the tab may
- * READ the catalog, but only an admin may write it. The catalog is one document
- * that the whole team's page renders from, so a typo in it is everyone's typo —
- * the same reason the Staff tab is admin-only.
+ * The shared tool catalog. Access rules live in _gate.ts (shared with the
+ * logo routes).
  *
  * PUT takes the whole catalog rather than patching a tool. The editor reorders
  * departments and moves tools between them, both of which are properties of the
  * list and not of a row; per-item writes would just reinvent the array and race
  * each other doing it. sanitizeCatalog on the other side makes a malformed body
  * degrade to something renderable instead of bricking the page.
- *
- * No route handler trusts that the page did the check — these are reachable
- * directly over HTTP.
  */
-
-async function gate(needsAdmin: boolean) {
-  if (!isConfigured()) {
-    return NextResponse.json(
-      { ok: false, message: "Server missing Firebase credentials" },
-      { status: 500 },
-    );
-  }
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ ok: false, message: "Not signed in" }, { status: 401 });
-  }
-  if (!session.permissions.includes("tools-hub")) {
-    return NextResponse.json(
-      { ok: false, message: "No access to the tools hub" },
-      { status: 403 },
-    );
-  }
-  if (needsAdmin && session.role !== "admin") {
-    return NextResponse.json(
-      { ok: false, message: "Only admins can edit the tool catalog" },
-      { status: 403 },
-    );
-  }
-  return session;
-}
 
 export async function GET() {
   const session = await gate(false);

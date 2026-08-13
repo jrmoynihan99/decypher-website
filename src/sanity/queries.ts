@@ -262,7 +262,7 @@ export async function getJobBySlug(slug: string): Promise<CmsJob | null> {
   const row: (CmsJob & { tags?: string[] }) | null = await client.fetch(
     `*[_type == "jobOpening" && slug.current == $slug][0]{
       title, "slug": slug.current, department, location, type, comp,
-      blurb, tags, videoUrl, description
+      blurb, tags, videoUrl, description, thankYou
     }`,
     { slug },
   );

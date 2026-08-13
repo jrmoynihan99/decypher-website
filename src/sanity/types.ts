@@ -273,6 +273,13 @@ export interface CmsJob {
   videoUrl?: string;
   /** Rich-text posting on the detail page; empty falls back to the blurb. */
   description?: PortableTextBlock[];
+  /** Post-application page content (/careers/<slug>/thank-you); all optional. */
+  thankYou?: {
+    title?: string;
+    body?: string;
+    videoUrl?: string;
+    steps?: { title: string; body?: string }[];
+  };
 }
 
 /** One line on the affiliate value-stack receipt. */

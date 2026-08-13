@@ -240,3 +240,63 @@ export async function postApplicationToSlack(
     blocks,
   );
 }
+
+/**
+ * A won deal to the #onboarding channel — the handoff doorbell. Fired by the
+ * sales PATCH route when a deal's status transitions INTO "won" (the pre-image
+ * check lives in the store, so editing an already-won deal stays silent).
+ *
+ * Takes display-ready strings rather than sales-flow types: the route maps
+ * option keys to their labels before calling, so this module stays ignorant
+ * of the sales vocabulary.
+ */
+export async function postClosedDealToSlack(deal: {
+  name: string;
+  email: string;
+  /** Whole dollars, as stored on the row. */
+  offer: number | null;
+  service: string | null;
+  paymentPlan: string | null;
+  /** ISO yyyy-mm-dd. */
+  onboardingDate: string | null;
+  /** The staff member who flipped the status. */
+  closedBy: string;
+}): Promise<SlackOutcome> {
+  const blocks: unknown[] = [
+    {
+      // plain_text header — rendered literally, so the name is safe unescaped.
+      type: "header",
+      text: { type: "plain_text", text: `🎉 Deal closed: ${deal.name}`, emoji: true },
+    },
+    {
+      type: "section",
+      fields: [
+        // Plain text rather than a mailto link: this email arrives via the
+        // Calendly sync, not a route with an EMAIL_RE gate, so it hasn't
+        // earned the raw link target that emailField() assumes.
+        field("Email", esc(deal.email) || "—"),
+        field("Offer", deal.offer != null ? fmt(deal.offer) : "—"),
+        field("Service", esc(deal.service ?? "") || "—"),
+        field("Payment plan", esc(deal.paymentPlan ?? "") || "—"),
+        field("Onboarding date", esc(deal.onboardingDate ?? "") || "—"),
+        field("Closed by", esc(deal.closedBy) || "—"),
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Marked won in the Sales Flow — over to onboarding.",
+        },
+      ],
+    },
+  ];
+
+  return postToChannel(
+    process.env.SLACK_ONBOARDING_WEBHOOK_URL,
+    "SLACK_ONBOARDING_WEBHOOK_URL",
+    `Deal closed: ${esc(deal.name)}${deal.offer != null ? ` — ${fmt(deal.offer)}` : ""}`,
+    blocks,
+  );
+}
