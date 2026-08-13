@@ -235,7 +235,47 @@ export type AccountLike = {
   subType?: string | null;
   /** "Revenue" | "Expense" — the reliable side discriminator when a subtype is exotic. */
   classification?: string | null;
+  /** The client's own account name — read by the personal-spend heuristic below. */
+  name?: string | null;
+  /** "Parent:Child". Preferred over `name`: a "Personal:Gym" child says so only here. */
+  fullyQualifiedName?: string | null;
 };
+
+/**
+ * Names that mean "this is the owner's money, not the business's".
+ *
+ * Intuit has no subtype for personal spending — an owner's gym membership and
+ * the studio's electricity bill are both `Utilities` if that's where the
+ * bookkeeper put them. What creators' books DO have is the word: an account
+ * called "Personal", a "Personal" parent with children under it, or an owner
+ * draw. That's the signal, so this reads the name.
+ *
+ * Matched against the fully-qualified name so a child of a "Personal" parent
+ * is caught even when its own leaf name is "Groceries".
+ */
+const PERSONAL_NAME =
+  /\bpersonal\b|\bowner'?s?\s*(draw|personal)|\bshareholder\s+distributions?\b|\bnon-?business\b/i;
+
+/**
+ * ...except these, which are ordinary business expenses that happen to contain
+ * the word. A creator paying for personal training content, a personal
+ * assistant, or personal branding is spending business money.
+ */
+const PERSONAL_EXCEPTIONS =
+  /\bpersonal\s+(training|trainer|development|brand|branding|coach|coaching|assistant|shopper)/i;
+
+/**
+ * Whether an account name reads as personal (non-operating) spending.
+ *
+ * Deliberately a DEFAULT, not a verdict: it sits below the per-account
+ * override in resolveCategory, so anything it gets wrong is one dropdown away
+ * from being fixed permanently on the mapping tab.
+ */
+export function looksPersonal(name: string | null | undefined): boolean {
+  if (!name) return false;
+  if (PERSONAL_EXCEPTIONS.test(name)) return false;
+  return PERSONAL_NAME.test(name);
+}
 
 export type CategoryOverrides = {
   /** accountId → category. Per-realm, highest precedence, survives renames. */
@@ -247,11 +287,18 @@ export type CategoryOverrides = {
 export const NO_OVERRIDES: CategoryOverrides = { byAccount: {}, bySubType: {} };
 
 /**
- * Four layers, first match wins:
+ * Five layers, first match wins:
  *   1. per-account override  — the firm pinned this exact account
- *   2. per-subtype override  — the firm re-mapped a subtype for everyone
- *   3. built-in subtype map  — the table above
- *   4. side fallback         — never drop the line
+ *   2. personal-name match   — the account calls itself personal (expenses only)
+ *   3. per-subtype override  — the firm re-mapped a subtype for everyone
+ *   4. built-in subtype map  — the table above
+ *   5. side fallback         — never drop the line
+ *
+ * Layer 2 sits above both subtype layers on purpose. A subtype is a generic
+ * default that means the same thing in every company file; the account's own
+ * name is evidence about THIS client. "Personal:Dining" is the owner's dinner
+ * whatever `Entertainment` would otherwise say, and layer 1 still overrules it
+ * when the heuristic guesses wrong.
  *
  * Layer 4 is the important one. An unmatched account MUST land somewhere
  * visible: if a line silently disappears, the categories stop summing to the
@@ -271,6 +318,14 @@ export function resolveCategory(
   if (accountId) {
     const pinned = overrides.byAccount[accountId];
     if (pinned) return pinned;
+  }
+  // Expenses only — "personal" is an expense-side category, and an income
+  // account with the word in it ("Personal training sessions") is revenue.
+  if (
+    side === "expense" &&
+    looksPersonal(account?.fullyQualifiedName ?? account?.name)
+  ) {
+    return "personal";
   }
   const subType = account?.subType;
   if (subType) {
