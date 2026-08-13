@@ -13,7 +13,11 @@ export const creatorCategory = defineType({
   title: "Creator category",
   type: "document",
   fields: [
-    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "title",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
   ],
   preview: { select: { title: "title" } },
 });
@@ -23,7 +27,11 @@ export const creatorGroup = defineType({
   title: "Creator group (filter tab)",
   type: "document",
   fields: [
-    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "title",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
   ],
   preview: { select: { title: "title" } },
 });
@@ -33,7 +41,11 @@ export const creator = defineType({
   title: "Creator",
   type: "document",
   fields: [
-    defineField({ name: "name", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "name",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "category",
       type: "reference",
@@ -71,7 +83,11 @@ export const creator = defineType({
               },
               validation: (r) => r.required(),
             }),
-            defineField({ name: "url", type: "url", validation: (r) => r.required() }),
+            defineField({
+              name: "url",
+              type: "url",
+              validation: (r) => r.required(),
+            }),
           ],
           preview: { select: { title: "platform", subtitle: "url" } },
         },
@@ -111,8 +127,17 @@ export const testimonial = defineType({
   title: "Testimonial",
   type: "document",
   fields: [
-    defineField({ name: "quote", type: "text", rows: 4, validation: (r) => r.required() }),
-    defineField({ name: "name", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "quote",
+      type: "text",
+      rows: 4,
+      validation: (r) => r.required(),
+    }),
+    defineField({
+      name: "name",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "handle",
       type: "string",
@@ -156,7 +181,11 @@ export const testimonial = defineType({
     // rows alternately down `order` (see getTestimonials) — picking a row by
     // hand is what let the top row grow to 60 cards against the bottom's 3.
     defineField({ name: "row", type: "string", hidden: true }),
-    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+    defineField({
+      name: "order",
+      type: "number",
+      validation: (r) => r.required(),
+    }),
   ],
   orderings: [
     {
@@ -184,7 +213,8 @@ export const videoTestimonial = defineType({
     defineField({
       name: "handle",
       type: "string",
-      description: "e.g. @mayamakesup — shown next to the name under the video.",
+      description:
+        "e.g. @mayamakesup — shown next to the name under the video.",
     }),
     defineField({
       name: "videoUrl",
@@ -194,7 +224,11 @@ export const videoTestimonial = defineType({
       description:
         "YouTube link in any form (watch, share, or embed URL). Other embeddable players work too.",
     }),
-    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+    defineField({
+      name: "order",
+      type: "number",
+      validation: (r) => r.required(),
+    }),
   ],
   orderings: [
     {
@@ -213,13 +247,21 @@ export const teamMember = defineType({
   title: "Team member",
   type: "document",
   fields: [
-    defineField({ name: "name", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "name",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "tag",
       type: "string",
       description: 'Optional badge on the card, e.g. "Co-Founder".',
     }),
-    defineField({ name: "role", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "role",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "tier",
       type: "string",
@@ -233,7 +275,8 @@ export const teamMember = defineType({
         direction: "horizontal",
       },
       validation: (r) => r.required(),
-      description: "Managers get the wide feature cards; seniors and staff share the grid.",
+      description:
+        "Managers get the wide feature cards; seniors and staff share the grid.",
     }),
     defineField({
       name: "codename",
@@ -248,7 +291,11 @@ export const teamMember = defineType({
       options: { hotspot: true },
       validation: (r) => r.required(),
     }),
-    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+    defineField({
+      name: "order",
+      type: "number",
+      validation: (r) => r.required(),
+    }),
   ],
   orderings: [
     {
@@ -268,7 +315,11 @@ export const jobOpening = defineType({
   type: "document",
   fields: [
     pageLinkField({ basePath: "/careers" }),
-    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "title",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "slug",
       type: "slug",
@@ -308,7 +359,8 @@ export const jobOpening = defineType({
       type: "text",
       rows: 4,
       validation: (r) => r.required(),
-      description: "Two or three sentences on the card — the pitch for the role.",
+      description:
+        "Two or three sentences on the card — the pitch for the role.",
     }),
     defineField({
       name: "videoUrl",
@@ -384,8 +436,8 @@ export const jobOpening = defineType({
       options: { collapsible: true, collapsed: true },
       description:
         "Applicants land on /careers/<slug>/thank-you the moment they submit. " +
-        "Every field is optional — an empty section still gets a page, with " +
-        "built-in copy and a standard three-step what-happens-next.",
+        "Every field is optional — an empty section still gets a finished page, " +
+        "with built-in copy and the team videos and stats at the foot.",
       fields: [
         defineField({
           name: "title",
@@ -410,7 +462,7 @@ export const jobOpening = defineType({
           title: "What happens next",
           type: "array",
           description:
-            "The numbered next steps for this role. Empty uses the built-in default.",
+            "The numbered next steps for this role. Empty hides the section entirely.",
           of: [
             {
               type: "object",
@@ -426,9 +478,74 @@ export const jobOpening = defineType({
             },
           ],
         }),
+        defineField({
+          name: "videoWall",
+          title: "Team videos",
+          type: "object",
+          options: { collapsible: true, collapsed: true },
+          description:
+            "The video wall at the foot of the page. Any field left empty " +
+            'falls back to the careers default ("Hear it from our team"), and ' +
+            "an empty video list falls back to the Video Testimonials collection.",
+          fields: [
+            defineField({
+              name: "eyebrow",
+              type: "string",
+              description:
+                'Small mono line above the title. Default: "[ the team ]".',
+            }),
+            defineField({
+              name: "title",
+              type: "string",
+              description: 'Default: "Hear it from our team".',
+            }),
+            defineField({
+              name: "sub",
+              title: "Sub-line",
+              type: "string",
+              description:
+                'Mono line under the title. Default: "// TAP A VIDEO TO PLAY."',
+            }),
+            defineField({
+              name: "videos",
+              title: "Team videos",
+              type: "array",
+              description:
+                "Pick the videos for this role. Empty uses the Video Testimonials collection.",
+              of: [
+                {
+                  type: "object",
+                  fields: [
+                    defineField({
+                      name: "name",
+                      type: "string",
+                      validation: (r) => r.required(),
+                    }),
+                    defineField({
+                      name: "handle",
+                      type: "string",
+                      description: 'e.g. "@creator".',
+                    }),
+                    defineField({
+                      name: "videoUrl",
+                      title: "Video URL",
+                      type: "url",
+                      validation: (r) => r.required(),
+                    }),
+                  ],
+                  preview: { select: { title: "name", subtitle: "handle" } },
+                },
+              ],
+            }),
+          ],
+        }),
       ],
     }),
-    defineField({ name: "order", type: "number", validation: (r) => r.required() }),
+    defineField({
+      name: "order",
+      type: "number",
+      validation: (r) => r.required(),
+    }),
   ],
   orderings: [
     {
@@ -447,26 +564,36 @@ export const service = defineType({
   title: "Service",
   type: "document",
   fields: [
-    defineField({ name: "title", type: "string", validation: (r) => r.required() }),
+    defineField({
+      name: "title",
+      type: "string",
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "promise",
       type: "string",
       validation: (r) => r.required(),
       description: 'The all-caps hook, e.g. "PAY LESS TO THE IRS".',
     }),
-    defineField({ name: "body", type: "text", rows: 4, validation: (r) => r.required() }),
+    defineField({
+      name: "body",
+      type: "text",
+      rows: 4,
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: "chips",
       type: "array",
       of: [{ type: "string" }],
       options: { layout: "tags" },
-      description: 'Optional mono tags, e.g. LLC / EIN / BOI / BANK.',
+      description: "Optional mono tags, e.g. LLC / EIN / BOI / BANK.",
     }),
     defineField({
       name: "nodeTag",
       type: "string",
       validation: (r) => r.required(),
-      description: 'Mono node label on the neural map, e.g. "TAX_STRATEGY.NODE".',
+      description:
+        'Mono node label on the neural map, e.g. "TAX_STRATEGY.NODE".',
     }),
     defineField({
       name: "image",
@@ -479,13 +606,15 @@ export const service = defineType({
       name: "imgLabel",
       title: "Image slot label",
       type: "string",
-      description: "Mono filename shown on the placeholder frame while no image is set.",
+      description:
+        "Mono filename shown on the placeholder frame while no image is set.",
     }),
     defineField({
       name: "order",
       type: "number",
       validation: (r) => r.required().min(1).max(9),
-      description: "Position 1–5. Node colors on the neural map follow this order.",
+      description:
+        "Position 1–5. Node colors on the neural map follow this order.",
     }),
   ],
   orderings: [
@@ -496,7 +625,12 @@ export const service = defineType({
     },
   ],
   preview: {
-    select: { title: "title", subtitle: "promise", media: "image", order: "order" },
+    select: {
+      title: "title",
+      subtitle: "promise",
+      media: "image",
+      order: "order",
+    },
     prepare: ({ title, subtitle, media, order }) => ({
       title: `${String(order ?? 0).padStart(2, "0")} — ${title}`,
       subtitle,
