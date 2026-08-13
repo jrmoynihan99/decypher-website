@@ -21,9 +21,9 @@ export default async function RefundCalculatorPage() {
       </div>
 
       <p className="mt-2 max-w-2xl text-sm text-muted">
-        We only charge for the time we actually work. Enter the join date and
-        the cancellation date, and this shows exactly what comes back — and how
-        we got there.
+        We only charge for the time we actually work. Pick the payment plan and
+        the two dates, and this shows exactly what moves in which direction —
+        a refund, a balance due, or a clean break — and how we got there.
       </p>
 
       <div className="mt-9">

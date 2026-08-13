@@ -30,7 +30,7 @@ import {
   penaltyFor,
   type WizardStatus,
 } from "@/lib/widget-tax";
-import { CHART } from "@/components/portal/widgets/charts";
+import { CHART, LineChart } from "@/components/portal/widgets/charts";
 import {
   Check,
   Disclaimer,
@@ -1524,102 +1524,39 @@ function ChipRow({
   );
 }
 
-/** The compounding curve — a filled area with an end-of-line value label. */
+/** The compounding curve — the shared LineChart with an end-of-line label.
+ *  The bespoke fixed-viewBox SVG this replaced stretched its text to the
+ *  container aspect; the shared chart renders in pixel space and animates
+ *  between states. */
 function GrowthChart({
   series,
   startAge,
-  endAge,
 }: {
   series: number[];
   startAge: number;
+  /** Kept in the signature for the call site; the axis derives ages from the index. */
   endAge: number;
 }) {
   const s = series.length < 2 ? [series[0] ?? 0, series[0] ?? 0] : series;
-  const W = 700;
-  const H = 205;
-  const padL = 60;
-  const padR = 16;
-  const padT = 16;
-  const padB = 24;
-  const x0 = padL;
-  const x1 = W - padR;
-  const y1 = H - padB;
-  const pw = x1 - x0;
-  const ph = y1 - padT;
-  const max = Math.max(...s, 1);
-  const n = s.length - 1;
-
-  const X = (i: number) => x0 + (n > 0 ? i / n : 0) * pw;
-  const Y = (v: number) => y1 - (v / max) * ph;
-
-  const line = s
-    .map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`)
-    .join(" ");
-  const area = `${line} L${X(n).toFixed(1)} ${y1} L${X(0).toFixed(1)} ${y1} Z`;
-  const endY = Y(s[s.length - 1]);
+  const last = s[s.length - 1] ?? 0;
+  const age = (i: number) => (startAge ? `Age ${startAge + i}` : "—");
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full">
-      <defs>
-        <linearGradient id="wizard-growth" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={CHART.cost} stopOpacity="0.4" />
-          <stop offset="100%" stopColor={CHART.cost} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-
-      {[0, 0.5, 1].map((t) => {
-        const gy = Y(max * t);
-        return (
-          <g key={t}>
-            <line
-              x1={x0}
-              y1={gy}
-              x2={x1}
-              y2={gy}
-              stroke={CHART.grid}
-            />
-            <text
-              x={x0 - 8}
-              y={gy + 3.5}
-              textAnchor="end"
-              className="fill-faint font-mono"
-              style={{ fontSize: 11 }}
-            >
-              {max * t >= 1e6
-                ? `$${((max * t) / 1e6).toFixed(1)}M`
-                : `$${Math.round((max * t) / 1e3)}K`}
-            </text>
-          </g>
-        );
-      })}
-
-      <path d={area} fill="url(#wizard-growth)" />
-      <path d={line} fill="none" stroke={CHART.cost} strokeWidth="2.5" />
-      <circle cx={X(n)} cy={endY} r="4.5" fill={CHART.cost} />
-      {n > 0 ? (
-        <text
-          x={X(n) - 7}
-          y={Math.max(padT + 11, endY - 9)}
-          textAnchor="end"
-          className="fill-magenta font-display"
-          style={{ fontSize: 15, fontWeight: 700 }}
-        >
-          {money(s[s.length - 1])}
-        </text>
-      ) : null}
-
-      <text x={x0} y={H - 7} className="fill-faint font-mono" style={{ fontSize: 11 }}>
-        Age {startAge || "—"}
-      </text>
-      <text
-        x={x1}
-        y={H - 7}
-        textAnchor="end"
-        className="fill-faint font-mono"
-        style={{ fontSize: 11 }}
-      >
-        Age {endAge || "—"}
-      </text>
-    </svg>
+    <LineChart
+      series={[
+        {
+          key: "wizard-growth",
+          label: "Projected value",
+          color: CHART.cost,
+          kind: "line",
+          values: s,
+        },
+      ]}
+      xLabel={age}
+      labelForIndex={age}
+      height={220}
+      fillFirst
+      endLabel={money(last)}
+    />
   );
 }

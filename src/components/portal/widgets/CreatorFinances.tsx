@@ -21,7 +21,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LineChart, type Series } from "@/components/portal/widgets/charts";
+import {
+  CHART,
+  ChartLegend,
+  LineChart,
+  type Series,
+} from "@/components/portal/widgets/charts";
 import {
   Chip,
   Disclaimer,
@@ -63,11 +68,135 @@ import type {
 /** Cents → the dollars every formatter in widget-format expects. */
 const usd = (cents: number) => money2(cents / 100);
 
+/** Chart roles resolved through the shared kit so the light theme re-binds them. */
 const COLORS = {
-  income: "#3dd6c4",
-  expenses: "#ff2d78",
-  net: "#f1eef6",
+  income: CHART.gain,
+  expenses: CHART.cost,
+  net: CHART.level,
 } as const;
+
+/**
+ * Operating margin — net operating profit over income. Distinct from
+ * netMargin(): this is the number the firm coaches creators against, so it
+ * gets the tier treatment below.
+ */
+function operatingMargin(t: ProfitAndLossTotals): number | null {
+  return t.income === 0 ? null : t.netOperatingIncome / t.income;
+}
+
+/**
+ * The firm's operating-margin targets. Checked in order, first match wins.
+ * These drive both the Net operating profit tile's colour and the visible
+ * band legend — the legend is on screen (not a tooltip) because this view
+ * gets screen-shared when a client presents to THEIR client.
+ */
+const MARGIN_TIERS = [
+  { min: 0.7, range: "70%+", name: "Elite", color: "var(--color-tier-elite)" },
+  { min: 0.4, range: "40–70%", name: "Strong", color: "var(--color-tier-good)" },
+  { min: 0.2, range: "20–40%", name: "Fair", color: "var(--color-tier-warn)" },
+  { min: -Infinity, range: "<20%", name: "Low", color: "var(--color-danger)" },
+] as const;
+
+function tierFor(margin: number | null) {
+  if (margin === null) return null;
+  return MARGIN_TIERS.find((t) => margin >= t.min) ?? MARGIN_TIERS[3];
+}
+
+/** The Net operating profit tile — same anatomy as Kpi, tier-coloured value. */
+function OperatingProfitKpi({ totals }: { totals: ProfitAndLossTotals }) {
+  const margin = operatingMargin(totals);
+  const tier = tierFor(margin);
+  return (
+    <div className="bg-panel px-4 py-3.5">
+      <Mono className="text-dusk">Net operating profit</Mono>
+      <div
+        className="mt-1.5 font-display text-[22px] font-bold tabular-nums transition-colors duration-300"
+        style={{ color: tier?.color ?? "var(--color-fog)" }}
+      >
+        {usd(totals.netOperatingIncome)}
+      </div>
+      <div className="mt-1 text-[11px] text-dusk">
+        {margin === null
+          ? "no income this period"
+          : `${pct(margin, 0)} operating margin`}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The margin scale: a gradient band strip with the current margin marked on
+ * it, targets labelled underneath. Doubles as the legend for the tile above.
+ */
+function OperatingMarginMeter({ totals }: { totals: ProfitAndLossTotals }) {
+  const margin = operatingMargin(totals);
+  if (margin === null) return null;
+  const clamped = Math.max(0, Math.min(1, margin));
+  const tier = tierFor(margin)!;
+  return (
+    <div className="rounded-[16px] border border-edge bg-panel px-5 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Mono className="text-dusk">Operating margin vs. targets</Mono>
+        <span
+          className="font-display text-[15px] font-bold tabular-nums transition-colors duration-300"
+          style={{ color: tier.color }}
+        >
+          {pct(margin, 0)} · {tier.name}
+        </span>
+      </div>
+
+      <div
+        className="relative mt-3 h-[10px] rounded-full"
+        style={{
+          background:
+            "linear-gradient(90deg, var(--color-danger) 0%, var(--color-danger) 14%, var(--color-tier-warn) 26%, var(--color-tier-warn) 34%, var(--color-tier-good) 46%, var(--color-tier-good) 64%, var(--color-tier-elite) 76%, var(--color-tier-elite) 100%)",
+        }}
+      >
+        {[0.2, 0.4, 0.7].map((t) => (
+          <span
+            key={t}
+            aria-hidden
+            className="absolute top-[-2px] h-[14px] w-px bg-night/70"
+            style={{ left: `${t * 100}%` }}
+          />
+        ))}
+        <span
+          aria-hidden
+          className="absolute top-1/2 h-[18px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-fog shadow transition-[left] duration-500 ease-out"
+          style={{ left: `${clamped * 100}%` }}
+        />
+      </div>
+
+      <div className="relative mt-1 h-[14px] font-mono text-[10px] text-faint">
+        {[0.2, 0.4, 0.7].map((t) => (
+          <span
+            key={t}
+            className="absolute -translate-x-1/2"
+            style={{ left: `${t * 100}%` }}
+          >
+            {Math.round(t * 100)}%
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+        {[...MARGIN_TIERS].reverse().map((t) => (
+          <span
+            key={t.range}
+            className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-dusk"
+          >
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-full"
+              style={{ background: t.color }}
+            />
+            {t.range} {t.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * The option list all three pickers share. Searchable rather than a plain
@@ -507,11 +636,7 @@ function Roster({
       <KpiRow cols={4}>
         <Kpi label="Total income" value={usd(bucket.income)} sub={`${bucket.count} creators`} />
         <Kpi label="Total expenses" value={usd(bucket.expenses + bucket.costOfGoodsSold)} />
-        <Kpi
-          label="Net operating profit"
-          value={usd(bucket.netOperatingIncome)}
-          tone={bucket.netOperatingIncome >= 0 ? "pos" : "neg"}
-        />
+        <OperatingProfitKpi totals={bucket} />
         <Kpi
           label="Net profit"
           value={usd(bucket.netIncome)}
@@ -519,6 +644,8 @@ function Roster({
           sub={marginLabel(bucket)}
         />
       </KpiRow>
+
+      <OperatingMarginMeter totals={bucket} />
 
       {mixedCurrency ? (
         <Callout>
@@ -986,6 +1113,16 @@ function CreatorDetail({
       ]
     : [];
 
+  // Personal (non-operating) lines get their own list under the expense
+  // ledger — they're not operating spend, so they shouldn't muddy that read.
+  const personalLines = d
+    ? d.expenseLines.filter((l) => l.category === "personal")
+    : [];
+  const operatingLines = d
+    ? d.expenseLines.filter((l) => l.category !== "personal")
+    : [];
+  const personalTotal = personalLines.reduce((s, l) => s + l.total, 0);
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -1042,11 +1179,7 @@ function CreatorDetail({
           <KpiRow cols={4}>
             <Kpi label="Total income" value={usd(d.income)} />
             <Kpi label="Total expenses" value={usd(d.expenses + d.costOfGoodsSold)} />
-            <Kpi
-              label="Net operating profit"
-              value={usd(d.netOperatingIncome)}
-              tone={d.netOperatingIncome >= 0 ? "pos" : "neg"}
-            />
+            <OperatingProfitKpi totals={d} />
             <Kpi
               label="Net profit"
               value={usd(d.netIncome)}
@@ -1055,8 +1188,11 @@ function CreatorDetail({
             />
           </KpiRow>
 
+          <OperatingMarginMeter totals={d} />
+
           {d.months.length > 1 ? (
             <Panel title="Month by month">
+              <ChartLegend series={series} />
               <LineChart
                 series={series}
                 xLabel={(i) => monthShortLabel(d.months[i] ?? "")}
@@ -1076,10 +1212,22 @@ function CreatorDetail({
             />
             <Ledger
               title="Expense categories"
-              items={d.expenseLines}
-              total={d.costOfGoodsSold + d.expenses + d.otherExpenses}
+              items={operatingLines}
+              total={d.costOfGoodsSold + d.expenses + d.otherExpenses - personalTotal}
+              totalLabel="Total operating"
               color={COLORS.expenses}
-              note="Cost of goods sold is folded in, so this reconciles against net profit."
+              note="Cost of goods sold is folded in. Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Operating and personal together reconcile against net profit."
+              secondary={
+                personalLines.length
+                  ? {
+                      title: "Personal (non-operating)",
+                      items: personalLines,
+                      total: personalTotal,
+                      totalLabel: "Total personal",
+                      color: CHART.baseline,
+                    }
+                  : null
+              }
             />
           </div>
 
@@ -1130,6 +1278,51 @@ function CreatorDetail({
   );
 }
 
+/** One proportion-bar list — Ledger renders one or two of these. */
+function LedgerRows({
+  items,
+  total,
+  color,
+}: {
+  items: LineItem[];
+  total: number;
+  color: string;
+}) {
+  const scale = Math.max(...items.map((i) => Math.abs(i.total)), 1);
+  return (
+    <div className="flex flex-col gap-2.5">
+      {items.map((item) => {
+        const share = total === 0 ? 0 : item.total / total;
+        return (
+          <div key={`${item.accountId ?? item.name}`}>
+            <div className="flex items-baseline justify-between gap-3 text-[13px]">
+              <span className="min-w-0 truncate text-muted" title={item.name}>
+                {item.name}
+              </span>
+              <span className="flex-none font-mono tabular-nums text-mist">
+                {usd(item.total)}
+                <span className="ml-2 text-[11px] text-faint">
+                  {total === 0 ? "—" : pct(share, 0)}
+                </span>
+              </span>
+            </div>
+            <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-white/[0.06]">
+              <div
+                className="h-full rounded-full transition-[width] duration-500 ease-out"
+                style={{
+                  width: `${Math.min(100, (Math.abs(item.total) / scale) * 100)}%`,
+                  background: color,
+                  opacity: item.total < 0 ? 0.4 : 1,
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** A ledger with proportion bars — the categorical read the chart kit has no primitive for. */
 function Ledger({
   title,
@@ -1137,53 +1330,49 @@ function Ledger({
   total,
   color,
   note,
+  totalLabel = "Total",
+  secondary,
 }: {
   title: string;
   items: LineItem[];
   total: number;
   color: string;
   note: string;
+  totalLabel?: string;
+  /** An appended, visually quieter list — personal (non-operating) spend. */
+  secondary?: {
+    title: string;
+    items: LineItem[];
+    total: number;
+    totalLabel: string;
+    color: string;
+  } | null;
 }) {
-  const scale = Math.max(...items.map((i) => Math.abs(i.total)), 1);
   return (
     <Panel title={title}>
       {items.length ? (
         <>
-          <div className="flex flex-col gap-2.5">
-            {items.map((item) => {
-              const share = total === 0 ? 0 : item.total / total;
-              return (
-                <div key={`${item.accountId ?? item.name}`}>
-                  <div className="flex items-baseline justify-between gap-3 text-[13px]">
-                    <span className="min-w-0 truncate text-muted" title={item.name}>
-                      {item.name}
-                    </span>
-                    <span className="flex-none font-mono tabular-nums text-mist">
-                      {usd(item.total)}
-                      <span className="ml-2 text-[11px] text-faint">
-                        {total === 0 ? "—" : pct(share, 0)}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-white/[0.06]">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, (Math.abs(item.total) / scale) * 100)}%`,
-                        background: color,
-                        opacity: item.total < 0 ? 0.4 : 1,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <LineRow label="Total" value={usd(total)} total />
+          <LedgerRows items={items} total={total} color={color} />
+          <LineRow label={totalLabel} value={usd(total)} total />
         </>
       ) : (
         <p className="text-[13px] text-dusk">Nothing in this period.</p>
       )}
+      {secondary && secondary.items.length ? (
+        <div className="mt-5 border-t border-edge pt-4">
+          <Mono className="mb-3 block text-dusk">{secondary.title}</Mono>
+          <LedgerRows
+            items={secondary.items}
+            total={secondary.total}
+            color={secondary.color}
+          />
+          <LineRow
+            label={secondary.totalLabel}
+            value={usd(secondary.total)}
+            total
+          />
+        </div>
+      ) : null}
       <Note>{note}</Note>
     </Panel>
   );

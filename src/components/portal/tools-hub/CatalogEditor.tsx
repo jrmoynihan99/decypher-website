@@ -404,8 +404,34 @@ function ToolRow({
   onDelete: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const problems = problemsWith(tool);
   const accentHex = asAccent(tool.accent);
+
+  /** Push a picked file to the logo route and drop its URL into logoUrl. */
+  const uploadLogo = async (file: File) => {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/portal/tools-hub/logo", {
+        method: "POST",
+        body: fd,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.url) throw new Error(data.message ?? "Upload failed");
+      onEdit({ logoUrl: data.url });
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div
@@ -510,16 +536,46 @@ function ToolRow({
                 className={`${inputCls} font-mono`}
               />
             </Field>
-            <Field label="Logo URL" hint="Optional — an SVG dropped in public/logos/">
-              <input
-                value={tool.logoUrl ?? ""}
-                onChange={(e) => onEdit({ logoUrl: e.target.value })}
-                // The path this tool's own file would live at, so the
-                // convention is legible without reading the docs.
-                placeholder={`/logos/${tool.id || slugify(tool.name) || "tool"}.svg`}
-                spellCheck={false}
-                className={`${inputCls} font-mono`}
-              />
+            <Field
+              label="Logo"
+              hint="Optional — upload a PNG/JPEG/SVG, or paste a URL"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  value={tool.logoUrl ?? ""}
+                  onChange={(e) => onEdit({ logoUrl: e.target.value })}
+                  // The path this tool's own file would live at, so the
+                  // convention is legible without reading the docs.
+                  placeholder={`/logos/${tool.id || slugify(tool.name) || "tool"}.svg`}
+                  spellCheck={false}
+                  className={`${inputCls} font-mono`}
+                />
+                {/* A label wrapping a hidden file input — the portal has no
+                    styled file-picker, and the native control can't match the
+                    mini-button look. */}
+                <label
+                  className={`${miniBtnCls} relative flex-none ${
+                    uploading ? "opacity-50" : "cursor-pointer"
+                  }`}
+                >
+                  {uploading ? "Uploading…" : "Upload"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    disabled={uploading}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      // Clear so re-picking the same file fires change again.
+                      e.target.value = "";
+                      if (file) void uploadLogo(file);
+                    }}
+                  />
+                </label>
+              </div>
+              {uploadError ? (
+                <p className="mt-1 text-[12px] text-danger">{uploadError}</p>
+              ) : null}
             </Field>
           </div>
 

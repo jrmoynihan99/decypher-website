@@ -19,6 +19,15 @@
   --color-ember: #ff5c2e;
   --color-teal: #3dd6c4;
   --color-danger: #ff6b7a;
+  /* Chart furniture — referenced by the portal chart kit via var() so the
+     portal light theme can re-bind them alongside the palette above. */
+  --color-chart-grid: rgba(255, 255, 255, 0.055);
+  --color-chart-crosshair: rgba(255, 255, 255, 0.28);
+  /* Operating-margin tier colours (Creator Finances). Status roles, kept out
+     of the categorical chart palette on purpose; the low tier reuses danger. */
+  --color-tier-warn: #f2c14e;
+  --color-tier-good: #45d483;
+  --color-tier-elite: #58a6ff;
 
   /* ---- fonts (variables provided by next/font in layout.tsx) ---- */
   --font-display: var(--font-space-grotesk), sans-serif;
@@ -602,4 +611,126 @@ html[data-page-transition="zoom"]::view-transition-new(root) {
   .rvg-float {
     animation: none;
   }
+}
+
+/* ── Portal theme ─────────────────────────────────────────────────────────
+   The portal layout stamps data-portal-theme="dark"|"light" on <html>
+   (PortalTheme.tsx sets it on mount and removes it on unmount, so the
+   marketing site never sees these overrides). Because every portal surface
+   is expressed in the palette tokens above, a theme is just a re-binding of
+   those custom properties — utilities like text-mist resolve var(--color-mist)
+   at the element, and these unlayered rules out-cascade the @theme layer.
+
+   The attribute must live on <html>, not the portal wrapper div: portal
+   modals createPortal to <body> (see LeadModal note) and would otherwise
+   escape a wrapper-scoped theme. */
+
+/* Dark stays the default look, but with the dim end of the text ramp lifted:
+   the original values read too dark on real screens (staff were squinting).
+   Marketing pages keep the original ramp. */
+html[data-portal-theme="dark"] {
+  --color-mist: #c7c2d4;
+  --color-muted: #a49db8;
+  --color-dusk: #948da8;
+  --color-faint: #7d7692;
+}
+
+html[data-portal-theme="light"] {
+  color-scheme: light;
+  --color-night: #f4f2f8;
+  --color-panel: #ffffff;
+  --color-panel-2: #edeaf3;
+  --color-edge-soft: #e4e1ec;
+  --color-edge: #dbd6e5;
+  --color-edge-mid: #cdc7da;
+  --color-edge-bright: #beb7ce;
+  --color-fog: #17131f;
+  --color-mist: #413b52;
+  --color-muted: #5b536e;
+  --color-dusk: #6e6683;
+  --color-faint: #8d86a0;
+  /* Accents darkened just enough to hold contrast as text on white. */
+  --color-magenta: #e30f6e;
+  --color-violet: #7a1fd6;
+  --color-ember: #e04a17;
+  /* Teal sits at #0b8276, not the naive darkening of the brand teal: the
+     dataviz validator puts anything lighter or bluer inside the deutan/protan
+     confusion band with the darkened magenta (income vs expenses lines). */
+  --color-teal: #0b8276;
+  --color-danger: #d92d47;
+  --color-chart-grid: rgba(23, 19, 31, 0.09);
+  --color-chart-crosshair: rgba(23, 19, 31, 0.38);
+  --color-tier-warn: #9a7208;
+  --color-tier-good: #12833f;
+  --color-tier-elite: #1b66d6;
+}
+
+/* White-alpha overlays assume a dark substrate; in light mode remap the
+   handful of literal utilities the portal uses onto ink alphas. Unlayered,
+   so they beat the utilities layer regardless of specificity. Alphas run a
+   touch higher than their white counterparts — dark-on-light needs more ink
+   to read at the same weight. */
+html[data-portal-theme="light"] .bg-white\/\[0\.015\] {
+  background-color: rgb(23 19 31 / 0.03);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.02\],
+html[data-portal-theme="light"] .hover\:bg-white\/\[0\.02\]:hover,
+html[data-portal-theme="light"] .even\:bg-white\/\[0\.02\]:nth-child(even) {
+  background-color: rgb(23 19 31 / 0.035);
+}
+html[data-portal-theme="light"] .hover\:bg-white\/\[0\.025\]:hover {
+  background-color: rgb(23 19 31 / 0.04);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.03\],
+html[data-portal-theme="light"] .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgb(23 19 31 / 0.05);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.04\],
+html[data-portal-theme="light"] .hover\:bg-white\/\[0\.04\]:hover {
+  background-color: rgb(23 19 31 / 0.06);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.045\] {
+  background-color: rgb(23 19 31 / 0.065);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.05\],
+html[data-portal-theme="light"] .hover\:bg-white\/\[0\.05\]:hover {
+  background-color: rgb(23 19 31 / 0.07);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.06\] {
+  background-color: rgb(23 19 31 / 0.08);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.07\] {
+  background-color: rgb(23 19 31 / 0.09);
+}
+html[data-portal-theme="light"] .bg-white\/\[0\.08\] {
+  background-color: rgb(23 19 31 / 0.1);
+}
+html[data-portal-theme="light"] .border-white\/\[0\.05\] {
+  border-color: rgb(23 19 31 / 0.1);
+}
+html[data-portal-theme="light"] .border-white\/\[0\.06\] {
+  border-color: rgb(23 19 31 / 0.11);
+}
+html[data-portal-theme="light"] .border-white\/\[0\.07\] {
+  border-color: rgb(23 19 31 / 0.12);
+}
+html[data-portal-theme="light"] .border-white\/\[0\.08\] {
+  border-color: rgb(23 19 31 / 0.13);
+}
+html[data-portal-theme="light"] .border-white\/10 {
+  border-color: rgb(23 19 31 / 0.14);
+}
+html[data-portal-theme="light"] .border-white\/12 {
+  border-color: rgb(23 19 31 / 0.16);
+}
+html[data-portal-theme="light"] .border-white\/15 {
+  border-color: rgb(23 19 31 / 0.2);
+}
+html[data-portal-theme="light"] .hover\:border-white\/20:hover {
+  border-color: rgb(23 19 31 / 0.26);
+}
+/* Four inputs pin dark native widgets via [color-scheme:dark]; give the
+   light theme light-scheme pickers instead. */
+html[data-portal-theme="light"] .\[color-scheme\:dark\] {
+  color-scheme: light;
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "crypto";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import {
   asAccent,
@@ -152,4 +153,62 @@ export async function saveCatalog(raw: unknown, actor: string): Promise<ToolsHub
     .doc(DOC)
     .set({ ...catalog, updatedAt: new Date(), updatedBy: actor });
   return catalog;
+}
+
+/* ────────────────────────────── logos ──────────────────────────────
+ *
+ * Uploaded logo images live in Firestore, one doc per image, served back by
+ * /api/portal/tools-hub/logo/[id]. Not a storage bucket because the Firebase
+ * project has no billing account, so Cloud Storage can't be enabled — the
+ * same constraint (and pattern) as resume PDFs in application-store.ts.
+ * Content-addressed by a random id rather than keyed on the tool: a draft
+ * tool has no id yet, and re-uploading must not clobber the image an older
+ * catalog revision still points at.
+ */
+
+const LOGOS = "toolsHubLogos";
+
+/** MIME types accepted for a logo upload. */
+export const LOGO_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/svg+xml",
+]);
+
+/** Raw-byte cap. Base64 inflates ~4/3×, and a Firestore doc caps at 1MiB. */
+export const LOGO_MAX_BYTES = 600 * 1024;
+
+export async function saveLogo(
+  bytes: Buffer,
+  contentType: string,
+  actor: string,
+): Promise<string> {
+  if (!isConfigured()) throw new ToolsHubError("Firebase is not configured");
+  if (!LOGO_TYPES.has(contentType)) throw new ToolsHubError("Unsupported image type");
+  if (!bytes.length) throw new ToolsHubError("Empty file");
+  if (bytes.length > LOGO_MAX_BYTES) {
+    throw new ToolsHubError("Logo must be under 600KB");
+  }
+  const id = randomUUID();
+  await adminDb().collection(LOGOS).doc(id).set({
+    contentType,
+    data: bytes.toString("base64"),
+    size: bytes.length,
+    uploadedAt: new Date(),
+    uploadedBy: actor,
+  });
+  return id;
+}
+
+export async function getLogo(
+  id: string,
+): Promise<{ contentType: string; data: Buffer } | null> {
+  if (!isConfigured()) return null;
+  const snap = await adminDb().collection(LOGOS).doc(id).get();
+  if (!snap.exists) return null;
+  const d = snap.data() as { contentType?: unknown; data?: unknown };
+  if (typeof d.contentType !== "string" || typeof d.data !== "string") return null;
+  if (!LOGO_TYPES.has(d.contentType)) return null;
+  return { contentType: d.contentType, data: Buffer.from(d.data, "base64") };
 }

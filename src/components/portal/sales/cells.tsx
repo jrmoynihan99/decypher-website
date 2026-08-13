@@ -109,12 +109,24 @@ export function SelectCell<T extends string = string>({
 /* ───────────────────────────── money ───────────────────────────── */
 
 /**
- * Whole dollars, committed on blur rather than on keystroke.
+ * Whole dollars. Commits on blur AND, since typing used to only persist once
+ * focus moved somewhere else (the "I have to click another tab to save it"
+ * complaint), on a debounced idle while typing.
  *
- * Per-keystroke saving would fire a write for every digit of "1995" and let a
- * half-typed "19" briefly become the stored offer. Local state holds the text
- * while typing; Enter commits early, Escape abandons.
+ * Per-keystroke saving would fire a write for every digit of "1995", so the
+ * idle commit waits out the typing burst instead. It also deliberately does
+ * NOT normalise the visible text — rewriting the field under a paused typist
+ * eats their cursor; only the blur commit tidies the text. Enter commits
+ * early, Escape abandons (and cancels any pending idle commit).
  */
+const MONEY_IDLE_MS = 900;
+
+function parseMoney(raw: string): number | null {
+  const digits = raw.replace(/[^0-9.]/g, "");
+  const next = digits === "" ? null : Math.round(Number(digits));
+  return next == null || !Number.isFinite(next) || next < 0 ? null : next;
+}
+
 export function MoneyCell({
   value,
   onChange,
@@ -128,6 +140,15 @@ export function MoneyCell({
 }) {
   const [text, setText] = useState(value == null ? "" : String(value));
   const dirty = useRef(false);
+  const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelIdle = () => {
+    if (idle.current) {
+      clearTimeout(idle.current);
+      idle.current = null;
+    }
+  };
+  useEffect(() => cancelIdle, []);
 
   // Re-sync when the row changes underneath us (a refresh, another editor) —
   // but never while this cell is mid-edit, which would eat what's being typed.
@@ -136,10 +157,9 @@ export function MoneyCell({
   }, [value]);
 
   const commit = () => {
+    cancelIdle();
     dirty.current = false;
-    const raw = text.replace(/[^0-9.]/g, "");
-    const next = raw === "" ? null : Math.round(Number(raw));
-    const clean = next == null || !Number.isFinite(next) || next < 0 ? null : next;
+    const clean = parseMoney(text);
     setText(clean == null ? "" : String(clean));
     if (clean !== value) onChange(clean);
   };
@@ -156,12 +176,19 @@ export function MoneyCell({
         disabled={saving}
         onChange={(e) => {
           dirty.current = true;
-          setText(e.target.value);
+          const raw = e.target.value;
+          setText(raw);
+          cancelIdle();
+          idle.current = setTimeout(() => {
+            const clean = parseMoney(raw);
+            if (clean !== value) onChange(clean);
+          }, MONEY_IDLE_MS);
         }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
+            cancelIdle();
             dirty.current = false;
             setText(value == null ? "" : String(value));
             e.currentTarget.blur();

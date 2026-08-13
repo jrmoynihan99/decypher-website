@@ -1,16 +1,24 @@
 "use client";
 
 /**
- * Cancellation refund calculator.
+ * Service Ledger — the cancellation calculator.
  *
- * Run on a call with a client who's leaving: pick the two dates and the tool
- * says what comes back and, more usefully, *why* — the plain-English block at
- * the bottom is the script. Plan pricing sits in a collapsed drawer so staff
- * can set it before the call without it dominating the screen.
+ * Run on a call with a client who's leaving: pick the payment plan and the two
+ * dates and the tool says what moves in which direction and, more usefully,
+ * *why* — the plain-English block is the script. Tier pricing, prepay
+ * discounts and the catch-up bonus sit in a collapsed drawer so staff can set
+ * them before the call without them dominating the screen.
  *
- * The rule it encodes: we keep the months we worked in the current contract
- * year, refund the rest, and in years 1 and 2 also keep the one-time
- * onboarding fee. From year 3 the onboarding deduction goes away entirely.
+ * The rule it encodes (the client's new model): the yearly price is the
+ * selected tier's rate minus the prepay discount for the chosen cadence.
+ * We charge for the months we actually worked in the current contract year at
+ * that yearly price ÷ 12, and compare it against the installments the client
+ * has paid so far this year (quarterly ×4, six-monthly ×2, or one annual
+ * payment — an installment counts as paid the moment its period starts).
+ * The catch-up bonus — free back-work done up front — is recovered IN FULL if
+ * the client leaves inside their first two years, and waived from year 3.
+ * Unlike the old calculator this can go past zero in either direction: the
+ * result is a refund, a balance still owed, or a clean break.
  */
 
 import { useMemo, useState } from "react";
@@ -28,11 +36,19 @@ import {
   Panel,
 } from "@/components/portal/widgets/ui";
 
-const PLANS = [
-  { id: "core", label: "Core", fee: 12000 },
-  { id: "creator", label: "Creator", fee: 17000 },
-  { id: "csuite", label: "C-suite", fee: 30000 },
+const TIERS = [
+  { id: "core", label: "Core" },
+  { id: "creator", label: "Creator" },
+  { id: "csuite", label: "C-suite" },
 ] as const;
+type TierId = (typeof TIERS)[number]["id"];
+
+const CADENCES = [
+  { id: "quarterly", label: "Quarterly", small: "4 payments / yr", installments: 4 },
+  { id: "semi", label: "Every 6 months", small: "2 payments / yr", installments: 2 },
+  { id: "annual", label: "Paid yearly", small: "1 payment / yr", installments: 1 },
+] as const;
+type CadenceId = (typeof CADENCES)[number]["id"];
 
 /** Fractional months between two dates — the day remainder is prorated. */
 function monthsBetween(d1: Date, d2: Date): number {
@@ -61,29 +77,44 @@ function tenureLabel(mos: number): string {
   return `${y} yr${m > 0 ? ` ${m} mo` : ""}`;
 }
 
+/** Installments considered paid by this point of the contract year — one the
+ *  moment its period starts, so 0.1 months into a quarter counts that quarter. */
+function installmentsPaidBy(cadence: CadenceId, mosUsed: number): number {
+  if (cadence === "annual") return 1;
+  if (cadence === "semi") return Math.min(2, Math.floor(mosUsed / 6) + 1);
+  return Math.min(4, Math.floor(mosUsed / 3) + 1);
+}
+
 export default function RefundCalculator() {
   const [setupOpen, setSetupOpen] = useState(false);
-  const [plan, setPlan] = useState<string>("core");
-  const [fee1, setFee1] = useState("12000");
-  const [fee2, setFee2] = useState("12000");
-  const [fee3, setFee3] = useState("12000");
-  const [onboarding, setOnboarding] = useState("5000");
+
+  // ── staff setup ──
+  const [tier, setTier] = useState<TierId>("core");
+  const [rates, setRates] = useState<Record<TierId, string>>({
+    core: "12000",
+    creator: "17000",
+    csuite: "30000",
+  });
+  const [discAnnual, setDiscAnnual] = useState("2000");
+  const [discSemi, setDiscSemi] = useState("1000");
+  const [catchPer, setCatchPer] = useState("5000");
+  const [catchYears, setCatchYears] = useState("1");
+
+  // ── client-facing inputs ──
+  const [cadence, setCadence] = useState<CadenceId>("quarterly");
   const [signDate, setSignDate] = useState("");
   const [cancelDate, setCancelDate] = useState("");
 
-  const applyPlan = (id: string, fee: number) => {
-    setPlan(id);
-    const v = String(fee);
-    setFee1(v);
-    setFee2(v);
-    setFee3(v);
-  };
+  const tierLabel = TIERS.find((t) => t.id === tier)!.label;
+  const catchTotal = toNum(catchPer) * Math.max(0, Math.floor(toNum(catchYears)));
 
-  // Editing a fee by hand means the preset no longer describes the numbers.
-  const editFee = (set: (v: string) => void) => (v: string) => {
-    setPlan("");
-    set(v);
-  };
+  /** Yearly price for the chosen tier and cadence — prepay discount applied. */
+  const yearly = useMemo(() => {
+    const base = toNum(rates[tier]);
+    if (cadence === "annual") return Math.max(0, base - toNum(discAnnual));
+    if (cadence === "semi") return Math.max(0, base - toNum(discSemi));
+    return base;
+  }, [rates, tier, cadence, discAnnual, discSemi]);
 
   const result = useMemo(() => {
     if (!signDate || !cancelDate) return { state: "empty" as const };
@@ -93,20 +124,24 @@ export default function RefundCalculator() {
 
     const totalMos = monthsBetween(sd, cd);
     const contractYear = Math.floor(totalMos / 12) + 1;
-    const feeForYear = [fee1, fee2, fee3][Math.min(contractYear, 3) - 1];
-    const fee = toNum(feeForYear);
-
     const mosUsed = totalMos - (contractYear - 1) * 12;
     const mosLeft = Math.max(0, 12 - mosUsed);
 
-    const rate = fee / 12;
-    const onboardingFee = toNum(onboarding);
-    // Onboarding is only deducted while the client is inside their first two years.
-    const onboardingDue = contractYear <= 2 ? onboardingFee : 0;
+    const rate = yearly / 12;
+    const installments = CADENCES.find((c) => c.id === cadence)!.installments;
+    const instAmt = yearly / installments;
+    const instPaid = installmentsPaidBy(cadence, mosUsed);
+    const paid = instPaid * instAmt;
 
     const worked = mosUsed * rate;
-    const proRata = mosLeft * rate;
-    const net = Math.max(0, proRata - onboardingDue);
+    // The catch-up bonus is recoverable IN FULL inside years 1–2 (the total
+    // can go underwater), and waived entirely from year 3.
+    const clawback = contractYear <= 2 ? catchTotal : 0;
+    const owed = worked + clawback;
+
+    const net = paid - owed;
+    const refund = Math.max(0, net);
+    const due = Math.max(0, -net);
 
     const yearStart = addYears(sd, contractYear - 1);
     const yearEnd = new Date(addYears(sd, contractYear).getTime() - 86400000);
@@ -117,18 +152,22 @@ export default function RefundCalculator() {
       cd,
       totalMos,
       contractYear,
-      fee,
       rate,
       mosUsed,
       mosLeft,
-      onboardingFee,
-      onboardingDue,
+      installments,
+      instAmt,
+      instPaid,
+      paid,
       worked,
-      net,
+      clawback,
+      owed,
+      refund,
+      due,
       yearStart,
       yearEnd,
     };
-  }, [signDate, cancelDate, fee1, fee2, fee3, onboarding]);
+  }, [signDate, cancelDate, yearly, cadence, catchTotal]);
 
   return (
     <div>
@@ -140,54 +179,141 @@ export default function RefundCalculator() {
         onToggle={setSetupOpen}
       >
         <div>
-            <Mono className="text-dusk">Plan preset</Mono>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {PLANS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => applyPlan(p.id, p.fee)}
-                className={`cursor-pointer rounded-[10px] border px-3.5 py-2 text-[13px] transition-colors duration-150 ${
-                  plan === p.id
-                    ? "border-transparent bg-grad font-semibold text-white"
-                    : "border-edge-bright text-muted hover:border-magenta hover:text-fog"
-                }`}
-              >
-                {p.label} — {money(p.fee)}
-              </button>
-            ))}
-          </div>
-
-          <Mono className="mt-5 block text-dusk">
-            Annual contract value by year
+          <Mono className="text-dusk">
+            Plan tiers — set each tier&rsquo;s current yearly rate
           </Mono>
-          <div className="mt-2 grid gap-2.5 sm:grid-cols-3">
-            <Field label="Year 1">
-              <NumInput value={fee1} onChange={editFee(setFee1)} prefix="$" align="left" />
-            </Field>
-            <Field label="Year 2">
-              <NumInput value={fee2} onChange={editFee(setFee2)} prefix="$" align="left" />
-            </Field>
-            <Field label="Year 3+">
-              <NumInput value={fee3} onChange={editFee(setFee3)} prefix="$" align="left" />
-            </Field>
+          <div className="mt-2 flex flex-col gap-2">
+            {TIERS.map((t) => {
+              const on = tier === t.id;
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => setTier(t.id)}
+                  className={`flex cursor-pointer items-center gap-3 rounded-[10px] border px-3 py-2 transition-colors duration-150 ${
+                    on
+                      ? "border-magenta bg-magenta/[0.07]"
+                      : "border-edge-bright hover:border-magenta/60"
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`relative h-4 w-4 flex-none rounded-full border-2 ${
+                      on ? "border-magenta" : "border-edge-bright"
+                    }`}
+                  >
+                    {on ? (
+                      <span className="absolute inset-[2.5px] rounded-full bg-grad" />
+                    ) : null}
+                  </span>
+                  <span className="flex-1 text-[13.5px] font-medium text-fog">
+                    {t.label}
+                  </span>
+                  <div
+                    className="w-[150px] flex-none"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <NumInput
+                      value={rates[t.id]}
+                      onChange={(v) => setRates((r) => ({ ...r, [t.id]: v }))}
+                      prefix="$"
+                      align="left"
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          <div className="mt-4 max-w-[220px]">
-            <Field
-              label="One-time onboarding fee"
-              hint="Deducted in years 1 and 2 only"
-            >
+          <Mono className="mt-5 block text-dusk">Prepay discounts</Mono>
+          <div className="mt-2 grid gap-2.5 sm:grid-cols-3">
+            <Field label="Pay-yearly discount">
               <NumInput
-                value={onboarding}
-                onChange={setOnboarding}
+                value={discAnnual}
+                onChange={setDiscAnnual}
+                prefix="$"
+                align="left"
+              />
+            </Field>
+            <Field label="6-month discount">
+              <NumInput
+                value={discSemi}
+                onChange={setDiscSemi}
                 prefix="$"
                 align="left"
               />
             </Field>
           </div>
+
+          <Mono className="mt-5 block text-dusk">
+            Catch-up bonus — free back-work done up front, recovered if they
+            leave within 2 years
+          </Mono>
+          <div className="mt-2 grid gap-2.5 sm:grid-cols-3">
+            <Field label="Value per year of catch-up">
+              <NumInput
+                value={catchPer}
+                onChange={setCatchPer}
+                prefix="$"
+                align="left"
+              />
+            </Field>
+            <Field label="Years of catch-up">
+              <NumInput value={catchYears} onChange={setCatchYears} align="left" />
+            </Field>
+            <Field label="Total bonus value">
+              <div className="flex h-[42px] items-center rounded-[10px] border border-dashed border-magenta/40 bg-magenta/[0.06] px-3.5 font-mono text-[14px] font-bold tabular-nums text-magenta">
+                {money(catchTotal)}
+              </div>
+            </Field>
+          </div>
         </div>
       </Drawer>
+
+      {/* ── payment plan ── */}
+      <div className="mt-4">
+        <Mono className="mb-2 block text-muted">Payment plan</Mono>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {CADENCES.map((c) => {
+            const on = cadence === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCadence(c.id)}
+                className={`cursor-pointer rounded-[10px] border px-3.5 py-2.5 text-center transition-colors duration-150 ${
+                  on
+                    ? "border-transparent bg-grad font-semibold text-white"
+                    : "border-edge-bright bg-panel-2 text-muted hover:border-magenta hover:text-fog"
+                }`}
+              >
+                <span className="block text-[13.5px]">{c.label}</span>
+                <span
+                  className={`mt-0.5 block text-[11px] font-normal ${on ? "text-white/80" : "text-dusk"}`}
+                >
+                  {c.small}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* the pill restating what the chosen plan costs */}
+        <div className="mt-3 inline-block rounded-full border border-edge bg-panel-2 px-4 py-2 font-mono text-[12px] tabular-nums text-muted">
+          <span className="font-bold text-magenta">{tierLabel}</span>
+          {" · "}
+          {cadence === "quarterly"
+            ? `Quarterly · ${money(yearly / 4)} × 4 · ${money(yearly)}/yr`
+            : cadence === "semi"
+              ? `Every 6 months · ${money(yearly / 2)} × 2 · ${money(yearly)}/yr`
+              : `Paid yearly · ${money(yearly)}/yr`}
+          {cadence !== "quarterly" ? (
+            <span className="text-teal">
+              {" "}
+              ({money(toNum(cadence === "annual" ? discAnnual : discSemi))} off)
+            </span>
+          ) : null}
+        </div>
+      </div>
 
       {/* ── the two dates ── */}
       <div className="mt-4 grid gap-3.5 sm:grid-cols-2">
@@ -203,28 +329,48 @@ export default function RefundCalculator() {
         <div className="mt-5 rounded-[16px] border border-dashed border-white/12 px-6 py-14 text-center text-[13.5px] text-dusk">
           {result.state === "invalid"
             ? "The cancellation date needs to be after the join date."
-            : "Pick both dates above to see the refund."}
+            : "Pick both dates above to see the result."}
         </div>
       ) : (
         /* Two columns once there's an answer: the number and its shape on the
            left, the arithmetic and the script to read out on the right. */
         <div className="mt-5 grid items-start gap-5 lg:grid-cols-2">
           <div className="flex flex-col gap-5">
-            {/* hero */}
-            <div className="rounded-[20px] bg-grad p-[2px]">
+            {/* hero — refund, balance due, or a clean break */}
+            <div
+              className={`rounded-[20px] p-[2px] ${
+                result.due > 0
+                  ? "bg-gradient-to-br from-danger to-magenta"
+                  : result.refund > 0
+                    ? "bg-grad"
+                    : "bg-edge-bright"
+              }`}
+            >
               <div className="rounded-[20px] bg-night px-6 py-7 text-center">
                 <Mono className="tracking-[2px] text-muted">
-                  Money back to you
+                  {result.due > 0
+                    ? "Balance still owed"
+                    : result.refund > 0
+                      ? "Money back to you"
+                      : "All squared up"}
                 </Mono>
-                <div className="mt-1.5 font-display text-[52px] font-bold leading-none tracking-[-1.5px] tabular-nums text-grad">
-                  {money(result.net)}
+                <div
+                  className={`mt-1.5 font-display text-[52px] font-bold leading-none tracking-[-1.5px] tabular-nums ${
+                    result.due > 0
+                      ? "text-danger"
+                      : result.refund > 0
+                        ? "text-grad"
+                        : "text-fog"
+                  }`}
+                >
+                  {money(result.due > 0 ? result.due : result.refund)}
                 </div>
                 <p className="mt-2.5 text-[13.5px] text-muted">
-                  {result.net > 0
-                    ? `For the ${result.mosLeft.toFixed(1)} months left in your current contract year.`
-                    : result.onboardingDue > 0
-                      ? "The months we worked plus the one-time onboarding use up this year's payment."
-                      : "This contract year is fully used."}
+                  {result.due > 0
+                    ? "This covers work and catch-up bonus we delivered before you paid for it."
+                    : result.refund > 0
+                      ? `For the ${result.mosLeft.toFixed(1)} months left in your current year.`
+                      : "Nothing owed either way — your payments match the work done."}
                 </p>
               </div>
             </div>
@@ -256,11 +402,11 @@ export default function RefundCalculator() {
               <div className="mt-3 flex flex-wrap gap-4 text-[12px] text-muted">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-3 w-3 rounded-[3px] bg-grad" />
-                  Months we worked (kept)
+                  Months we worked
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <span className="h-3 w-3 rounded-[3px] bg-violet/25" />
-                  Unused (refundable)
+                  Unused months
                 </span>
               </div>
             </div>
@@ -268,13 +414,14 @@ export default function RefundCalculator() {
             <KpiRow cols={3}>
               <Kpi label="Time with us" value={tenureLabel(result.totalMos)} />
               <Kpi
-                label="Months left this yr"
-                value={`${result.mosLeft.toFixed(1)} mo`}
+                label="Payments made this yr"
+                value={`${result.instPaid} of ${result.installments}`}
               />
               <Kpi
-                label="Onboarding fee"
-                value={result.onboardingDue > 0 ? "Applies" : "Waived"}
-                tone={result.onboardingDue > 0 ? "neg" : "pos"}
+                label="Catch-up bonus"
+                value={money(catchTotal)}
+                sub={result.clawback > 0 ? "recoverable — inside 2 years" : "waived — past 2 years"}
+                tone={result.clawback > 0 ? "neg" : "pos"}
               />
             </KpiRow>
           </div>
@@ -282,33 +429,79 @@ export default function RefundCalculator() {
           <div className="flex flex-col gap-5">
             {/* breakdown */}
             <Panel title="How we got there">
-              <LineRow label="You paid for this year" value={money(result.fee)} />
+              <Mono className="block text-magenta">
+                1 · Money you&rsquo;ve paid us
+              </Mono>
               <LineRow
                 label={
                   <>
-                    Months we worked{" "}
+                    Your payments this year{" "}
+                    <span className="text-dusk">
+                      ({result.instPaid} of {result.installments} payment
+                      {result.installments > 1 ? "s" : ""})
+                    </span>
+                  </>
+                }
+                value={money(result.paid)}
+              />
+
+              <Mono className="mt-4 block text-magenta">
+                2 · What you owe us for
+              </Mono>
+              <LineRow
+                label={
+                  <>
+                    Bookkeeping we did{" "}
                     <span className="text-dusk">
                       ({result.mosUsed.toFixed(1)} mo × {money(result.rate)})
                     </span>
                   </>
                 }
-                value={`− ${money(result.worked)}`}
-                tone="neg"
+                value={money(result.worked)}
               />
-              {result.onboardingDue > 0 ? (
+              {result.clawback > 0 ? (
                 <LineRow
-                  label="One-time onboarding (already done)"
-                  value={`− ${money(result.onboardingFee)}`}
-                  tone="neg"
+                  label="Catch-up work, taken back since you're leaving early"
+                  value={money(result.clawback)}
                 />
               ) : null}
+              <LineRow label="Total you owe us for" value={money(result.owed)} total />
+
+              <p className="mt-4 rounded-[10px] bg-white/[0.03] px-4 py-3 text-[13.5px] leading-relaxed text-mist [&_b]:font-semibold [&_b]:text-fog">
+                {result.due > 0 ? (
+                  <>
+                    You owe us for <b>{money(result.owed)}</b> so far, but
+                    you&rsquo;ve only paid <b>{money(result.paid)}</b>. The
+                    difference is what&rsquo;s left for you to pay us.
+                  </>
+                ) : result.refund > 0 ? (
+                  <>
+                    You&rsquo;ve paid <b>{money(result.paid)}</b>, but you only
+                    owe us for <b>{money(result.owed)}</b>. The difference goes
+                    back to you.
+                  </>
+                ) : (
+                  <>
+                    What you&rsquo;ve paid (<b>{money(result.paid)}</b>) and what
+                    you owe us for (<b>{money(result.owed)}</b>) are the same —
+                    so nothing is owed either way.
+                  </>
+                )}
+              </p>
+
               <LineRow
-                label="Your refund"
-                value={money(result.net)}
+                label={
+                  result.due > 0
+                    ? "Balance due (you pay us)"
+                    : result.refund > 0
+                      ? "Your refund (we pay you)"
+                      : "All settled up"
+                }
+                value={money(result.due > 0 ? result.due : result.refund)}
                 total
                 size="lg"
                 display
-                tone="brand"
+                tone={result.due > 0 ? "neg" : result.refund > 0 ? "brand" : undefined}
               />
             </Panel>
 
@@ -319,7 +512,12 @@ export default function RefundCalculator() {
                 In plain terms
               </h3>
               <div className="mt-3 space-y-3 text-[14px] leading-[1.8] text-mist [&_b]:font-semibold [&_b]:text-fog">
-                <PlainEnglish r={result} />
+                <PlainEnglish
+                  r={result}
+                  yearly={yearly}
+                  cadence={cadence}
+                  hasDiscount={cadence !== "quarterly"}
+                />
               </div>
             </div>
           </div>
@@ -328,8 +526,10 @@ export default function RefundCalculator() {
 
       <Disclaimer>
         Pro-rated on whole and partial months from the anniversary of the join
-        date. Onboarding is deducted inside the first two contract years only.
-        Confirm against the signed agreement before committing to a figure.
+        date; an installment counts as paid once its period starts. The catch-up
+        bonus is recovered in full inside the first two contract years and
+        waived from year three. Confirm against the signed agreement before
+        committing to a figure.
       </Disclaimer>
     </div>
   );
@@ -372,65 +572,101 @@ function DateField({
   );
 }
 
-/** Three scripts, picked by whether onboarding applies and whether anything is owed. */
+const CADENCE_NAMES: Record<string, string> = {
+  quarterly: "quarterly",
+  semi: "every-6-months",
+  annual: "paid-yearly",
+};
+
+/** Three scripts — balance due, refund, or a clean break. */
 function PlainEnglish({
   r,
+  yearly,
+  cadence,
+  hasDiscount,
 }: {
   r: {
     sd: Date;
     cd: Date;
+    contractYear: number;
     mosUsed: number;
     mosLeft: number;
-    totalMos: number;
-    fee: number;
+    rate: number;
+    installments: number;
+    instPaid: number;
+    paid: number;
     worked: number;
-    net: number;
-    onboardingFee: number;
-    onboardingDue: number;
+    clawback: number;
+    refund: number;
+    due: number;
   };
+  yearly: number;
+  cadence: string;
+  hasDiscount: boolean;
 }) {
   const joined = shortDate(r.sd);
   const cancelled = shortDate(r.cd);
 
-  if (r.onboardingDue > 0 && r.net > 0) {
+  const opener = (
+    <p>
+      You joined on <b>{joined}</b> and are cancelling on <b>{cancelled}</b> —
+      that&rsquo;s <b>{r.mosUsed.toFixed(1)} months</b> into your current year,
+      with <b>{r.mosLeft.toFixed(1)}</b> left. You&rsquo;re on the{" "}
+      <b>{CADENCE_NAMES[cadence]}</b> plan at <b>{money(yearly)}/year</b>
+      {hasDiscount ? " (after the prepay discount)" : ""}, which works out to{" "}
+      <b>{money(r.rate)}/month</b>.
+    </p>
+  );
+
+  if (r.due > 0) {
     return (
       <>
+        {opener}
         <p>
-          You joined DeCypher on <b>{joined}</b> and are cancelling on{" "}
-          <b>{cancelled}</b>. That&rsquo;s <b>{r.mosUsed.toFixed(1)} months</b>{" "}
-          into your current year, with <b>{r.mosLeft.toFixed(1)} months</b> left.
+          So far you&rsquo;ve made{" "}
+          <b>
+            {r.instPaid} of {r.installments}
+          </b>{" "}
+          payment{r.installments > 1 ? "s" : ""} this year (
+          <b>{money(r.paid)}</b>). But we&rsquo;ve already delivered{" "}
+          <b>{money(r.worked)}</b> of monthly work
+          {r.clawback > 0 ? (
+            <>
+              {" "}
+              plus your <b>{money(r.clawback)}</b> catch-up bonus
+            </>
+          ) : null}
+          .
         </p>
         <p>
-          You paid <b>{money(r.fee)}</b> for the year. We keep{" "}
-          <b>{money(r.worked)}</b> for the months we worked, plus your one-time{" "}
-          <b>{money(r.onboardingFee)}</b> onboarding — the setup work we did
-          before your regular service started.
-        </p>
-        <p>
-          That leaves a refund of <b>{money(r.net)}</b>. After your first two
-          years the onboarding fee goes away completely — you&rsquo;d get every
-          unused month back.
+          Because you&rsquo;re leaving early, that work is more than
+          you&rsquo;ve paid so far — so instead of a refund, there&rsquo;s a{" "}
+          <b>balance due of {money(r.due)}</b>. After two full years the
+          catch-up bonus drops off entirely.
         </p>
       </>
     );
   }
 
-  if (r.onboardingDue > 0) {
+  if (r.refund > 0) {
     return (
       <>
+        {opener}
         <p>
-          You joined on <b>{joined}</b> and are cancelling on <b>{cancelled}</b>{" "}
-          — <b>{r.mosUsed.toFixed(1)} months</b> into your current year.
+          You&rsquo;ve paid <b>{money(r.paid)}</b> so far this year. We keep{" "}
+          <b>{money(r.worked)}</b> for the months we worked
+          {r.clawback > 0 ? (
+            <>
+              , plus your <b>{money(r.clawback)}</b> catch-up bonus
+            </>
+          ) : null}
+          .
         </p>
         <p>
-          The <b>{money(r.worked)}</b> for months worked plus your one-time{" "}
-          <b>{money(r.onboardingFee)}</b> onboarding fee add up to what
-          you&rsquo;ve already paid this year, so there&rsquo;s{" "}
-          <b>no refund due</b>. Nothing extra is owed, either.
-        </p>
-        <p>
-          Good to know: after two full years with us, the onboarding fee is
-          waived entirely.
+          That leaves a refund of <b>{money(r.refund)}</b> coming back to you.
+          {r.contractYear <= 2
+            ? " Once you pass two full years, the catch-up bonus goes away and you'd get every unused month back."
+            : " You're past two years, so there's no catch-up deduction — thanks for being a long-term client."}
         </p>
       </>
     );
@@ -438,19 +674,15 @@ function PlainEnglish({
 
   return (
     <>
+      {opener}
       <p>
-        You joined on <b>{joined}</b> and are cancelling on <b>{cancelled}</b> —
-        you&rsquo;ve been with us <b>{tenureLabel(r.totalMos)}</b>.
+        You&rsquo;ve paid <b>{money(r.paid)}</b> so far this year, and the work
+        we&rsquo;ve delivered
+        {r.clawback > 0 ? " (including your catch-up bonus)" : ""} comes to the
+        same amount.
       </p>
       <p>
-        Because you&rsquo;re past your first two years, there&rsquo;s{" "}
-        <b>no onboarding deduction</b>. We simply keep <b>{money(r.worked)}</b>{" "}
-        for the {r.mosUsed.toFixed(1)} months we worked this year and refund the
-        rest.
-      </p>
-      <p>
-        Your refund is <b>{money(r.net)}</b> for the {r.mosLeft.toFixed(1)}{" "}
-        unused months. Thanks for being a long-term client.
+        So it&rsquo;s a clean break — <b>no refund and nothing owed</b>.
       </p>
     </>
   );

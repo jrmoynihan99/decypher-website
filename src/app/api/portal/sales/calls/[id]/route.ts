@@ -11,7 +11,12 @@ import {
 } from "@/lib/sales/options";
 import { getOptionsConfig, keysOf } from "@/lib/sales/config";
 import { SalesStoreError, updateSalesCall } from "@/lib/sales/store";
-import type { SalesCallEdits, SalesOptionsConfig } from "@/lib/sales/types";
+import { postClosedDealToSlack } from "@/lib/slack";
+import type {
+  OptionItem,
+  SalesCallEdits,
+  SalesOptionsConfig,
+} from "@/lib/sales/types";
 
 /**
  * Save one cell.
@@ -112,7 +117,29 @@ export async function PATCH(
   }
 
   try {
-    const call = await updateSalesCall(id, edits, session.email);
+    const { call, previousStatus } = await updateSalesCall(id, edits, session.email);
+
+    // A deal transitioning into "won" rings the onboarding channel. Awaited —
+    // a floating promise dies with the serverless invocation — but a Slack
+    // failure only logs; it never fails the save that caused it.
+    if (call.status === "won" && previousStatus !== "won") {
+      const label = (list: OptionItem[], key: string | null) =>
+        key ? (list.find((o) => o.key === key)?.label ?? key) : null;
+      try {
+        await postClosedDealToSlack({
+          name: call.name,
+          email: call.email,
+          offer: call.offer,
+          service: label(config.service, call.service),
+          paymentPlan: label(config.paymentPlan, call.paymentPlan),
+          onboardingDate: call.onboardingDate,
+          closedBy: session.email,
+        });
+      } catch (err) {
+        console.error("[sales] onboarding notification failed:", err);
+      }
+    }
+
     return NextResponse.json({ ok: true, call });
   } catch (e) {
     if (e instanceof SalesStoreError) {

@@ -377,6 +377,57 @@ export const jobOpening = defineType({
       options: { layout: "tags" },
       description: "Optional mono tags, e.g. QBO / 1120-S / STRATEGY.",
     }),
+    defineField({
+      name: "thankYou",
+      title: "After you apply — thank-you page",
+      type: "object",
+      options: { collapsible: true, collapsed: true },
+      description:
+        "Applicants land on /careers/<slug>/thank-you the moment they submit. " +
+        "Every field is optional — an empty section still gets a page, with " +
+        "built-in copy and a standard three-step what-happens-next.",
+      fields: [
+        defineField({
+          name: "title",
+          type: "string",
+          description: 'Headline. Default: "Application received."',
+        }),
+        defineField({
+          name: "body",
+          type: "text",
+          rows: 3,
+          description: "A short paragraph under the headline.",
+        }),
+        defineField({
+          name: "videoUrl",
+          title: "Video URL",
+          type: "url",
+          description:
+            "Optional YouTube video — a founder hello or a what-happens-next walkthrough. Empty hides the player.",
+        }),
+        defineField({
+          name: "steps",
+          title: "What happens next",
+          type: "array",
+          description:
+            "The numbered next steps for this role. Empty uses the built-in default.",
+          of: [
+            {
+              type: "object",
+              fields: [
+                defineField({
+                  name: "title",
+                  type: "string",
+                  validation: (r) => r.required(),
+                }),
+                defineField({ name: "body", type: "text", rows: 2 }),
+              ],
+              preview: { select: { title: "title", subtitle: "body" } },
+            },
+          ],
+        }),
+      ],
+    }),
     defineField({ name: "order", type: "number", validation: (r) => r.required() }),
   ],
   orderings: [

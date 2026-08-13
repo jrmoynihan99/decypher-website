@@ -388,6 +388,15 @@ export default function ApplicationForm({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setDone(true);
+      // Hand off to the role's thank-you page — a full navigation, like the
+      // booking flow's, so the page loads fresh with scroll at the top. The
+      // inline `done` state stays rendered underneath while the browser
+      // switches, and remains the whole experience for legacy docs with no
+      // slug (which have no thank-you route to go to).
+      if (job.slug) {
+        window.location.assign(`/careers/${job.slug}/thank-you`);
+        return;
+      }
     } catch (e) {
       setFailure(e instanceof Error ? e.message : "Something went wrong.");
     } finally {

@@ -3,6 +3,7 @@ import type { StaffSession } from "@/lib/firebase/session";
 import SignOutButton from "@/components/portal/SignOutButton";
 import SidebarUser from "@/components/portal/SidebarUser";
 import { SidebarRail, SidebarStrip } from "@/components/portal/PortalSidebar";
+import { PortalThemeToggle } from "@/components/portal/PortalTheme";
 
 /**
  * Where portal users report a problem. Deliberately a real, monitored mailbox
@@ -39,17 +40,21 @@ export default function PortalShell({
             DeCypher <span className="text-grad">Portal</span>
           </Link>
 
-          {/* phones only — the desktop copy lives at the foot of the rail */}
-          <div className="ml-auto flex items-center gap-3 md:hidden">
-            <div className="text-right">
-              <div className="font-body text-[13px] leading-tight text-fog">
-                {session.displayName || session.email}
+          <div className="ml-auto flex items-center gap-3">
+            <PortalThemeToggle />
+
+            {/* phones only — the desktop copy lives at the foot of the rail */}
+            <div className="flex items-center gap-3 md:hidden">
+              <div className="text-right">
+                <div className="font-body text-[13px] leading-tight text-fog">
+                  {session.displayName || session.email}
+                </div>
+                <div className="font-mono text-[10px] uppercase tracking-[1.2px] text-dusk">
+                  {session.role}
+                </div>
               </div>
-              <div className="font-mono text-[10px] uppercase tracking-[1.2px] text-dusk">
-                {session.role}
-              </div>
+              <SignOutButton />
             </div>
-            <SignOutButton />
           </div>
         </div>
 
