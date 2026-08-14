@@ -25,12 +25,14 @@ import {
   sliceIndices,
   type PeriodKey,
 } from "./periods";
-import type {
-  AccountingBasis,
-  CreatorFinanceRow,
-  DataStatus,
-  FinancesPayload,
-  ProfitAndLoss,
+import {
+  parsePnlSection,
+  type AccountingBasis,
+  type CreatorFinanceRow,
+  type DataStatus,
+  type FinancesPayload,
+  type PnlSection,
+  type ProfitAndLoss,
 } from "./types";
 
 const COLLECTION = "quickbooksSnapshots";
@@ -40,7 +42,7 @@ const COLLECTION = "quickbooksSnapshots";
  * client's figures predate the fix" from "these are current" — without it, the
  * only remedy after a parser bug is to re-sync everything and hope.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Older than this and the row is flagged stale. The cron runs daily. */
 const STALE_MS = 36 * 60 * 60 * 1000;
@@ -90,13 +92,24 @@ function toPnl(v: unknown): ProfitAndLoss | null {
   if (!d || typeof d !== "object") return null;
 
   const monthlyRaw = (d.monthly ?? {}) as Record<string, unknown>;
-  const line = (x: unknown) => {
+  /**
+   * `fallback` covers schemaVersion 1 docs, written before lines carried their
+   * section. Reading the `cost-of-sales` category as COGS recovers most of the
+   * split for those, and the daily sync replaces the guess with QuickBooks' own
+   * answer — so a stale doc renders a slightly conservative ratio for a few
+   * hours rather than the wrong shape of report.
+   */
+  const line = (fallback: PnlSection) => (x: unknown) => {
     const l = x as Record<string, unknown>;
+    const category = s(l?.category) as ProfitAndLoss["revenueStreams"][number]["category"];
     return {
       accountId: typeof l?.accountId === "string" ? l.accountId : null,
       name: s(l?.name),
       subType: typeof l?.subType === "string" ? l.subType : null,
-      category: s(l?.category) as ProfitAndLoss["revenueStreams"][number]["category"],
+      category,
+      section:
+        parsePnlSection(l?.section) ??
+        (category === "cost-of-sales" ? "cogs" : fallback),
       total: num(l?.total),
       monthly: nums(l?.monthly),
     };
@@ -119,8 +132,10 @@ function toPnl(v: unknown): ProfitAndLoss | null {
       otherExpenses: nums(monthlyRaw.otherExpenses),
       netIncome: nums(monthlyRaw.netIncome),
     },
-    revenueStreams: Array.isArray(d.revenueStreams) ? d.revenueStreams.map(line) : [],
-    expenseLines: Array.isArray(d.expenseLines) ? d.expenseLines.map(line) : [],
+    revenueStreams: Array.isArray(d.revenueStreams)
+      ? d.revenueStreams.map(line("income"))
+      : [],
+    expenseLines: Array.isArray(d.expenseLines) ? d.expenseLines.map(line("operating")) : [],
     incomeByCategory: (d.incomeByCategory ?? {}) as ProfitAndLoss["incomeByCategory"],
     expensesByCategory: (d.expensesByCategory ?? {}) as ProfitAndLoss["expensesByCategory"],
     empty: d.empty === true,

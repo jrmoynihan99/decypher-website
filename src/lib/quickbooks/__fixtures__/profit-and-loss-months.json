@@ -187,16 +187,26 @@
                 { "value": "4405.50" }
               ],
               "type": "Data"
+            },
+            {
+              "ColData": [
+                { "value": "Merch Fulfilment Labor", "id": "21" },
+                { "value": "380.00" },
+                { "value": "425.50" },
+                { "value": "295.00" },
+                { "value": "1100.50" }
+              ],
+              "type": "Data"
             }
           ]
         },
         "Summary": {
           "ColData": [
             { "value": "Total Cost of Goods Sold" },
-            { "value": "1420.00" },
-            { "value": "1880.50" },
-            { "value": "1105.00" },
-            { "value": "4405.50" }
+            { "value": "1800.00" },
+            { "value": "2306.00" },
+            { "value": "1400.00" },
+            { "value": "5506.00" }
           ]
         },
         "type": "Section",
@@ -206,10 +216,10 @@
         "Summary": {
           "ColData": [
             { "value": "GROSS PROFIT" },
-            { "value": "50090.65" },
-            { "value": "38542.15" },
-            { "value": "60880.75" },
-            { "value": "149513.55" }
+            { "value": "49710.65" },
+            { "value": "38116.65" },
+            { "value": "60585.75" },
+            { "value": "148413.05" }
           ]
         },
         "type": "Section",
@@ -345,10 +355,10 @@
         "Summary": {
           "ColData": [
             { "value": "NET OPERATING INCOME" },
-            { "value": "30364.07" },
-            { "value": "16875.21" },
-            { "value": "34751.82" },
-            { "value": "81991.10" }
+            { "value": "29984.07" },
+            { "value": "16449.71" },
+            { "value": "34456.82" },
+            { "value": "80890.60" }
           ]
         },
         "type": "Section",
@@ -443,10 +453,10 @@
         "Summary": {
           "ColData": [
             { "value": "NET INCOME" },
-            { "value": "30196.22" },
-            { "value": "16710.01" },
-            { "value": "34583.72" },
-            { "value": "81489.95" }
+            { "value": "29816.22" },
+            { "value": "16284.51" },
+            { "value": "34288.72" },
+            { "value": "80389.45" }
           ]
         },
         "type": "Section",

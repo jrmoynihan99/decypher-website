@@ -44,6 +44,7 @@ import {
   type LineItem,
   type MonthlySeries,
   type MoneyCents,
+  type PnlSection,
   type ProfitAndLoss,
   type ProfitAndLossTotals,
 } from "./types";
@@ -166,6 +167,8 @@ function planColumns(columns: QboColumn[]): ColumnPlan {
 type Leaf = {
   accountId: string | null;
   name: string;
+  /** Stamped by the caller from the section being walked — see collectLeaves. */
+  section: PnlSection;
   monthly: MoneyCents[];
   total: MoneyCents;
 };
@@ -213,6 +216,7 @@ function collectLeaves(
   rows: QboRow[] | undefined,
   plan: ColumnPlan,
   out: Leaf[],
+  section: PnlSection,
   depth = 0,
 ): void {
   if (!rows || depth > 12) return;
@@ -226,10 +230,10 @@ function collectLeaves(
         // Only when it actually carries money. Most parents don't, and emitting
         // a run of $0.00 rows would bury the lines that matter.
         if (cells.total !== 0 || cells.monthly.some((v) => v !== 0)) {
-          out.push({ accountId: header[0]?.id ?? null, name, ...cells });
+          out.push({ accountId: header[0]?.id ?? null, name, section, ...cells });
         }
       }
-      collectLeaves(children, plan, out, depth + 1);
+      collectLeaves(children, plan, out, section, depth + 1);
       continue;
     }
     const cd = row.ColData ?? row.Summary?.ColData;
@@ -239,6 +243,7 @@ function collectLeaves(
     out.push({
       accountId: cd[0]?.id ?? null,
       name,
+      section,
       ...readCells(cd, plan),
     });
   }
@@ -265,6 +270,7 @@ function toLineItems(
       name: meta?.fullyQualifiedName || leaf.name,
       subType: meta?.subType ?? null,
       category,
+      section: leaf.section,
       total: leaf.total,
       monthly: leaf.monthly,
     } satisfies LineItem;
@@ -276,18 +282,35 @@ function toLineItems(
   return items.length > MAX_LINES ? rollUpTail(items) : items;
 }
 
+/**
+ * Fold everything past MAX_LINES into one row PER SECTION.
+ *
+ * Per section, not one combined row: the ledger divides each section by its own
+ * sum now, so a mixed roll-up would drop cost-of-sales money into the operating
+ * denominator and understate every ratio in it — a quieter version of the exact
+ * bug the section split exists to fix.
+ */
 function rollUpTail(items: LineItem[]): LineItem[] {
   const kept = items.slice(0, MAX_LINES - 1);
-  const tail = items.slice(MAX_LINES - 1);
-  const monthly = tail[0].monthly.map((_, i) => tail.reduce((sum, it) => sum + it.monthly[i], 0));
-  kept.push({
-    accountId: null,
-    name: `Other (${tail.length} accounts)`,
-    subType: null,
-    category: "uncategorized",
-    total: tail.reduce((sum, it) => sum + it.total, 0),
-    monthly,
-  });
+  const bySection = new Map<PnlSection, LineItem[]>();
+  for (const item of items.slice(MAX_LINES - 1)) {
+    const group = bySection.get(item.section);
+    if (group) group.push(item);
+    else bySection.set(item.section, [item]);
+  }
+  for (const [section, group] of bySection) {
+    kept.push({
+      accountId: null,
+      name: `Other (${group.length} accounts)`,
+      subType: null,
+      category: "uncategorized",
+      section,
+      total: group.reduce((sum, it) => sum + it.total, 0),
+      monthly: group[0].monthly.map((_, i) =>
+        group.reduce((sum, it) => sum + it.monthly[i], 0),
+      ),
+    });
+  }
   return kept;
 }
 
@@ -400,17 +423,21 @@ export function parseProfitAndLoss(raw: unknown, opts: ParseOptions): ParseResul
     "Net income",
   );
 
-  // Leaves. COGS joins the expense ledger — it's a cost of doing business to
-  // everyone except an accountant, and keeping it in its own section would
-  // leave the expense breakdown failing to reconcile against net income.
+  // Leaves. COGS stays in the one expense array — pulling it out here would
+  // leave the expense breakdown failing to reconcile against net income — but
+  // every leaf carries the section it came from, because a cost of sale and an
+  // operating expense are not the same kind of number and the ratios the firm
+  // reads off this report are only true when the two are told apart.
   const incomeLeaves: Leaf[] = [];
-  collectLeaves(sections.get(GROUP.income)?.Rows?.Row, plan, incomeLeaves);
-  collectLeaves(sections.get(GROUP.otherIncome)?.Rows?.Row, plan, incomeLeaves);
+  collectLeaves(sections.get(GROUP.income)?.Rows?.Row, plan, incomeLeaves, "income");
+  collectLeaves(sections.get(GROUP.otherIncome)?.Rows?.Row, plan, incomeLeaves, "other-income");
 
   const expenseLeaves: Leaf[] = [];
-  collectLeaves(sections.get(GROUP.cogs)?.Rows?.Row, plan, expenseLeaves);
-  collectLeaves(sections.get(GROUP.expenses)?.Rows?.Row, plan, expenseLeaves);
-  collectLeaves(sections.get(GROUP.otherExpenses)?.Rows?.Row, plan, expenseLeaves);
+  collectLeaves(sections.get(GROUP.cogs)?.Rows?.Row, plan, expenseLeaves, "cogs");
+  collectLeaves(sections.get(GROUP.expenses)?.Rows?.Row, plan, expenseLeaves, "operating");
+  collectLeaves(
+    sections.get(GROUP.otherExpenses)?.Rows?.Row, plan, expenseLeaves, "other-expense",
+  );
 
   const revenueStreams = toLineItems(
     incomeLeaves, opts.accounts, opts.overrides, "income", unknownAccountIds, unmappedSubTypes,

@@ -125,13 +125,13 @@ check("garbage is zero, not NaN", cents("n/a"), 0);
 
 section("totals — must equal QuickBooks' own section summaries");
 check("income", pnl.income, 15391905);
-check("costOfGoodsSold", pnl.costOfGoodsSold, 440550);
-check("grossProfit", pnl.grossProfit, 14951355);
+check("costOfGoodsSold", pnl.costOfGoodsSold, 550600);
+check("grossProfit", pnl.grossProfit, 14841305);
 check("expenses", pnl.expenses, 6752245);
-check("netOperatingIncome", pnl.netOperatingIncome, 8199110);
+check("netOperatingIncome", pnl.netOperatingIncome, 8089060);
 check("otherIncome", pnl.otherIncome, 12885);
 check("otherExpenses", pnl.otherExpenses, 63000);
-check("netIncome", pnl.netIncome, 8148995);
+check("netIncome", pnl.netIncome, 8038945);
 
 section("totals — internally consistent");
 check("grossProfit = income - cogs", pnl.grossProfit, pnl.income - pnl.costOfGoodsSold);
@@ -212,6 +212,60 @@ ok(
   !pnl.expenseLines.some((l) => l.total === 0),
 );
 
+/* ───────────────────── sections ───────────────────── */
+
+// The report nets cost of sales against revenue and divides operating ratios by
+// what's left, so these assertions are what stands between a correct ratio and
+// a number that reads plausibly and is wrong by a factor of three.
+section("sections — the cost-of-sales split");
+
+const inSection = (items, name) => items.filter((l) => l.section === name);
+const cogsLines = inSection(pnl.expenseLines, "cogs");
+const operatingLines = inSection(pnl.expenseLines, "operating");
+
+ok(
+  "every line carries a section",
+  [...pnl.revenueStreams, ...pnl.expenseLines].every((l) => !!l.section),
+);
+ok(
+  "income lines are on the income side",
+  pnl.revenueStreams.every((l) => l.section === "income" || l.section === "other-income"),
+);
+ok("the COGS section produced lines", cogsLines.length > 0);
+check("COGS lines sum to the COGS total", sum(cogsLines.map((l) => l.total)), pnl.costOfGoodsSold);
+check(
+  "operating lines sum to the operating expense total",
+  sum(operatingLines.map((l) => l.total)),
+  pnl.expenses,
+);
+check(
+  "other-expense lines sum to the other-expense total",
+  sum(inSection(pnl.expenseLines, "other-expense").map((l) => l.total)),
+  pnl.otherExpenses,
+);
+// Nothing may fall between the three: the sections still have to add back up to
+// every cost, or the ledger stops reconciling against net profit.
+check(
+  "the three expense sections account for every expense line",
+  cogsLines.length +
+    operatingLines.length +
+    inSection(pnl.expenseLines, "other-expense").length,
+  pnl.expenseLines.length,
+);
+// Section, not category — CostOfLabor resolves to `contractors`, so a category
+// filter would leave cost-of-sales money in the operating base.
+ok(
+  "a COGS line whose category isn't cost-of-sales is still sectioned as COGS",
+  cogsLines.some((l) => l.category !== "cost-of-sales"),
+  "fixture no longer covers the case category-filtering would get wrong",
+);
+// The whole point, stated as arithmetic: the denominator actually moved.
+ok(
+  "the operating base excludes COGS",
+  sum(operatingLines.map((l) => l.total)) <
+    pnl.costOfGoodsSold + pnl.expenses,
+);
+
 /* ───────────────────── categories ───────────────────── */
 
 section("categories");
@@ -226,7 +280,11 @@ check(
   pnl.income + pnl.otherIncome,
 );
 check("software mapped from DuesSubscriptions", pnl.expensesByCategory.software, 284863);
-check("contractors merges two accounts", pnl.expensesByCategory.contractors, 4270000);
+// Three accounts, and one of them (Merch Fulfilment Labor, CostOfLabor) sits in
+// the COGS section. That's why the ledger splits on section and not on this:
+// filtering by category would leave that $1,100.50 of cost-of-sales money in the
+// operating base, understating every ratio computed against it.
+check("contractors merges accounts across sections", pnl.expensesByCategory.contractors, 4380050);
 check("cost-of-sales from a COGS subtype", pnl.expensesByCategory["cost-of-sales"], 440550);
 
 // The whole reason the override map is v1-mandatory: QuickBooks files AdSense,
@@ -290,7 +348,7 @@ section("slicing — must be exact, not approximate");
 const july = slicePnl(pnl, 2, 3);
 check("sliced months", july.months, ["2026-07"]);
 check("sliced income = July column", july.income, 6198575);
-check("sliced netIncome = July column", july.netIncome, 3458372);
+check("sliced netIncome = July column", july.netIncome, 3428872);
 check("sliced dates", [july.startDate, july.endDate], ["2026-07-01", "2026-07-31"]);
 check(
   "sliced categories still reconcile",

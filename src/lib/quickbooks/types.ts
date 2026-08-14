@@ -35,6 +35,19 @@ export type AccountMeta = {
   active: boolean;
 };
 
+/**
+ * Which section of QuickBooks' own P&L a line was filed under.
+ *
+ * This is the join key for the cost-of-sales split, and it is deliberately NOT
+ * derived from `category`. `CostOfLabor` resolves to `contractors`, so a
+ * category filter would leave subcontracted production cost sitting in the
+ * operating list underneath a heading claiming cost of sales had been taken
+ * out. Which costs are costs of sale is a bookkeeping judgement the client's
+ * own accountant already made, once, when they placed the account — so their
+ * placement decides it, not a lookup table of ours.
+ */
+export type PnlSection = "income" | "other-income" | "cogs" | "operating" | "other-expense";
+
 /** One account's line on the P&L, with its monthly series. */
 export type LineItem = {
   /** Null is normal — uncategorised rows and rolled-up sub-accounts have no id. */
@@ -43,10 +56,25 @@ export type LineItem = {
   name: string;
   subType: string | null;
   category: CategoryKey;
+  /** The P&L section QuickBooks filed this under. See PnlSection. */
+  section: PnlSection;
   total: MoneyCents;
   /** Aligned index-for-index with ProfitAndLoss.months. */
   monthly: MoneyCents[];
 };
+
+const SECTIONS = new Set<string>([
+  "income",
+  "other-income",
+  "cogs",
+  "operating",
+  "other-expense",
+]);
+
+/** Narrow an untrusted value (a stored snapshot) to a section. */
+export function parsePnlSection(value: unknown): PnlSection | null {
+  return typeof value === "string" && SECTIONS.has(value) ? (value as PnlSection) : null;
+}
 
 /**
  * The seven summary figures QuickBooks emits. Not five — omitting OtherIncome
@@ -93,7 +121,11 @@ export type ProfitAndLoss = ProfitAndLossTotals & {
 
   /** Income leaves, descending. RAW client account names — see categories.ts. */
   revenueStreams: LineItem[];
-  /** Expense leaves (incl. COGS), descending. */
+  /**
+   * Expense leaves, descending. Still one array including COGS — splitting it
+   * here would let a section quietly stop reconciling against net income.
+   * Presentation splits on `section`; the sum of this array is every cost.
+   */
   expenseLines: LineItem[];
 
   incomeByCategory: Partial<Record<CategoryKey, MoneyCents>>;

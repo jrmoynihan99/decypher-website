@@ -76,6 +76,15 @@
         "Active": true
       },
       {
+        "Id": "21",
+        "Name": "Merch Fulfilment Labor",
+        "FullyQualifiedName": "Merch Fulfilment Labor",
+        "Classification": "Expense",
+        "AccountType": "Cost of Goods Sold",
+        "AccountSubType": "CostOfLabor",
+        "Active": true
+      },
+      {
         "Id": "30",
         "Name": "Contract Labor",
         "FullyQualifiedName": "Contract Labor",
