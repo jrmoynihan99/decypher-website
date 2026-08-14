@@ -75,6 +75,52 @@ const COLORS = {
   net: CHART.level,
 } as const;
 
+const sumLines = (items: LineItem[]) => items.reduce((acc, l) => acc + l.total, 0);
+
+/**
+ * One expense array into the three kinds of cost, because only one of them is
+ * an operating expense and only one of them belongs in a ratio.
+ *
+ * Cost of sales is netted against the revenue that produced it, in the panel
+ * opposite — it isn't discretionary spend, and for a creator selling physical
+ * product it's also the largest number on the page. Leaving it in the
+ * denominator quietly divided every other ratio down: an accounting fee that is
+ * 60% of what the business actually spends to run itself read as 20%, and had
+ * to be corrected by hand before it could be said out loud on a client call.
+ *
+ * Personal spend comes out for the same reason, and always has.
+ *
+ * The COGS test is `section`, not `category`. QuickBooks files cost of labour
+ * under COGS while its subtype resolves to `contractors`, so a category test
+ * would leave production labour sitting in the operating base underneath a
+ * heading claiming cost of sales had been taken out — the same understatement,
+ * just harder to spot. See PnlSection in types.ts.
+ *
+ * The totals are the sum of the lines actually rendered, NOT QuickBooks'
+ * section summaries. The two can disagree (unapplied and uncategorised amounts
+ * aren't leaf rows — rule 2 in parse.ts), and a percentage column that doesn't
+ * add to 100% is indefensible in the one setting this report exists for. The
+ * P&L panel still reports QuickBooks verbatim, and any disagreement between the
+ * two is already surfaced as a warning.
+ */
+function splitCosts(expenseLines: LineItem[]) {
+  const personalLines = expenseLines.filter((l) => l.category === "personal");
+  const cogsLines = expenseLines.filter(
+    (l) => l.section === "cogs" && l.category !== "personal",
+  );
+  const operatingLines = expenseLines.filter(
+    (l) => l.section !== "cogs" && l.category !== "personal",
+  );
+  return {
+    personalLines,
+    cogsLines,
+    operatingLines,
+    personalTotal: sumLines(personalLines),
+    cogsTotal: sumLines(cogsLines),
+    operatingTotal: sumLines(operatingLines),
+  };
+}
+
 /**
  * Operating margin — net operating profit over income. Distinct from
  * netMargin(): this is the number the firm coaches creators against, so it
@@ -1113,15 +1159,10 @@ function CreatorDetail({
       ]
     : [];
 
-  // Personal (non-operating) lines get their own list under the expense
-  // ledger — they're not operating spend, so they shouldn't muddy that read.
-  const personalLines = d
-    ? d.expenseLines.filter((l) => l.category === "personal")
-    : [];
-  const operatingLines = d
-    ? d.expenseLines.filter((l) => l.category !== "personal")
-    : [];
-  const personalTotal = personalLines.reduce((s, l) => s + l.total, 0);
+  const { personalLines, cogsLines, operatingLines, personalTotal, cogsTotal, operatingTotal } =
+    splitCosts(d?.expenseLines ?? []);
+  const revenueTotal = d ? d.income + d.otherIncome : 0;
+  const hasCogs = cogsLines.length > 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -1178,7 +1219,13 @@ function CreatorDetail({
         <>
           <KpiRow cols={4}>
             <Kpi label="Total income" value={usd(d.income)} />
-            <Kpi label="Total expenses" value={usd(d.expenses + d.costOfGoodsSold)} />
+            {/* Every dollar out, COGS included — so it deliberately doesn't
+                match "Total operating" below. Says so when the gap exists. */}
+            <Kpi
+              label="Total expenses"
+              value={usd(d.expenses + d.costOfGoodsSold)}
+              sub={d.costOfGoodsSold !== 0 ? `incl. ${usd(d.costOfGoodsSold)} cost of sales` : undefined}
+            />
             <OperatingProfitKpi totals={d} />
             <Kpi
               label="Net profit"
@@ -1206,17 +1253,46 @@ function CreatorDetail({
             <Ledger
               title="Revenue streams"
               items={d.revenueStreams}
-              total={d.income + d.otherIncome}
+              total={revenueTotal}
+              totalLabel={hasCogs ? "Total revenue" : "Total"}
               color={COLORS.income}
-              note="Each client's own account names, kept verbatim — QuickBooks has no category that tells AdSense apart from a brand deal, so the raw names are the answer here."
+              note={
+                hasCogs
+                  ? "Each client's own account names, kept verbatim — QuickBooks has no category that tells AdSense apart from a brand deal, so the raw names are the answer here. Cost of sales is netted off below, against the revenue that produced it."
+                  : "Each client's own account names, kept verbatim — QuickBooks has no category that tells AdSense apart from a brand deal, so the raw names are the answer here."
+              }
+              secondary={
+                hasCogs
+                  ? {
+                      title: "Cost of goods sold",
+                      items: cogsLines,
+                      total: cogsTotal,
+                      totalLabel: "Total cost of sales",
+                      color: COLORS.expenses,
+                    }
+                  : null
+              }
+              closing={
+                hasCogs
+                  ? {
+                      label: "Gross profit",
+                      value: usd(revenueTotal - cogsTotal),
+                      tone: revenueTotal - cogsTotal >= 0 ? "pos" : "neg",
+                    }
+                  : null
+              }
             />
             <Ledger
-              title="Expense categories"
+              title="Operating expenses"
               items={operatingLines}
-              total={d.costOfGoodsSold + d.expenses + d.otherExpenses - personalTotal}
+              total={operatingTotal}
               totalLabel="Total operating"
               color={COLORS.expenses}
-              note="Cost of goods sold is folded in. Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Operating and personal together reconcile against net profit."
+              note={
+                hasCogs
+                  ? "Percentages are of operating spend only — cost of sales is netted against revenue in the panel opposite, so a figure here is a share of what the business spends to run itself. Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Cost of sales, operating and personal together reconcile against net profit."
+                  : "Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Operating and personal together reconcile against net profit."
+              }
               secondary={
                 personalLines.length
                   ? {
@@ -1332,6 +1408,7 @@ function Ledger({
   note,
   totalLabel = "Total",
   secondary,
+  closing,
 }: {
   title: string;
   items: LineItem[];
@@ -1339,13 +1416,23 @@ function Ledger({
   color: string;
   note: string;
   totalLabel?: string;
-  /** An appended, visually quieter list — personal (non-operating) spend. */
+  /** An appended, visually quieter list — cost of sales, personal spend. */
   secondary?: {
     title: string;
     items: LineItem[];
     total: number;
     totalLabel: string;
     color: string;
+  } | null;
+  /**
+   * The figure the two lists above resolve to — gross profit, under revenue
+   * less cost of sales. Sized `lg` because on a client call it's the number
+   * the conversation is actually about.
+   */
+  closing?: {
+    label: string;
+    value: string;
+    tone?: "pos" | "neg";
   } | null;
 }) {
   return (
@@ -1372,6 +1459,16 @@ function Ledger({
             total
           />
         </div>
+      ) : null}
+      {closing ? (
+        <LineRow
+          label={closing.label}
+          value={closing.value}
+          tone={closing.tone ?? "plain"}
+          total
+          size="lg"
+          display
+        />
       ) : null}
       <Note>{note}</Note>
     </Panel>
