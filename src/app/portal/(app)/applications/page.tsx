@@ -2,6 +2,7 @@ import { requirePermission } from "@/lib/firebase/session";
 import { listApplications } from "@/lib/application-store";
 import { Eyebrow } from "@/components/estimator/fields";
 import ApplicationsTable from "@/components/portal/ApplicationsTable";
+import ApplicationsNav from "@/components/portal/applications/ApplicationsNav";
 
 export const metadata = { title: "Applications — DeCypher Portal" };
 
@@ -18,7 +19,10 @@ export default async function ApplicationsPage() {
       <p className="mt-2 max-w-xl text-sm text-muted">
         Everyone who applied through the careers page. Same records that ping{" "}
         <span className="font-mono text-[13px]">#recruiting</span> in Slack.
+        Fit, offers, hires and the counts live on the Pipeline page.
       </p>
+
+      <ApplicationsNav />
 
       <ApplicationsTable initialApplications={applications} />
     </>

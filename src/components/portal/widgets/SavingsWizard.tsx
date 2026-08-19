@@ -1106,7 +1106,12 @@ export default function SavingsWizard() {
 
                 <div className="flex h-[230px] items-end justify-center gap-14 px-2.5">
                   <div className="relative h-full w-[108px]">
-                    <div className="absolute inset-x-0 bottom-0 h-full rounded-t-[10px] bg-gradient-to-b from-white/[0.12] to-white/[0.04]" />
+                    {/* The baseline bar is drawn in the ink token, not in
+                        white-alpha: on the portal's light theme the panel IS
+                        white, so a white-on-white gradient made this whole
+                        half of the comparison disappear. `fog` inverts with
+                        the theme, so the bar reads on both. */}
+                    <div className="absolute inset-x-0 bottom-0 h-full rounded-t-[10px] bg-gradient-to-b from-fog/[0.14] to-fog/[0.05]" />
                   </div>
                   <div className="relative h-full w-[108px]">
                     {barSaved > 0 ? (

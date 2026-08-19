@@ -1,6 +1,11 @@
 import "server-only";
 import { adminDb, isConfigured } from "./firebase/admin";
 import type { Application, ResumeMeta } from "./application";
+import {
+  EMPTY_PIPELINE,
+  NOTES_MAX,
+  type ApplicationPipeline,
+} from "./applications/pipeline";
 
 /**
  * Job applications, in Firestore. Same posture as lib/lead-store: this is the
@@ -153,9 +158,28 @@ export type ApplicationRow = {
   message: string;
   resume: ResumeMeta | null;
   notified: boolean | null;
+  /**
+   * Recruiting's own annotations — fit, offer, outcome, role, notes. Never
+   * written by the applicant; see lib/applications/pipeline for the split.
+   * Always present, all-null on a record nobody has triaged yet.
+   */
+  pipeline: ApplicationPipeline;
 };
 
 const s = (v: unknown) => (typeof v === "string" ? v : "");
+/** Option keys and notes off an untrusted document — a missing map is all-null. */
+const key = (v: unknown) => (typeof v === "string" && v ? v : null);
+function readPipeline(v: unknown): ApplicationPipeline {
+  if (!v || typeof v !== "object") return { ...EMPTY_PIPELINE };
+  const p = v as Record<string, unknown>;
+  return {
+    fit: key(p.fit),
+    offer: key(p.offer),
+    outcome: key(p.outcome),
+    role: key(p.role),
+    notes: typeof p.notes === "string" && p.notes.trim() ? p.notes.slice(0, NOTES_MAX) : null,
+  };
+}
 const b = (v: unknown) => (typeof v === "boolean" ? v : null);
 const arr = (v: unknown) =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -211,6 +235,7 @@ export async function listApplications(limit = 200): Promise<ApplicationRow[]> {
             }
           : null,
       notified: typeof d.notified === "boolean" ? d.notified : null,
+      pipeline: readPipeline(d.pipeline),
     };
   });
 }
@@ -233,13 +258,72 @@ export async function recordDelivery(
 }
 
 /**
- * Delete an application and its resume chunks. Used by cleanup tooling, not by
- * any route — the portal is read-only over this collection today.
+ * Save recruiting's annotations on one application.
+ *
+ * Written under a `pipeline` map with dotted field paths, so the tracker can
+ * PATCH one field at a time — two people triaging different columns of the
+ * same applicant don't clobber each other, which a whole-object write would
+ * guarantee. Dotted paths also create the map on first write, so no record
+ * needs backfilling.
+ *
+ * update() (not set-merge) on purpose: patching an application somebody else
+ * just deleted should fail loudly rather than resurrect it as a document with
+ * nothing but a pipeline on it.
+ */
+export async function updateApplicationPipeline(
+  id: string,
+  patch: Partial<ApplicationPipeline>,
+  actor: string,
+): Promise<ApplicationPipeline> {
+  if (!isConfigured()) throw new ApplicationStoreError("Firebase is not configured");
+
+  const ref = adminDb().collection(COLLECTION).doc(id);
+  const writes: Record<string, unknown> = {
+    "pipeline.updatedAt": new Date(),
+    "pipeline.updatedBy": actor,
+  };
+  for (const [field, value] of Object.entries(patch)) {
+    writes[`pipeline.${field}`] = value;
+  }
+
+  try {
+    await ref.update(writes);
+  } catch (e) {
+    // NOT_FOUND is the common one — the row was deleted in another tab.
+    throw new ApplicationStoreError(
+      e instanceof Error && /NOT_FOUND|No document to update/i.test(e.message)
+        ? "That application no longer exists."
+        : e instanceof Error
+          ? e.message
+          : String(e),
+    );
+  }
+
+  const snap = await ref.get();
+  return readPipeline(snap.data()?.pipeline);
+}
+
+/**
+ * Delete an application and its resume chunks, permanently.
+ *
+ * A real delete rather than an archive flag: unlike a sales call (keyed on a
+ * Calendly invitee, so a delete gets recreated by the next sync) an
+ * application is only ever written once, by the form. Nothing re-creates it,
+ * so nothing needs a tombstone — and a test submission the client wants gone
+ * should actually be gone, resume included.
+ *
+ * Chunks first, doc last: the portal lists parent docs, so a failure part way
+ * through leaves an application that still renders, not orphaned resume bytes
+ * nothing can reach.
  */
 export async function deleteApplication(id: string): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isConfigured()) throw new ApplicationStoreError("Firebase is not configured");
   const ref = adminDb().collection(COLLECTION).doc(id);
-  const chunks = await ref.collection(RESUME_SUBCOLLECTION).listDocuments();
-  await Promise.all(chunks.map((c) => c.delete()));
-  await ref.delete();
+  try {
+    const chunks = await ref.collection(RESUME_SUBCOLLECTION).listDocuments();
+    await Promise.all(chunks.map((c) => c.delete()));
+    await ref.delete();
+  } catch (e) {
+    throw new ApplicationStoreError(e instanceof Error ? e.message : String(e));
+  }
 }
