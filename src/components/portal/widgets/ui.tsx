@@ -883,7 +883,10 @@ export function Slider({
       onChange={(e) => onChange(Number(e.target.value))}
       className={`widget-range h-2 w-full cursor-pointer appearance-none rounded-full outline-none ${className}`}
       style={{
-        background: `linear-gradient(90deg, var(--color-magenta) 0%, var(--color-violet) ${filled}%, rgba(255,255,255,0.07) ${filled}%, rgba(255,255,255,0.07) 100%)`,
+        // The unfilled track is a palette token, not white-alpha: on the light
+        // theme a 7% white track over a white panel is nothing at all, and the
+        // slider reads as having no track past the thumb.
+        background: `linear-gradient(90deg, var(--color-magenta) 0%, var(--color-violet) ${filled}%, var(--color-edge-mid) ${filled}%, var(--color-edge-mid) 100%)`,
       }}
     />
   );

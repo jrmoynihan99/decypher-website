@@ -510,67 +510,34 @@ export function matchReferrer<T extends { id: string; name: string; aliases?: st
   return null;
 }
 
-/* ─────────────────────────── validation ─────────────────────────── */
-
-/** Narrow an untrusted string to a known key, or null. Used by the PATCH route. */
-export function asOption<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-): T | null {
-  return typeof value === "string" && (allowed as readonly string[]).includes(value)
-    ? (value as T)
-    : null;
-}
-
 /* ─────────────────────────── option colours ─────────────────────────── */
 
 import type { EditableList, OptionItem, SalesOptionsConfig } from "./types";
+// The palette and the key/label/retired mechanics are portal-wide — the
+// Applications pipeline edits its lists with the same swatches and the same
+// sanitizer. Re-exported here so every existing `@/lib/sales/options` import
+// keeps working.
+import {
+  OPTION_COLORS,
+  OPTION_COLOR_KEYS,
+  type OptionColor,
+  asOption,
+  itemColorHex,
+  optionColorHex,
+  optionKey,
+  optionLabel,
+} from "@/lib/option-list";
 
-/**
- * The colours an option may wear — a fixed set, not a colour picker.
- *
- * These do double duty: a tinted control in the grid (where the label is always
- * printed beside the colour) and a bar in the stats charts (where, on a ranked
- * list, colour is the only thing separating two neighbouring rows). The second
- * job is what rules out a free hex field. Every swatch here clears 3:1 against
- * the portal's panel surface (#141319) and no two sit close enough to collapse
- * into each other under deuteranopia — which the brand's own five accents do
- * not manage (ember vs danger measure ΔE 7.5 to *normal* vision).
- *
- * Ten is the ceiling on purpose. Past that, a categorical palette stops being
- * discriminable no matter how it's chosen, and the honest answer is bar length.
- */
-export const OPTION_COLORS = [
-  { key: "magenta", label: "Magenta", hex: "#ff4d8d" },
-  { key: "rose", label: "Rose", hex: "#ff6b7a" },
-  { key: "ember", label: "Ember", hex: "#ff8a4c" },
-  { key: "amber", label: "Amber", hex: "#f0c04d" },
-  { key: "lime", label: "Lime", hex: "#9ed45a" },
-  { key: "teal", label: "Teal", hex: "#3fc9b6" },
-  { key: "sky", label: "Sky", hex: "#4fb3f5" },
-  { key: "indigo", label: "Indigo", hex: "#8f9bff" },
-  { key: "violet", label: "Violet", hex: "#b98cff" },
-  { key: "slate", label: "Slate", hex: "#9a93ac" },
-] as const;
-
-export type OptionColor = (typeof OPTION_COLORS)[number]["key"];
-
-export const OPTION_COLOR_KEYS = OPTION_COLORS.map((c) => c.key);
-
-const COLOR_HEX: Record<string, string> = Object.fromEntries(
-  OPTION_COLORS.map((c) => [c.key, c.hex]),
-);
-
-/** Hex for a swatch key, or null for "no colour" and for keys we don't know. */
-export function optionColorHex(key: string | null | undefined): string | null {
-  return key ? (COLOR_HEX[key] ?? null) : null;
-}
-
-/** The colour an option is currently wearing, by key. */
-export function itemColorHex(items: OptionItem[], key: string | null): string | null {
-  if (!key) return null;
-  return optionColorHex(items.find((i) => i.key === key)?.color);
-}
+export {
+  OPTION_COLORS,
+  OPTION_COLOR_KEYS,
+  asOption,
+  itemColorHex,
+  optionColorHex,
+  optionKey,
+  optionLabel,
+};
+export type { OptionColor };
 
 /**
  * Colours the closed lists ship with, so status and attendance read as colour
@@ -642,21 +609,6 @@ export function defaultOptionsConfig(): SalesOptionsConfig {
     showStatus: toItems("showStatus", SHOW_STATUSES, SHOW_STATUS_LABELS),
     referralKind: toItems("referralKind", REFERRAL_KINDS, REFERRAL_KIND_LABELS),
   };
-}
-
-/** Slug for a brand-new option added in the editor. */
-export function optionKey(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 50);
-}
-
-/** Label for a key, falling back to the key itself for retired/unknown ones. */
-export function optionLabel(items: OptionItem[], key: string | null): string {
-  if (!key) return "—";
-  return items.find((i) => i.key === key)?.label ?? key;
 }
 
 /** Narrow an untrusted value to a non-negative whole-dollar amount, or null. */

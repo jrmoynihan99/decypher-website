@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ApplicationRow } from "@/lib/application-store";
 
 /**
@@ -12,6 +12,11 @@ import type { ApplicationRow } from "@/lib/application-store";
  *
  * Rows from before the long form (name/email/link/note only) still render:
  * empty facts show as "—", empty groups don't render at all.
+ *
+ * Delete lives in the expanded panel rather than on the row: it's permanent
+ * (the resume goes with it) and a stray click in a list you're scanning is not
+ * a decision. Opening the row, reading it, then arming the button is. The same
+ * delete is on the Pipeline tracker, over the same documents.
  */
 
 function when(iso: string | null): { day: string; time: string } {
@@ -122,6 +127,33 @@ export default function ApplicationsTable({
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  /** Which row's delete is armed, and which is mid-request. */
+  const [armed, setArmed] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // An armed delete disarms itself, so a button left hot behind a scrolled-away
+  // row can't be hit by the next click that lands there.
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(null), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  const remove = async (id: string) => {
+    setArmed(null);
+    setDeleting(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/portal/applications/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) throw new Error(data?.message);
+      setApplications((list) => list.filter((a) => a.id !== id));
+      if (open === id) setOpen(null);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : "Couldn’t delete that.");
+    }
+    setDeleting(null);
+  };
 
   const refresh = async () => {
     if (refreshing) return;
@@ -378,6 +410,39 @@ export default function ApplicationsTable({
                                     ? "posted"
                                     : "failed"}
                               </span>
+
+                              {armed === a.id ? (
+                                <span className="ml-auto flex items-center gap-3">
+                                  <span className="font-body text-[12px] text-dusk">
+                                    Delete this application and its resume,
+                                    permanently?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={deleting === a.id}
+                                    onClick={() => remove(a.id)}
+                                    className="cursor-pointer rounded-[8px] border border-danger/50 bg-danger/10 px-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.8px] text-danger transition-colors duration-150 hover:bg-danger/20 disabled:opacity-40"
+                                  >
+                                    {deleting === a.id ? "Deleting…" : "Delete"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setArmed(null)}
+                                    className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[0.8px] text-dusk hover:text-fog"
+                                  >
+                                    Cancel
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={deleting === a.id}
+                                  onClick={() => setArmed(a.id)}
+                                  className="ml-auto cursor-pointer rounded-[8px] border border-transparent px-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.8px] text-faint transition-colors duration-150 hover:border-danger/40 hover:text-danger disabled:opacity-40"
+                                >
+                                  Delete
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

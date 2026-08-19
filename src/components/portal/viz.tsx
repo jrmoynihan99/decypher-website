@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Chart primitives for the Sales Flow stats tab.
+ * Chart primitives for the portal's stats views — Sales Flow, and the
+ * Applications pipeline.
  *
  * BUILT IN CSS, NOT SVG. Every shape here is a bar, and a bar is a div with a
  * width or a height. That keeps text crisp at any container size — the portal's
@@ -42,7 +43,10 @@ export const VIZ = {
   series: "#d62368",
   series2: "#29a294",
   funnel: ["#8f1a4d", "#d62368", "#ff5c96"],
-  grid: "rgba(255,255,255,0.055)",
+  // Theme-bound, unlike the series hues: a hardcoded white gridline vanishes
+  // completely on the portal's light theme, which is exactly the failure the
+  // Savings Snapshot's baseline bar had.
+  grid: "var(--color-chart-grid)",
 } as const;
 
 const pct = (n: number, of: number) => (of > 0 ? (n / of) * 100 : 0);
@@ -136,8 +140,10 @@ export interface MonthDatum {
   year: number;
   /** 0-11, so January can carry the year tick. */
   month: number;
-  booked: number;
-  won: number;
+  /** The whole for this month — booked calls, or applications received. */
+  total: number;
+  /** The highlighted subset stacked at the base — deals won, or people hired. */
+  part: number;
 }
 
 /** Round up to something a human would choose for an axis top. */
@@ -151,10 +157,11 @@ function niceTop(n: number): number {
 }
 
 /**
- * Booked calls per month, with the won subset stacked at the base.
+ * A count per month, with a highlighted subset stacked at the base — booked
+ * calls and the ones that closed, or applications and the people hired.
  *
- * Stacked rather than two charts because the question is "of what we booked,
- * how much closed" — a part-to-whole over time. Won sits at the bottom so it
+ * Stacked rather than two charts because the question is "of what came in,
+ * how much converted" — a part-to-whole over time. The part sits at the bottom so it
  * shares the baseline and its heights are comparable month to month; the
  * floating segment is the remainder, which nobody needs to compare precisely.
  *
@@ -162,15 +169,29 @@ function niceTop(n: number): number {
  * of secondary encoding its palette's CVD warn band requires: a legend, a 2px
  * surface gap between the segments, and hover values.
  */
-export function MonthColumns({ data, height = 190 }: { data: MonthDatum[]; height?: number }) {
+export function MonthColumns({
+  data,
+  height = 190,
+  totalLabel = "Booked",
+  partLabel = "Won",
+  emptyLabel = "No calls in this range.",
+}: {
+  data: MonthDatum[];
+  height?: number;
+  /** What the whole column is, e.g. "Booked" or "Applied". */
+  totalLabel?: string;
+  /** What the base segment is, e.g. "Won" or "Hired". */
+  partLabel?: string;
+  emptyLabel?: string;
+}) {
   const [hover, setHover] = useState<string | null>(null);
 
   if (!data.length) {
-    return <p className="py-6 text-center text-[12.5px] text-dusk">No calls in this range.</p>;
+    return <p className="py-6 text-center text-[12.5px] text-dusk">{emptyLabel}</p>;
   }
   // The axis top is a rounded number, not the raw peak, so the gridlines land
   // on values a reader can actually do arithmetic with.
-  const max = niceTop(Math.max(1, ...data.map((d) => d.booked)));
+  const max = niceTop(Math.max(1, ...data.map((d) => d.total)));
   // Label every month when there's room, otherwise roughly every other one.
   const step = data.length > 18 ? Math.ceil(data.length / 12) : 1;
   const ticks = [1, 0.5, 0];
@@ -179,8 +200,8 @@ export function MonthColumns({ data, height = 190 }: { data: MonthDatum[]; heigh
     <div>
       <Legend
         items={[
-          { label: "Won", color: VIZ.series2 },
-          { label: "Not won", color: VIZ.series },
+          { label: partLabel, color: VIZ.series2 },
+          { label: `Not ${partLabel.toLowerCase()}`, color: VIZ.series },
         ]}
       />
 
@@ -204,7 +225,7 @@ export function MonthColumns({ data, height = 190 }: { data: MonthDatum[]; heigh
         <div className="relative flex items-end gap-[3px]" style={{ height }}>
           {data.map((d, i) => {
             const on = hover === d.key;
-            const lost = Math.max(0, d.booked - d.won);
+            const rest = Math.max(0, d.total - d.part);
             return (
               <div
                 key={d.key}
@@ -214,28 +235,28 @@ export function MonthColumns({ data, height = 190 }: { data: MonthDatum[]; heigh
               >
                 {/* Selective direct labels: the count above each column when the
                     axis isn't crowded. Never a number on every point otherwise. */}
-                {step === 1 && d.booked > 0 ? (
+                {step === 1 && d.total > 0 ? (
                   <span className="mb-1 text-center font-mono text-[9.5px] tabular-nums text-dusk">
-                    {d.booked}
+                    {d.total}
                   </span>
                 ) : null}
 
                 <div
                   className="w-full rounded-t-[4px] transition-opacity duration-150"
                   style={{
-                    height: `${pct(lost, max)}%`,
+                    height: `${pct(rest, max)}%`,
                     background: VIZ.series,
                     opacity: hover && !on ? 0.4 : 1,
                   }}
                 />
                 {/* The 2px gap IS the spacer between stacked fills. */}
-                {lost > 0 && d.won > 0 ? <div className="h-[2px] w-full" /> : null}
+                {rest > 0 && d.part > 0 ? <div className="h-[2px] w-full" /> : null}
                 <div
                   className="w-full transition-opacity duration-150"
                   style={{
-                    height: `${pct(d.won, max)}%`,
+                    height: `${pct(d.part, max)}%`,
                     background: VIZ.series2,
-                    borderRadius: lost > 0 ? "0 0 2px 2px" : "4px 4px 2px 2px",
+                    borderRadius: rest > 0 ? "0 0 2px 2px" : "4px 4px 2px 2px",
                     opacity: hover && !on ? 0.4 : 1,
                   }}
                 />
@@ -248,12 +269,12 @@ export function MonthColumns({ data, height = 190 }: { data: MonthDatum[]; heigh
                   >
                     <div className="mb-1 text-dusk">{d.full}</div>
                     <div className="flex justify-between gap-4 tabular-nums">
-                      <span style={{ color: VIZ.series2 }}>Won</span>
-                      <span className="text-fog">{d.won}</span>
+                      <span style={{ color: VIZ.series2 }}>{partLabel}</span>
+                      <span className="text-fog">{d.part}</span>
                     </div>
                     <div className="flex justify-between gap-4 tabular-nums">
-                      <span className="text-mist">Booked</span>
-                      <span className="text-fog">{d.booked}</span>
+                      <span className="text-mist">{totalLabel}</span>
+                      <span className="text-fog">{d.total}</span>
                     </div>
                   </div>
                 ) : null}

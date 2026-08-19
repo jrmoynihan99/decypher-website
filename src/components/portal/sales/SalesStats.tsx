@@ -51,7 +51,7 @@ import {
   MonthColumns,
   VIZ,
   type MonthDatum,
-} from "./viz";
+} from "@/components/portal/viz";
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const moneyShort = (n: number) =>
@@ -233,13 +233,13 @@ export default function SalesStats({
           full: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`,
           year: d.getFullYear(),
           month: d.getMonth(),
-          booked: 0,
-          won: 0,
+          total: 0,
+          part: 0,
         };
         m.set(key, hit);
       }
-      hit.booked += 1;
-      if (won(r)) hit.won += 1;
+      hit.total += 1;
+      if (won(r)) hit.part += 1;
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
   }, [rows]);

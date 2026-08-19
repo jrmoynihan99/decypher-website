@@ -1,10 +1,10 @@
 import "server-only";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
-import { OPTION_COLOR_KEYS, defaultOptionsConfig } from "./options";
+import { defaultOptionsConfig } from "./options";
+import { sanitizeOptionList } from "@/lib/option-list";
 import {
   OPEN_LISTS,
   type EditableList,
-  type OptionItem,
   type SalesOptionsConfig,
 } from "./types";
 
@@ -16,8 +16,9 @@ import {
  * needs no seeding step and a future change to the defaults reaches every
  * un-edited install automatically.
  *
- * Writes go through `sanitizeConfig`, which enforces the contract the rest of
- * the system depends on:
+ * Writes go through `sanitizeConfig` — a thin per-list wrapper over
+ * sanitizeOptionList in lib/option-list — which enforces the contract the rest
+ * of the system depends on:
  *
  *  - Keys from the DEFAULT lists can never be removed or renamed — historical
  *    rows are written in them, and the closed lists (status/show/kind) have
@@ -32,7 +33,7 @@ import {
  *
  * A list ABSENT from the stored document means "never edited" and returns the
  * defaults verbatim. That distinction matters: an empty/omitted list run
- * through sanitizeList would come back with every default retired, so adding a
+ * through sanitizeOptionList would come back with every default retired, so adding a
  * new list (objection) to the defaults would silently arrive switched off on
  * every install that had already saved a config.
  */
@@ -47,69 +48,6 @@ export class SalesConfigError extends Error {
   }
 }
 
-const COLORS = new Set<string>(OPTION_COLOR_KEYS);
-
-/**
- * One submitted entry, narrowed.
- *
- * `fallbackColor` is the colour this key ships with, applied when the
- * submission carries none. Stored documents written before colours existed
- * hold colourless items, and without this every status in them would come back
- * grey — a visible regression from a change nobody made.
- */
-function cleanItem(raw: unknown, fallbackColor?: string): OptionItem | null {
-  if (!raw || typeof raw !== "object") return null;
-  const { key, label, retired, color } = raw as Record<string, unknown>;
-  if (typeof key !== "string" || !key.trim()) return null;
-  const cleanKey = key.trim().slice(0, 50);
-  const cleanLabel =
-    typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : cleanKey;
-  // Swatch keys only. A raw hex — or a swatch we've since dropped — becomes no
-  // colour rather than an error, so a stale document still renders.
-  const cleanColor =
-    typeof color === "string" && COLORS.has(color) ? color : fallbackColor;
-
-  const item: OptionItem = { key: cleanKey, label: cleanLabel };
-  if (retired) item.retired = true;
-  if (cleanColor) item.color = cleanColor;
-  return item;
-}
-
-/**
- * Merge an untrusted list against its defaults. `open` lists may add and
- * retire; closed lists are re-ordered/re-labelled views of the default keys.
- */
-function sanitizeList(raw: unknown, defaults: OptionItem[], open: boolean): OptionItem[] {
-  const byKey = new Map(defaults.map((d) => [d.key, d]));
-  const submitted = (Array.isArray(raw) ? raw : [])
-    .map((item) => {
-      const key = (item as { key?: unknown } | null)?.key;
-      const fallback = typeof key === "string" ? byKey.get(key.trim())?.color : undefined;
-      const cleaned = cleanItem(item, fallback);
-      // Closed keys can't retire either — money semantics hang off them.
-      if (cleaned && !open) delete cleaned.retired;
-      return cleaned;
-    })
-    .filter((i): i is OptionItem => i !== null);
-  const seen = new Set<string>();
-  const out: OptionItem[] = [];
-
-  for (const item of submitted) {
-    if (seen.has(item.key)) continue; // a duplicate row would fork the key
-    if (!open && !byKey.has(item.key)) continue; // closed list: no additions
-    out.push(item);
-    seen.add(item.key);
-  }
-
-  // Anything from the defaults the submission dropped comes back — retired on
-  // open lists (closest to the intent of deleting), verbatim on closed ones.
-  for (const d of defaults) {
-    if (seen.has(d.key)) continue;
-    out.push(open ? { ...d, retired: true } : d);
-  }
-  return out;
-}
-
 export function sanitizeConfig(raw: unknown): SalesOptionsConfig {
   const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const defaults = defaultOptionsConfig();
@@ -120,7 +58,7 @@ export function sanitizeConfig(raw: unknown): SalesOptionsConfig {
     out[list] =
       body[list] === undefined
         ? defaults[list]
-        : sanitizeList(body[list], defaults[list], openSet.has(list));
+        : sanitizeOptionList(body[list], defaults[list], openSet.has(list));
   }
   return out;
 }

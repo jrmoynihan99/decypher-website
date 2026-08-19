@@ -19,29 +19,14 @@ import type {
 /* ───────────────────────── editable dropdowns ───────────────────────── */
 
 /**
- * One entry in an editable dropdown.
+ * One entry in an editable dropdown — key/label/retired/colour.
  *
- * `key` is permanent — it's what a year of rows is written in, so the editor
- * can never change it. `label` and position are the editable parts; `retired`
- * hides an option from new picks while old rows keep rendering it. Deleting a
- * key outright would strand every row that holds it, which is why there is no
- * delete, only retire.
+ * Defined in lib/option-list, which is where the mechanics of editable lists
+ * live now that Applications edits its own. Re-exported so the sales grid and
+ * its cells keep importing it from here.
  */
-export interface OptionItem {
-  key: string;
-  label: string;
-  retired?: boolean;
-  /**
-   * A key from OPTION_COLORS — never a raw hex.
-   *
-   * The swatches were checked against the portal's panel surface; a free colour
-   * field would let an editor pick two neighbouring hues that are one bar apart
-   * in the stats charts and indistinguishable to a colourblind reader. Storing
-   * the swatch key also means the palette can be retuned without migrating
-   * every config document.
-   */
-  color?: string;
-}
+import type { OptionItem } from "@/lib/option-list";
+export type { OptionItem };
 
 /**
  * The dropdown lists an operator can edit, in display order.
