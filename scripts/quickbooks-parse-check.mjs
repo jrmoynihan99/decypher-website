@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SRC = "src/lib/quickbooks";
-const MODULES = ["types", "categories", "periods", "parse", "aggregate"];
+const MODULES = ["types", "categories", "periods", "parse", "aggregate", "ledger"];
 
 /* ───────────────────── compile ───────────────────── */
 
@@ -56,6 +56,7 @@ const { parseProfitAndLoss, slicePnl, cents } = await import(pathToFileURL(join(
 const { aggregateRows, averageOf, primaryBucket } = await import(pathToFileURL(join(out, "aggregate.js")));
 const { resolvePeriod, sliceIndices, syncWindow } = await import(pathToFileURL(join(out, "periods.js")));
 const { NO_OVERRIDES } = await import(pathToFileURL(join(out, "categories.js")));
+const { splitCosts } = await import(pathToFileURL(join(out, "ledger.js")));
 
 /* ───────────────────── harness ───────────────────── */
 
@@ -264,6 +265,64 @@ ok(
   "the operating base excludes COGS",
   sum(operatingLines.map((l) => l.total)) <
     pnl.costOfGoodsSold + pnl.expenses,
+);
+
+/* ───────────────────── ledger split ───────────────────── */
+
+// The section stamps above were always right. What went wrong was downstream:
+// the ledger re-derived its own split in the view as "everything that isn't
+// cost of sales", which swept QuickBooks' entire Other Expenses section — the
+// client's income tax, their loan interest — into the operating list, under a
+// heading claiming it was what the business spends to run itself. The figure
+// was overstated by the whole below-the-line total while the P&L panel on the
+// same screen read correctly. splitCosts lives in lib now so this can hold it.
+section("ledger — the operating / below-the-line split");
+
+const split = splitCosts(pnl.expenseLines);
+
+check(
+  "the operating list is QuickBooks' Expenses section, nothing more",
+  split.operatingTotal + sum(split.personalLines.filter((l) => l.section === "operating").map((l) => l.total)),
+  pnl.expenses,
+);
+ok(
+  "no operating line came from below Net Operating Income",
+  split.operatingLines.every((l) => l.section === "operating"),
+);
+ok("the fixture exercises the below-the-line case", split.otherLines.length > 0);
+check(
+  "below-the-line plus personal-from-other equals the Other Expenses total",
+  split.otherTotal + sum(split.personalLines.filter((l) => l.section === "other-expense").map((l) => l.total)),
+  pnl.otherExpenses,
+);
+// The invariant the note under the ledger promises the client out loud.
+check(
+  "the four lists reconcile against every expense",
+  split.cogsTotal + split.operatingTotal + split.otherTotal + split.personalTotal,
+  sum(pnl.expenseLines.map((l) => l.total)),
+);
+check(
+  "no line is in two lists, and none is in none",
+  split.cogsLines.length +
+    split.operatingLines.length +
+    split.otherLines.length +
+    split.personalLines.length,
+  pnl.expenseLines.length,
+);
+// Personal is the one category-driven bucket: it has to outrank the section, or
+// an owner draw the firm pinned on the mapping tab goes back into operating.
+ok(
+  "personal wins over the section it was filed under",
+  splitCosts([
+    { accountId: "1", name: "Owner draw", subType: null, category: "personal", section: "operating", total: 5000, monthly: [] },
+  ]).operatingLines.length === 0,
+);
+// An unrecognised section must land below the line, never inside the base.
+ok(
+  "an unexpected section lands below the line, not in operating",
+  splitCosts([
+    { accountId: "2", name: "Odd", subType: null, category: "other-expense", section: "income", total: 100, monthly: [] },
+  ]).otherLines.length === 1,
 );
 
 /* ───────────────────── categories ───────────────────── */
