@@ -44,6 +44,7 @@ import {
 } from "@/components/portal/widgets/ui";
 import { money2, pct } from "@/lib/widget-format";
 import { averageOf, netMargin, primaryBucket } from "@/lib/quickbooks/aggregate";
+import { splitCosts } from "@/lib/quickbooks/ledger";
 import {
   CATEGORY_LABELS,
   categoriesForSide,
@@ -74,52 +75,6 @@ const COLORS = {
   expenses: CHART.cost,
   net: CHART.level,
 } as const;
-
-const sumLines = (items: LineItem[]) => items.reduce((acc, l) => acc + l.total, 0);
-
-/**
- * One expense array into the three kinds of cost, because only one of them is
- * an operating expense and only one of them belongs in a ratio.
- *
- * Cost of sales is netted against the revenue that produced it, in the panel
- * opposite — it isn't discretionary spend, and for a creator selling physical
- * product it's also the largest number on the page. Leaving it in the
- * denominator quietly divided every other ratio down: an accounting fee that is
- * 60% of what the business actually spends to run itself read as 20%, and had
- * to be corrected by hand before it could be said out loud on a client call.
- *
- * Personal spend comes out for the same reason, and always has.
- *
- * The COGS test is `section`, not `category`. QuickBooks files cost of labour
- * under COGS while its subtype resolves to `contractors`, so a category test
- * would leave production labour sitting in the operating base underneath a
- * heading claiming cost of sales had been taken out — the same understatement,
- * just harder to spot. See PnlSection in types.ts.
- *
- * The totals are the sum of the lines actually rendered, NOT QuickBooks'
- * section summaries. The two can disagree (unapplied and uncategorised amounts
- * aren't leaf rows — rule 2 in parse.ts), and a percentage column that doesn't
- * add to 100% is indefensible in the one setting this report exists for. The
- * P&L panel still reports QuickBooks verbatim, and any disagreement between the
- * two is already surfaced as a warning.
- */
-function splitCosts(expenseLines: LineItem[]) {
-  const personalLines = expenseLines.filter((l) => l.category === "personal");
-  const cogsLines = expenseLines.filter(
-    (l) => l.section === "cogs" && l.category !== "personal",
-  );
-  const operatingLines = expenseLines.filter(
-    (l) => l.section !== "cogs" && l.category !== "personal",
-  );
-  return {
-    personalLines,
-    cogsLines,
-    operatingLines,
-    personalTotal: sumLines(personalLines),
-    cogsTotal: sumLines(cogsLines),
-    operatingTotal: sumLines(operatingLines),
-  };
-}
 
 /**
  * Operating margin — net operating profit over income. Distinct from
@@ -1151,16 +1106,30 @@ function CreatorDetail({
   const syncing = busy === selected.realmId;
   const disconnecting = busy === `disconnect:${selected.realmId}`;
 
+  /**
+   * Net OPERATING profit, not net profit: the two lines above it are income and
+   * operating expenses, so plotting the bottom line here drew a third line that
+   * didn't relate to either — the visible gap was tax and owner draw, with
+   * nothing on the chart to say so. This one is income − expenses, drawn.
+   */
   const series: Series[] = d
     ? [
         { key: "cf-income", label: "Income", color: COLORS.income, kind: "line", values: d.monthly.income.map((c) => c / 100) },
         { key: "cf-expenses", label: "Expenses", color: COLORS.expenses, kind: "line", values: d.monthly.expenses.map((c) => c / 100) },
-        { key: "cf-net", label: "Net profit", color: COLORS.net, kind: "line", values: d.monthly.netIncome.map((c) => c / 100) },
+        { key: "cf-net", label: "Net operating profit", color: COLORS.net, kind: "line", values: d.monthly.netOperatingIncome.map((c) => c / 100) },
       ]
     : [];
 
-  const { personalLines, cogsLines, operatingLines, personalTotal, cogsTotal, operatingTotal } =
-    splitCosts(d?.expenseLines ?? []);
+  const {
+    personalLines,
+    cogsLines,
+    operatingLines,
+    otherLines,
+    personalTotal,
+    cogsTotal,
+    operatingTotal,
+    otherTotal,
+  } = splitCosts(d?.expenseLines ?? []);
   const revenueTotal = d ? d.income + d.otherIncome : 0;
   const hasCogs = cogsLines.length > 0;
 
@@ -1263,14 +1232,16 @@ function CreatorDetail({
               }
               secondary={
                 hasCogs
-                  ? {
-                      title: "Cost of goods sold",
-                      items: cogsLines,
-                      total: cogsTotal,
-                      totalLabel: "Total cost of sales",
-                      color: COLORS.expenses,
-                    }
-                  : null
+                  ? [
+                      {
+                        title: "Cost of goods sold",
+                        items: cogsLines,
+                        total: cogsTotal,
+                        totalLabel: "Total cost of sales",
+                        color: COLORS.expenses,
+                      },
+                    ]
+                  : []
               }
               closing={
                 hasCogs
@@ -1290,20 +1261,25 @@ function CreatorDetail({
               color={COLORS.expenses}
               note={
                 hasCogs
-                  ? "Percentages are of operating spend only — cost of sales is netted against revenue in the panel opposite, so a figure here is a share of what the business spends to run itself. Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Cost of sales, operating and personal together reconcile against net profit."
-                  : "Personal spending sits in its own list below — map an account to “Personal (non-operating)” on the mapping tab to move it there. Operating and personal together reconcile against net profit."
+                  ? "This list is QuickBooks' Expenses section only, so percentages are of operating spend and a figure here is a share of what the business spends to run itself. Cost of sales is netted against revenue in the panel opposite; everything QuickBooks files below Net Operating Income — tax, interest — is listed separately below, as is personal spending. Map an account to “Personal (non-operating)” on the mapping tab to move it to that list. All four together reconcile against net profit."
+                  : "This list is QuickBooks' Expenses section only, so a figure here is a share of what the business spends to run itself. Everything QuickBooks files below Net Operating Income — tax, interest — is listed separately below, as is personal spending. Map an account to “Personal (non-operating)” on the mapping tab to move it to that list. The lists together reconcile against net profit."
               }
-              secondary={
-                personalLines.length
-                  ? {
-                      title: "Personal (non-operating)",
-                      items: personalLines,
-                      total: personalTotal,
-                      totalLabel: "Total personal",
-                      color: CHART.baseline,
-                    }
-                  : null
-              }
+              secondary={[
+                {
+                  title: "Below the line (non-operating)",
+                  items: otherLines,
+                  total: otherTotal,
+                  totalLabel: "Total non-operating",
+                  color: CHART.baseline,
+                },
+                {
+                  title: "Personal (non-operating)",
+                  items: personalLines,
+                  total: personalTotal,
+                  totalLabel: "Total personal",
+                  color: CHART.baseline,
+                },
+              ]}
             />
           </div>
 
@@ -1399,6 +1375,15 @@ function LedgerRows({
   );
 }
 
+/** An appended, visually quieter list — cost of sales, below-the-line, personal spend. */
+type LedgerBlock = {
+  title: string;
+  items: LineItem[];
+  total: number;
+  totalLabel: string;
+  color: string;
+};
+
 /** A ledger with proportion bars — the categorical read the chart kit has no primitive for. */
 function Ledger({
   title,
@@ -1416,14 +1401,13 @@ function Ledger({
   color: string;
   note: string;
   totalLabel?: string;
-  /** An appended, visually quieter list — cost of sales, personal spend. */
-  secondary?: {
-    title: string;
-    items: LineItem[];
-    total: number;
-    totalLabel: string;
-    color: string;
-  } | null;
+  /**
+   * Appended lists, in order. Plural because the expense side has two of them
+   * now — Other Expenses and Personal are both below the line, and rolling them
+   * into one list would put the client's tax bill under a heading that says
+   * "personal".
+   */
+  secondary?: LedgerBlock[];
   /**
    * The figure the two lists above resolve to — gross profit, under revenue
    * less cost of sales. Sized `lg` because on a client call it's the number
@@ -1445,21 +1429,15 @@ function Ledger({
       ) : (
         <p className="text-[13px] text-dusk">Nothing in this period.</p>
       )}
-      {secondary && secondary.items.length ? (
-        <div className="mt-5 border-t border-edge pt-4">
-          <Mono className="mb-3 block text-dusk">{secondary.title}</Mono>
-          <LedgerRows
-            items={secondary.items}
-            total={secondary.total}
-            color={secondary.color}
-          />
-          <LineRow
-            label={secondary.totalLabel}
-            value={usd(secondary.total)}
-            total
-          />
-        </div>
-      ) : null}
+      {(secondary ?? [])
+        .filter((block) => block.items.length)
+        .map((block) => (
+          <div key={block.title} className="mt-5 border-t border-edge pt-4">
+            <Mono className="mb-3 block text-dusk">{block.title}</Mono>
+            <LedgerRows items={block.items} total={block.total} color={block.color} />
+            <LineRow label={block.totalLabel} value={usd(block.total)} total />
+          </div>
+        ))}
       {closing ? (
         <LineRow
           label={closing.label}
