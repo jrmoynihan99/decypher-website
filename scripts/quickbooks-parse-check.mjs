@@ -52,7 +52,7 @@ if (tsc.status !== 0) {
   process.exit(1);
 }
 
-const { parseProfitAndLoss, slicePnl, cents } = await import(pathToFileURL(join(out, "parse.js")));
+const { parseProfitAndLoss, recategorize, slicePnl, cents } = await import(pathToFileURL(join(out, "parse.js")));
 const { aggregateRows, averageOf, primaryBucket } = await import(pathToFileURL(join(out, "aggregate.js")));
 const { resolvePeriod, sliceIndices, syncWindow } = await import(pathToFileURL(join(out, "periods.js")));
 const { NO_OVERRIDES } = await import(pathToFileURL(join(out, "categories.js")));
@@ -368,6 +368,78 @@ check(
   "overrides don't change the headline total",
   sum(Object.values(mapped.incomeByCategory)),
   sum(Object.values(pnl.incomeByCategory)),
+);
+
+/* ───────────────────── recategorising ───────────────────── */
+
+// Categories are resolved at sync time and stored resolved, so the dashboard
+// read re-derives them against the current map — otherwise pinning an account
+// does nothing visible until that client's next sync, and a saved decision is
+// indistinguishable from a lost one. The invariant that makes it safe: reading
+// with a map must land exactly where re-syncing with that map would.
+section("recategorising — a mapping change without a resync");
+
+const OVERRIDE_MAP = {
+  byAccount: { 2: "brand-deals", 3: "brand-deals", 4: "brand-deals", 6: "affiliate" },
+  bySubType: {},
+};
+const live = recategorize(pnl, OVERRIDE_MAP);
+
+check(
+  "read-time resolution matches a resync, line for line",
+  live.revenueStreams.map((l) => `${l.accountId}:${l.category}`),
+  mapped.revenueStreams.map((l) => `${l.accountId}:${l.category}`),
+);
+check(
+  "...on the expense side too",
+  live.expenseLines.map((l) => `${l.accountId}:${l.category}`),
+  mapped.expenseLines.map((l) => `${l.accountId}:${l.category}`),
+);
+check("...and the category totals agree", live.incomeByCategory, mapped.incomeByCategory);
+check("...including expenses", live.expensesByCategory, mapped.expensesByCategory);
+
+// Nothing but the category may move. Sections, totals and the monthly series
+// are QuickBooks' own answers and a mapping decision has no business touching
+// them — that's what keeps the ledger reconciling while the map is edited.
+check("recategorising leaves the headline totals alone", live.income, pnl.income);
+check("...and the expense total", live.expenses, pnl.expenses);
+check(
+  "...and every line's section",
+  live.expenseLines.map((l) => l.section),
+  pnl.expenseLines.map((l) => l.section),
+);
+
+ok(
+  "no overrides is the identity, by reference",
+  recategorize(pnl, NO_OVERRIDES) === pnl,
+  "a no-op read is allocating a new report — the short-circuit has broken",
+);
+check(
+  "clearing an override reverts to the built-in map",
+  recategorize(mapped, NO_OVERRIDES).incomeByCategory,
+  pnl.incomeByCategory,
+);
+// The one that motivated all of this: pin an account to personal — account 32,
+// Software & Subscriptions, an ordinary operating expense — and the ledger has
+// to move it out of the operating list on the very next read, no sync involved.
+const before = splitCosts(pnl.expenseLines);
+const after = splitCosts(
+  recategorize(pnl, { byAccount: { 32: "personal" }, bySubType: {} }).expenseLines,
+);
+ok(
+  "pinning an account to personal moves it out of operating on the next read",
+  after.operatingLines.length === before.operatingLines.length - 1 &&
+    after.personalLines.length === before.personalLines.length + 1,
+);
+check(
+  "...and the operating total drops by exactly that account",
+  before.operatingTotal - after.operatingTotal,
+  pnl.expensesByCategory.software,
+);
+check(
+  "...while the four lists still add up to every expense",
+  after.cogsTotal + after.operatingTotal + after.otherTotal + after.personalTotal,
+  sum(pnl.expenseLines.map((l) => l.total)),
 );
 
 section("account index");

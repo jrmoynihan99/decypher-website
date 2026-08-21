@@ -20,7 +20,7 @@
  *     number down by a bug, so those are excluded and named.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CHART,
   ChartLegend,
@@ -240,18 +240,28 @@ export default function CreatorFinances({
   const [error, setError] = useState("");
   const [banner, setBanner] = useState<ConnectNotice>(notice);
 
+  /**
+   * Last request wins. Mattered little when only the period selector called
+   * this, but a mapping change refetches too — so a run of quick edits puts
+   * several loads in flight at once, and an early one landing late would put
+   * the pre-edit figures back on screen and leave them there.
+   */
+  const loadSeq = useRef(0);
+
   const load = useCallback(async (next: PeriodKey) => {
+    const seq = ++loadSeq.current;
     setBusy("load");
     setError("");
     try {
       const res = await fetch(`/api/portal/quickbooks/finances?period=${next}`);
       const data = await res.json();
+      if (seq !== loadSeq.current) return;
       if (!res.ok || !data?.ok) throw new Error(data?.message);
       setPayload(data as FinancesPayload);
     } catch {
-      setError("Couldn't load the latest figures — try again.");
+      if (seq === loadSeq.current) setError("Couldn't load the latest figures — try again.");
     } finally {
-      setBusy(null);
+      if (seq === loadSeq.current) setBusy(null);
     }
   }, []);
 
@@ -368,9 +378,13 @@ export default function CreatorFinances({
 
   const bucket = primaryBucket(payload.aggregate);
   const average = useMemo(() => averageOf(bucket), [bucket]);
-  // Both tabs read the same selection, so picking a creator in the comparison
-  // and opening their breakdown lands on the one you were just looking at. The
-  // fallback matters after a disconnect, when the held realmId no longer exists.
+  // All THREE tabs read the same selection, so picking a creator in the
+  // comparison and opening their breakdown — or their account map — lands on the
+  // one you were just looking at. The mapping tab used to hold its own state,
+  // initialised to the first client, so it silently ignored the creator you had
+  // open and threw away the one you picked in it the moment you left the tab.
+  // The fallback matters after a disconnect, when the held realmId no longer
+  // exists.
   const current =
     payload.rows.find((r) => r.realmId === selected) ?? payload.rows[0] ?? null;
 
@@ -449,7 +463,14 @@ export default function CreatorFinances({
         />
       ) : null}
 
-      {tab === "mapping" ? <Mapping rows={payload.rows} /> : null}
+      {tab === "mapping" ? (
+        <Mapping
+          rows={payload.rows}
+          realmId={current?.realmId ?? ""}
+          onSelect={setSelected}
+          onSaved={() => void load(period)}
+        />
+      ) : null}
 
       <Disclaimer>
         Figures come straight from each client&rsquo;s QuickBooks company file, on an accrual
@@ -1471,8 +1492,18 @@ type MappedAccount = AccountMeta & {
  *
  * Roughly ten accounts per new client, once.
  */
-function Mapping({ rows }: { rows: CreatorFinanceRow[] }) {
-  const [realmId, setRealmId] = useState(rows[0]?.realmId ?? "");
+function Mapping({
+  rows,
+  realmId,
+  onSelect,
+  onSaved,
+}: {
+  rows: CreatorFinanceRow[];
+  /** The dashboard-wide selection — this tab does NOT hold its own. See below. */
+  realmId: string;
+  onSelect: (realmId: string) => void;
+  onSaved: () => void;
+}) {
   const options = useMemo(() => creatorOptions(rows), [rows]);
 
   return (
@@ -1481,7 +1512,7 @@ function Mapping({ rows }: { rows: CreatorFinanceRow[] }) {
         label="Client"
         className="w-[280px]"
         value={realmId}
-        onChange={setRealmId}
+        onChange={onSelect}
         options={options}
         placeholder="Search clients…"
         emptyLabel="No client by that name."
@@ -1490,19 +1521,20 @@ function Mapping({ rows }: { rows: CreatorFinanceRow[] }) {
       {/* Keyed on realmId so switching client remounts with empty state. That's
           why the table below never has to reset anything in an effect — the
           "loading" state is simply "mounted but nothing has arrived yet". */}
-      {realmId ? <AccountTable key={realmId} realmId={realmId} /> : null}
+      {realmId ? <AccountTable key={realmId} realmId={realmId} onSaved={onSaved} /> : null}
 
       <Note>
         Mapping a revenue account here is what makes the aggregate income breakdown mean
         anything — QuickBooks files AdSense, sponsorships and merch under the same one or
         two subtypes, so it genuinely can&rsquo;t tell them apart. Expenses mostly sort
-        themselves out. Changes apply on this client&rsquo;s next sync.
+        themselves out. Changes show up on the other tabs straight away — a sync is only
+        needed for new figures, not for a new mapping.
       </Note>
     </div>
   );
 }
 
-function AccountTable({ realmId }: { realmId: string }) {
+function AccountTable({ realmId, onSaved }: { realmId: string; onSaved: () => void }) {
   const [accounts, setAccounts] = useState<MappedAccount[] | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -1539,6 +1571,9 @@ function AccountTable({ realmId }: { realmId: string }) {
         (prev) =>
           prev?.map((a) => (a.id === account.id ? { ...a, category, pinned: true } : a)) ?? prev,
       );
+      // The figures on the other two tabs were resolved with the OLD map, so
+      // refetch them. Cheap — a snapshot read, not a QuickBooks call.
+      onSaved();
     } catch {
       setError("Couldn't save that mapping — try again.");
     } finally {

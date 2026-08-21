@@ -17,8 +17,10 @@ import "server-only";
 
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import { aggregateRows } from "./aggregate";
+import { NO_OVERRIDES } from "./categories";
 import { listConnections, type ConnectionRow } from "./connections";
-import { slicePnl } from "./parse";
+import { getOverridesFor } from "./overrides";
+import { recategorize, slicePnl } from "./parse";
 import {
   availableYears,
   resolvePeriod,
@@ -201,7 +203,16 @@ export async function listCreatorFinances(
     return { period, basis, rows: [], aggregate: aggregateRows([]), years: [] };
   }
 
-  const docs = await adminDb().getAll(...connections.map((c) => ref(c.realmId, basis)));
+  /**
+   * Read alongside the snapshots, not instead of them: categories are stored
+   * resolved, so without this a mapping change stays invisible until that
+   * client's next sync. One extra getAll on a dashboard read is a fair price
+   * for a dropdown that does something when you use it. See recategorize().
+   */
+  const [docs, overrides] = await Promise.all([
+    adminDb().getAll(...connections.map((c) => ref(c.realmId, basis))),
+    getOverridesFor(connections.map((c) => c.realmId)),
+  ]);
   const snapshots = new Map(docs.map((doc) => [doc.id, doc.data()]));
 
   // Union of every cached month, for the year selector. Collected while
@@ -220,7 +231,12 @@ export async function listCreatorFinances(
       if (snap.status === "error") {
         dataStatus = "error";
       } else {
-        const stored = toPnl(snap.data);
+        const parsed = toPnl(snap.data);
+        // Before slicing, so the period's category totals are re-summed from
+        // the current map rather than carried over from the stored ones.
+        const stored = parsed
+          ? recategorize(parsed, overrides.get(c.realmId) ?? NO_OVERRIDES)
+          : null;
         if (stored) {
           for (const m of stored.months) allMonths.add(m);
           // The period selector is a slice of the cached window — exact, and
