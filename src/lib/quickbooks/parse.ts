@@ -512,6 +512,77 @@ export function parseProfitAndLoss(raw: unknown, opts: ParseOptions): ParseResul
   };
 }
 
+/* ────────────────────────── recategorising ────────────────────────── */
+
+/**
+ * Re-resolve one stored line against the overrides as they are NOW.
+ *
+ * Falls back to the category the line was stored with, because a stored line
+ * doesn't carry its account's `classification` — so layer 5 of resolveCategory
+ * can't run here, and its `uncategorized` return has to be read as "the layers
+ * that CAN run had no opinion" rather than as an answer. The stored value is
+ * that opinion, made at sync time when the classification was in hand.
+ *
+ * The one thing this can't undo is a cleared override on an account whose
+ * subtype isn't in the built-in map: nothing above the fallback matches, so the
+ * old pinned category persists until the next sync. Narrow, and it fails in the
+ * direction of the last decision the firm actually made.
+ */
+function recategorizeLine(
+  item: LineItem,
+  overrides: CategoryOverrides,
+  side: CategorySide,
+): CategoryKey {
+  const next = resolveCategory(
+    item.accountId,
+    // `name` is already the fully-qualified name wherever one existed — see
+    // toLineItems — which is what the personal-name heuristic wants to read.
+    { subType: item.subType, name: item.name, fullyQualifiedName: item.name },
+    overrides,
+    side,
+  );
+  return next === "uncategorized" ? item.category : next;
+}
+
+/**
+ * Apply the current category map to an already-parsed report.
+ *
+ * Categories are resolved at sync time and stored resolved, which made a
+ * mapping change invisible until that client's next sync — the firm would pin
+ * an account to "Personal (non-operating)", watch the ledger not move, and have
+ * no way to tell a saved decision from a lost one. Sections, totals and every
+ * monthly series come from QuickBooks and don't move; only the category does,
+ * and it's cheap to re-derive. So the read path derives it, and the stored value
+ * is a starting point rather than the answer.
+ *
+ * Returns the input unchanged, by identity, when nothing moved — which is the
+ * normal case, since most reads happen with the same overrides the sync used.
+ */
+export function recategorize(pnl: ProfitAndLoss, overrides: CategoryOverrides): ProfitAndLoss {
+  const apply = (items: LineItem[], side: CategorySide) => {
+    let moved = false;
+    const next = items.map((item) => {
+      const category = recategorizeLine(item, overrides, side);
+      if (category === item.category) return item;
+      moved = true;
+      return { ...item, category };
+    });
+    return moved ? next : items;
+  };
+
+  const revenueStreams = apply(pnl.revenueStreams, "income");
+  const expenseLines = apply(pnl.expenseLines, "expense");
+  if (revenueStreams === pnl.revenueStreams && expenseLines === pnl.expenseLines) return pnl;
+
+  return {
+    ...pnl,
+    revenueStreams,
+    expenseLines,
+    incomeByCategory: sumByCategory(revenueStreams),
+    expensesByCategory: sumByCategory(expenseLines),
+  };
+}
+
 /* ──────────────────────────── slicing ──────────────────────────── */
 
 /**
