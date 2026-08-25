@@ -5,8 +5,9 @@
  * they live in lib/tax.ts (the public estimator's engine) and are imported, so
  * a CPA updating a bracket for the tax year fixes the whole site at once.
  * What lives here is the modelling the staff tools need and the public
- * estimator doesn't: switchable standard/QBI deductions, per-plan retirement
- * contribution room, the Roth MAGI phase-out, and the late-filing penalty run.
+ * estimator doesn't: switchable standard/QBI deductions, the QBI phase-out,
+ * per-plan retirement contribution room, the Roth MAGI phase-out, and the
+ * late-filing penalty run.
  *
  * Every figure below is a 2026 estimate. Verify against the IRS release before
  * a client acts on it — the widgets say so on screen, and so does this file.
@@ -62,6 +63,31 @@ export const ROTH_PHASEOUT: Record<FilingStatus, [number, number]> = {
   mfs: [0, 10000],
 };
 
+/**
+ * 2026 QBI phase-out ranges [start, end], measured on taxable income *before*
+ * the QBI deduction.
+ *
+ * Modelled as a specified service trade or business (SSTB) — the usual
+ * treatment for a content creator — so the deduction slides linearly to $0
+ * across the range rather than falling back on the wage/property limit. Under
+ * the OBBBA permanent rules the phase-in span is $75,000 (single, HOH, MFS)
+ * and $150,000 (MFJ). Verify against the IRS release.
+ */
+export const QBI_PHASEOUT: Record<FilingStatus, [number, number]> = {
+  single: [201750, 276750],
+  hoh: [201750, 276750],
+  mfs: [201750, 276750],
+  mfj: [403500, 553500],
+};
+
+/** The share of the QBI deduction that survives the SSTB phase-out. */
+export function qbiPct(preQBI: number, status: FilingStatus): number {
+  const [lo, hi] = QBI_PHASEOUT[status];
+  if (preQBI <= lo) return 1;
+  if (preQBI >= hi) return 0;
+  return 1 - (preQBI - lo) / (hi - lo);
+}
+
 /* ─────────────────────────── core estimate ─────────────────────────── */
 
 export interface TaxScenario {
@@ -86,6 +112,11 @@ export interface TaxResult {
   taxable: number;
   /** The single federal bracket the taxable income lands in. */
   fedRate: number;
+  /** Taxable income before the QBI deduction — what the phase-out is read off. */
+  preQBI: number;
+  qbiDed: number;
+  /** 1 = fully available, 0 = fully phased out. */
+  qbiPct: number;
 }
 
 /**
@@ -109,8 +140,12 @@ export function estimateTax(s: TaxScenario): TaxResult {
 
   const totalAGI = Math.max(0, net - halfSE - adjust) + other;
   const preQBI = Math.max(0, totalAGI - (useStd ? STD_DED[s.status] : 0));
+  // A retirement contribution is an adjustment to income, so it shrinks the
+  // qualified business income the 20% is taken on as well as the tax base.
+  const qbiIncome = Math.max(0, net - halfSE - adjust);
+  const pct = qbiPct(preQBI, s.status);
   const qbi = useQBI
-    ? Math.min(TAX.qbiRate * Math.max(0, net - halfSE), TAX.qbiRate * preQBI)
+    ? Math.min(TAX.qbiRate * qbiIncome * pct, TAX.qbiRate * preQBI)
     : 0;
   const taxable = Math.max(0, preQBI - qbi);
 
@@ -125,6 +160,9 @@ export function estimateTax(s: TaxScenario): TaxResult {
     total: seTax + fed + stateTax,
     taxable,
     fedRate: marginalRate(taxable, brackets),
+    preQBI,
+    qbiDed: qbi,
+    qbiPct: pct,
   };
 }
 

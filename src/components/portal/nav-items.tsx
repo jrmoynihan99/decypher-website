@@ -70,6 +70,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     note: "Calendly integration",
     icon: "M5 6h6M5 12h14M5 18h9M17 3l3 3-3 3M17 15l3 3-3 3",
     permission: "sales-flow",
+    live: true,
   },
   {
     href: "/portal/creator-finances",
