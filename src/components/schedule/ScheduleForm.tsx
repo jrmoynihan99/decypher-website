@@ -54,6 +54,24 @@ interface Loaded {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * Recording consent, shown on the last step of every booking this form drives —
+ * /schedule and every affiliate page alike, because both mount this component.
+ *
+ * Held as data rather than JSX so the wording is editable in one place without
+ * touching markup, and so the apostrophes and em-dashes stay typographic.
+ *
+ * Deliberately in full rather than a "see our terms" link: the second point is
+ * a licence to publish someone's likeness, and burying that behind a click is
+ * how consent stops meaning anything. It sits at the end of step 3, directly
+ * above the button that acts on it — the last thing read before booking.
+ */
+const CONSENT_POINTS = [
+  "Calls may be recorded and transcribed for training, quality assurance, and internal documentation.",
+  "We may use portions of recorded calls — including audio, video, or transcript excerpts — in educational, promotional, or marketing materials. Where we do, we anonymize the content: names, handles, business names, and identifying financial details are removed or altered.",
+  "You may opt out during the call. Let us know at any point while we\u2019re on the call and we\u2019ll flag the recording so it\u2019s excluded from any content use. Opting out has no effect on your call, your pricing, or your service.",
+];
+
+/**
  * The shared btnPrimaryCls is w-full by design — right for a lone CTA, wrong
  * for a row, where two of them fight for the same width and the second lands
  * off-panel. These are the same look at row scale.
@@ -350,6 +368,8 @@ export default function ScheduleForm({
                 setQErrors((e) => (e[pos] ? { ...e, [pos]: false } : e));
               }}
             />
+
+            <RecordingConsent />
           </div>
         )}
         </div>
@@ -395,6 +415,40 @@ export default function ScheduleForm({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The recording notice, in full, at the foot of step 3.
+ *
+ * A notice rather than a tick-box on purpose. Every point here is either
+ * something we do regardless (record, transcribe) or something they can stop
+ * with a sentence on the call — so a required checkbox would gate the booking
+ * on an agreement that has no "no" branch, which is friction pretending to be
+ * a choice. What consent needs is that it was legible before the act it covers,
+ * and that the opt-out is as prominent as the licence: hence full text, right
+ * above the button, with the opt-out as its own point rather than a footnote.
+ */
+function RecordingConsent() {
+  return (
+    <div className="mt-7 rounded-[13px] border border-white/10 bg-white/[0.028] px-4 py-3.5">
+      <p className="m-0 font-mono text-[9.5px] uppercase tracking-[0.26em] text-magenta">
+        Recording &amp; consent
+      </p>
+      <p className="m-0 mt-2.5 text-[12px] leading-relaxed text-mist">
+        By booking this call, you agree that:
+      </p>
+      <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+        {CONSENT_POINTS.map((point) => (
+          <li key={point} className="flex gap-2.5">
+            <span aria-hidden className="mt-[7px] h-1 w-1 flex-none rounded-full bg-magenta/70" />
+            <span className="text-[11.5px] leading-[1.6] text-dusk [text-wrap:pretty]">
+              {point}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -205,7 +205,16 @@ function OperatingMarginMeter({ totals }: { totals: ProfitAndLossTotals }) {
  * knowing the name and shouldn't have to scroll to find it.
  */
 const creatorOptions = (rows: CreatorFinanceRow[]) =>
-  rows.map((row) => ({ value: row.realmId, label: row.displayName }));
+  rows.map((row) => ({
+    value: row.realmId,
+    // A disconnected client stays pickable — the firm keeps the history — but
+    // the option has to say so, because those figures stopped moving the day
+    // the books were handed back.
+    label:
+      row.connection === "disabled"
+        ? `${row.displayName} (disconnected)`
+        : row.displayName,
+  }));
 
 type Tab = "roster" | "creator" | "mapping";
 
@@ -234,7 +243,13 @@ export default function CreatorFinances({
   // A freshly connected company should be the one on screen, so it's chosen in
   // the initialiser rather than by an effect that would re-render immediately.
   const [selected, setSelected] = useState<string | null>(
-    (notice?.kind === "connected" ? notice.realm : null) ?? initial.rows[0]?.realmId ?? null,
+    (notice?.kind === "connected" ? notice.realm : null) ??
+      // A disconnected client is a poor thing to land on: its figures are
+      // frozen and half the controls are off. Only fall back to one when the
+      // whole book is disconnected.
+      initial.rows.find((r) => r.connection !== "disabled")?.realmId ??
+      initial.rows[0]?.realmId ??
+      null,
   );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -378,15 +393,38 @@ export default function CreatorFinances({
 
   const bucket = primaryBucket(payload.aggregate);
   const average = useMemo(() => averageOf(bucket), [bucket]);
+
+  /**
+   * The clients we still hold books for.
+   *
+   * Disconnecting keeps the document and the last-good snapshot — the firm
+   * wants the history, and aggregateRows has always skipped `disabled` when it
+   * sums. What hadn't skipped it were the counts and lists AROUND that
+   * aggregate, so a handed-back client kept being counted as connected and kept
+   * a line in the roster table under figures the totals no longer included.
+   * Every roster-level count reads this; the history stays one tab over.
+   */
+  const live = useMemo(
+    () => payload.rows.filter((r) => r.connection !== "disabled"),
+    [payload.rows],
+  );
+  const disconnected = useMemo(
+    () => payload.rows.filter((r) => r.connection === "disabled"),
+    [payload.rows],
+  );
+
   // All THREE tabs read the same selection, so picking a creator in the
   // comparison and opening their breakdown — or their account map — lands on the
   // one you were just looking at. The mapping tab used to hold its own state,
   // initialised to the first client, so it silently ignored the creator you had
   // open and threw away the one you picked in it the moment you left the tab.
-  // The fallback matters after a disconnect, when the held realmId no longer
-  // exists.
+  // The fallback prefers a live connection, and only lands on a disconnected
+  // client when the whole book is disconnected.
   const current =
-    payload.rows.find((r) => r.realmId === selected) ?? payload.rows[0] ?? null;
+    payload.rows.find((r) => r.realmId === selected) ??
+    live[0] ??
+    payload.rows[0] ??
+    null;
 
   if (!payload.rows.length) {
     return (
@@ -440,6 +478,8 @@ export default function CreatorFinances({
       {tab === "roster" ? (
         <Roster
           payload={payload}
+          live={live}
+          disconnected={disconnected}
           average={average}
           selected={current}
           busy={busy}
@@ -463,10 +503,20 @@ export default function CreatorFinances({
         />
       ) : null}
 
+      {/* Live clients only. Mapping reads a chart of accounts from QuickBooks,
+          which is exactly what a disconnected company no longer answers — so
+          this is the one tab that can't follow the shared selection all the way.
+          It falls back to a client it can actually open rather than landing on
+          an error, and picking one here still moves the selection for the other
+          two tabs. */}
       {tab === "mapping" ? (
         <Mapping
-          rows={payload.rows}
-          realmId={current?.realmId ?? ""}
+          rows={live}
+          realmId={
+            current && current.connection !== "disabled"
+              ? current.realmId
+              : (live[0]?.realmId ?? "")
+          }
           onSelect={setSelected}
           onSaved={() => void load(period)}
         />
@@ -620,6 +670,8 @@ function FirstRun() {
  */
 function Roster({
   payload,
+  live,
+  disconnected,
   average,
   selected,
   busy,
@@ -628,6 +680,10 @@ function Roster({
   onSync,
 }: {
   payload: FinancesPayload;
+  /** Clients we still hold books for — what every count on this tab is about. */
+  live: CreatorFinanceRow[];
+  /** Handed back. Kept for their history, out of every total and count here. */
+  disconnected: CreatorFinanceRow[];
   average: ProfitAndLossTotals;
   selected: CreatorFinanceRow | null;
   busy: string | null;
@@ -638,19 +694,29 @@ function Roster({
   const bucket = primaryBucket(payload.aggregate);
   const { excluded, mixedCurrency, primaryCurrency } = payload.aggregate;
   const d = selected?.data ?? null;
-  const options = useMemo(() => creatorOptions(payload.rows), [payload.rows]);
+  // Live clients, plus whichever disconnected one is currently selected — the
+  // selection is shared with the per-creator tab, and a picker that can't name
+  // its own value renders blank next to a table full of that client's figures.
+  const options = useMemo(
+    () =>
+      creatorOptions(
+        payload.rows.filter(
+          (r) => r.connection !== "disabled" || r.realmId === selected?.realmId,
+        ),
+      ),
+    [payload.rows, selected],
+  );
 
   // Losing the table loses the at-a-glance read on which connections are
   // broken, so the unhealthy rows keep a home of their own. `disabled` is
   // deliberately off rather than failing, and the aggregate skips it too.
   const excludedIds = new Set(excluded.map((e) => e.realmId));
-  const attention = payload.rows.filter(
+  const attention = live.filter(
     (row) =>
-      row.connection !== "disabled" &&
-      (excludedIds.has(row.realmId) ||
-        row.connection === "reconnect-required" ||
-        row.connection === "error" ||
-        row.stale),
+      excludedIds.has(row.realmId) ||
+      row.connection === "reconnect-required" ||
+      row.connection === "error" ||
+      row.stale,
   );
 
   return (
@@ -679,7 +745,12 @@ function Roster({
 
       <Panel
         title="Creator vs. average"
-        action={<Mono className="text-dusk">{payload.rows.length} connected</Mono>}
+        action={
+          <Mono className="text-dusk">
+            {live.length} connected
+            {disconnected.length ? ` · ${disconnected.length} disconnected` : ""}
+          </Mono>
+        }
         bodyClassName="px-0 py-0"
       >
         <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3.5">
@@ -758,7 +829,7 @@ function Roster({
         </div>
       </Panel>
 
-      <AllCreatorsTable rows={payload.rows} onOpen={onOpen} />
+      <AllCreatorsTable rows={live} disconnected={disconnected} onOpen={onOpen} />
 
       {attention.length ? (
         <Panel title={`Needs attention (${attention.length})`} bodyClassName="px-0 py-0">
@@ -869,17 +940,27 @@ function sortValue(row: CreatorFinanceRow, key: SortKey): number | string | null
  */
 function AllCreatorsTable({
   rows,
+  disconnected,
   onOpen,
 }: {
+  /** Live connections only — the count in the header is this list's length. */
   rows: CreatorFinanceRow[];
+  /** Handed back. Off by default; shown on request, never counted. */
+  disconnected: CreatorFinanceRow[];
   onOpen: (realmId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>("income");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
+  const [withDisconnected, setWithDisconnected] = useState(false);
+
+  const shown = useMemo(
+    () => (withDisconnected ? [...rows, ...disconnected] : rows),
+    [rows, disconnected, withDisconnected],
+  );
 
   const sorted = useMemo(() => {
-    const out = [...rows];
+    const out = [...shown];
     out.sort((a, b) => {
       const va = sortValue(a, sort);
       const vb = sortValue(b, sort);
@@ -894,7 +975,7 @@ function AllCreatorsTable({
       return dir === "asc" ? cmp : -cmp;
     });
     return out;
-  }, [rows, sort, dir]);
+  }, [shown, sort, dir]);
 
   const toggle = (key: SortKey) => {
     if (key === sort) {
@@ -910,19 +991,43 @@ function AllCreatorsTable({
     <Panel
       title="All creators"
       action={
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-magenta transition-colors duration-150 hover:text-fog"
-        >
-          {open ? "Hide" : `View all ${rows.length}`}
-        </button>
+        <span className="flex items-center gap-3">
+          {/* Disconnected books are history, not roster: off by default, and
+              the count above never includes them either way. */}
+          {open && disconnected.length ? (
+            <button
+              type="button"
+              onClick={() => setWithDisconnected((v) => !v)}
+              className={`cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] transition-colors duration-150 hover:text-fog ${
+                withDisconnected ? "text-magenta" : "text-dusk"
+              }`}
+            >
+              {withDisconnected
+                ? "Hide disconnected"
+                : `Show ${disconnected.length} disconnected`}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-magenta transition-colors duration-150 hover:text-fog"
+          >
+            {/* "Collapse", not "Hide" — the control beside it hides something
+                else, and two Hides in one header is a coin toss. */}
+            {open ? "Collapse" : `View all ${rows.length}`}
+          </button>
+        </span>
       }
       bodyClassName={open ? "px-0 py-0" : "px-4 py-3"}
     >
       {!open ? (
         <p className="text-[12.5px] text-dusk">
           Every connected creator in one table, sortable by any column.
+          {disconnected.length
+            ? ` ${disconnected.length} disconnected ${
+                disconnected.length === 1 ? "client is" : "clients are"
+              } kept for their history and left out of the totals.`
+            : ""}
         </p>
       ) : (
         <div className="overflow-x-auto">

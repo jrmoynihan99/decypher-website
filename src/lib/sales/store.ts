@@ -161,6 +161,52 @@ export async function listSalesCalls(limit = 2000): Promise<SalesCallRow[]> {
   return snap.docs.map((doc) => toRow(doc.id, doc.data()));
 }
 
+/**
+ * The same rows the grid holds, plus the intake Q&A, for a named set of ids.
+ *
+ * Exists because `answers` is deliberately absent from the wire shape — it's
+ * 60% of the payload and the grid renders none of it (see types.ts) — but it IS
+ * data we hold on the person, so an export that claimed to be everything and
+ * quietly dropped it would be a lie. Fetching it here, on demand, for the rows
+ * actually being exported keeps the page load unchanged.
+ *
+ * The caller supplies the ids because the filters that produced them live in
+ * the grid: date range, call type, tab, search and the per-tab selects, all
+ * client-side. Re-deriving that server-side would be a second implementation of
+ * the same rules, free to drift from the one the operator can see.
+ *
+ * Order follows `ids`, so the file matches what was on screen. Missing ids —
+ * a row deleted between render and export — are skipped rather than erroring.
+ */
+export async function listSalesCallsForExport(
+  ids: string[],
+): Promise<(SalesCallRow & { answers: Answer[] })[]> {
+  if (!isConfigured() || !ids.length) return [];
+
+  const unique = [...new Set(ids)];
+  const found = new Map<string, SalesCallRow & { answers: Answer[] }>();
+
+  // Chunked: getAll takes every ref in one round trip, and a 2,000-ref call is
+  // a single point of failure for the whole export.
+  const CHUNK = 300;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const refs = unique
+      .slice(i, i + CHUNK)
+      .map((id) => adminDb().collection(CALLS).doc(id));
+    const docs = await adminDb().getAll(...refs);
+    for (const doc of docs) {
+      if (!doc.exists) continue;
+      const d = doc.data()!;
+      found.set(doc.id, {
+        ...toRow(doc.id, d),
+        answers: Array.isArray(d.answers) ? (d.answers as Answer[]) : [],
+      });
+    }
+  }
+
+  return ids.map((id) => found.get(id)).filter((row) => row !== undefined);
+}
+
 function toReferrer(id: string, d: FirebaseFirestore.DocumentData): ReferrerRow {
   return {
     id,

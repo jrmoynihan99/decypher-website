@@ -21,6 +21,7 @@ import { money, toNum } from "@/lib/widget-format";
 import { STATE_NAMES } from "@/lib/tax";
 import {
   LIMITS,
+  QBI_PHASEOUT,
   SE,
   SS_WAGE_BASE,
   STD_DED,
@@ -77,6 +78,10 @@ interface ScenarioResult {
   salary: number;
   maxRet: number;
   seSaved: number;
+  /** Taxable income before QBI — what the phase-out card reads off. */
+  preQBI: number;
+  qbiDed: number;
+  qbiPct: number;
 }
 
 /**
@@ -148,11 +153,16 @@ function evalScenario(o: ScenarioOpts): ScenarioResult {
     salary,
     maxRet,
     seSaved: Math.max(0, r.seTax - ficaS),
+    preQBI: r.preQBI,
+    qbiDed: r.qbiDed,
+    qbiPct: r.qbiPct,
   };
 }
 
-/** Fixed attribution order, so per-row gains sum to the headline total. */
-const ORDER = ["yours", "ours", "ho", "scorp", "retire"] as const;
+/** Fixed attribution order, so per-row gains sum to the headline total. The
+ *  standard and QBI deductions come last: they apply to whatever taxable income
+ *  survives the strategies, which is the order a return works in. */
+const ORDER = ["yours", "ours", "ho", "scorp", "retire", "std", "qbi"] as const;
 type GainKey = (typeof ORDER)[number];
 
 /* The penalty run needs today's date, and reading the clock during render
@@ -173,6 +183,18 @@ const STEPS = [
   "The long game",
 ] as const;
 
+/** How a filing status reads mid-sentence — "…for single filers". */
+const STATUS_LABEL: Record<WizardStatus, string> = {
+  single: "single",
+  mfj: "married filing jointly",
+  hoh: "head of household",
+};
+const STATUS_PLURAL: Record<WizardStatus, string> = {
+  single: "single filers",
+  mfj: "married filing jointly",
+  hoh: "head of household",
+};
+
 export default function SavingsWizard() {
   const [step, setStep] = useState(1);
 
@@ -181,8 +203,6 @@ export default function SavingsWizard() {
   const [w2, setW2] = useState("0");
   const [usState, setUsState] = useState("Massachusetts");
   const [status, setStatus] = useState<WizardStatus>("single");
-  const [useStd, setUseStd] = useState(false);
-  const [useQBI, setUseQBI] = useState(false);
 
   // step 1 — behind-on-filing
   const [penOn, setPenOn] = useState(false);
@@ -193,6 +213,8 @@ export default function SavingsWizard() {
   const [penBaseDirty, setPenBaseDirty] = useState(false);
 
   // step 2 — strategies
+  const [onStd, setOnStd] = useState(false);
+  const [onQbi, setOnQbi] = useState(false);
   const [onYours, setOnYours] = useState(false);
   const [onOurs, setOnOurs] = useState(false);
   const [onHo, setOnHo] = useState(false);
@@ -221,25 +243,26 @@ export default function SavingsWizard() {
       w2: Math.max(0, toNum(w2)),
       status,
       state: usState,
-      useStd,
-      useQBI,
+      useStd: onStd,
+      useQBI: onQbi,
     }),
-    [revenue, w2, status, usState, useStd, useQBI],
+    [revenue, w2, status, usState, onStd, onQbi],
   );
 
   /* ── step 1: the anchor ── */
   const anchor = useMemo(() => {
+    // Deliberately raw — no write-offs, no standard deduction, no QBI. Every
+    // one of those is a saving Step 2 gets to put back on the table.
     const r = estimateTax({
       net: base.revenue,
       status: base.status,
       state: base.state,
       other: base.w2,
-      useStd: base.useStd,
-      useQBI: base.useQBI,
+      useStd: false,
+      useQBI: false,
     });
     // Split the federal line so a client with a day job can see which part of
     // the bill their business is actually responsible for.
-    const stdAmt = base.useStd ? STD_DED[base.status] : 0;
     const w2Fed =
       base.w2 > 0
         ? Math.min(
@@ -248,7 +271,7 @@ export default function SavingsWizard() {
               net: 0,
               status: base.status,
               state: base.state,
-              other: Math.max(0, base.w2 - stdAmt),
+              other: base.w2,
               useStd: false,
               useQBI: false,
             }).fed,
@@ -279,7 +302,10 @@ export default function SavingsWizard() {
 
   /* ── step 2: strategies, applied in order ── */
   const c = useMemo(() => {
-    const baseline = evalScenario(base).total;
+    // Baseline = the revenue taxed with nothing applied at all, deductions
+    // included, so the plan is credited with every dollar it puts back.
+    const bare: ScenarioOpts = { ...base, useStd: false, useQBI: false };
+    const baseline = evalScenario(bare).total;
 
     const cur: ScenarioOpts = { ...base };
     if (onYours) cur.curExp = Math.max(0, toNum(curExp));
@@ -300,7 +326,7 @@ export default function SavingsWizard() {
     }
     if (retPlan) cur.retPlan = retPlan;
 
-    const running: ScenarioOpts = { ...base };
+    const running: ScenarioOpts = { ...bare };
     let prev = baseline;
     const gains: Record<GainKey, number> = {
       yours: 0,
@@ -308,6 +334,8 @@ export default function SavingsWizard() {
       ho: 0,
       scorp: 0,
       retire: 0,
+      std: 0,
+      qbi: 0,
     };
 
     for (const k of ORDER) {
@@ -322,6 +350,8 @@ export default function SavingsWizard() {
         running.scorp = true;
         running.salary = cur.salary;
       } else if (k === "retire" && cur.retPlan) running.retPlan = cur.retPlan;
+      else if (k === "std" && base.useStd) running.useStd = true;
+      else if (k === "qbi" && base.useQBI) running.useQBI = true;
       else continue;
 
       const t = evalScenario(running).total;
@@ -352,22 +382,6 @@ export default function SavingsWizard() {
     hoPct,
     salaryPct,
   ]);
-
-  /* Split the write-off savings between what they already claim and what we
-     find on top, so the second number is provably incremental. */
-  const writeoffSplit = useMemo(() => {
-    const cx = onYours ? Math.max(0, toNum(curExp)) : 0;
-    const fd = onOurs ? Math.max(0, toNum(found)) : 0;
-    const tGross = evalScenario(base).total;
-    const tCur = evalScenario({ ...base, curExp: cx }).total;
-    const tFound = evalScenario({ ...base, curExp: cx, found: fd }).total;
-    return {
-      cx,
-      fd,
-      savX: Math.max(0, tGross - tCur),
-      savY: Math.max(0, tCur - tFound),
-    };
-  }, [base, onYours, onOurs, curExp, found]);
 
   /* ── back-tax penalties ── */
   const penalty = useMemo(() => {
@@ -437,12 +451,20 @@ export default function SavingsWizard() {
     retPlan === "sep" ? "SEP-IRA" : retPlan === "solo" ? "Solo 401(k)" : "Retirement";
 
   const strategyRows = [
-    { label: "Your existing write-offs", value: writeoffSplit.savX },
-    { label: "Write-offs we find", value: writeoffSplit.savY },
+    { label: "Your existing write-offs", value: c.gains.yours },
+    { label: "Write-offs we find", value: c.gains.ours },
     { label: "Home office deduction", value: c.gains.ho },
     { label: "S-Corp election", value: c.gains.scorp },
     { label: retName, value: c.gains.retire },
+    { label: "Standard deduction", value: c.gains.std },
+    { label: "QBI deduction", value: c.gains.qbi },
   ].filter((r) => r.value >= 1);
+
+  /* The QBI phase-out read-off, taken from the fully-optimised scenario: the
+     point of the card is that the strategies above it move this number. */
+  const qbiRange = QBI_PHASEOUT[status];
+  const qbiLeft = c.full.qbiPct;
+  const qbiPre = c.full.preQBI;
 
   /* ── the comparison bars ── */
   const barBase = penalty.active ? penalty.allInBefore : c.baseline;
@@ -452,11 +474,23 @@ export default function SavingsWizard() {
   const optPct = (barOpt / barMax) * 100;
   const savPct = (barSaved / barMax) * 100;
 
-  const newNet = Math.max(
-    0,
-    base.revenue - writeoffSplit.cx - writeoffSplit.fd,
-  );
-  const marginPct = base.revenue > 0 ? (newNet / base.revenue) * 100 : 0;
+  /* ── the books panel: every deduction, so they see true profitability ── */
+  const newNet = Math.max(0, base.revenue - c.curExpAmt - c.foundAmt);
+  // Capped against net profit the same way evalScenario caps it, so the panel
+  // can never show more home-office expense than there is profit to absorb.
+  const hoDed = onHo
+    ? Math.min(
+        Math.max(0, toNum(rent) + toNum(util)) *
+          12 *
+          (Math.max(0, Math.min(100, hoPct)) / 100),
+        newNet,
+      )
+    : 0;
+  const retAmt = retPlan ? Math.max(0, c.full.maxRet) : 0;
+  const opEx = c.curExpAmt + c.foundAmt + hoDed;
+  const opNet = Math.max(0, base.revenue - opEx);
+  const trueNet = Math.max(0, opNet - retAmt);
+  const marginPct = base.revenue > 0 ? (opNet / base.revenue) * 100 : 0;
   const marginOut = base.revenue > 0 && (marginPct < 20 || marginPct > 70);
 
   return (
@@ -514,7 +548,7 @@ export default function SavingsWizard() {
                 Where you are now
               </h3>
               <p className="mb-5 mt-1 text-[13.5px] text-muted">
-                A quick read on where you stand — before a single write-off.
+                A quick read on your starting point — before a single write-off.
                 Your revenue and state get us there.
               </p>
 
@@ -555,14 +589,11 @@ export default function SavingsWizard() {
                 </Field>
               </div>
 
-              <div className="mt-5 flex flex-wrap gap-6">
-                <Check checked={useStd} onChange={setUseStd}>
-                  Standard deduction ({money(STD_DED[status])})
-                </Check>
-                <Check checked={useQBI} onChange={setUseQBI}>
-                  QBI deduction (20%)
-                </Check>
-              </div>
+              <p className="mt-5 text-[12px] text-dusk">
+                {base.revenue > 0
+                  ? "Your business revenue (plus any W-2) — write-offs, deductions and strategies all come in Step 2."
+                  : "Enter your revenue above."}
+              </p>
             </Panel>
 
             {/* the anchor number */}
@@ -580,7 +611,7 @@ export default function SavingsWizard() {
                   <MoneyFlow value={anchor.total} />
                 </div>
                 <p className="text-[15px] text-muted">
-                  in tax — self-employment, federal and state combined.
+                  in tax — self-employment, federal, and state combined.
                 </p>
 
                 <div className="mt-5 border-t border-edge pt-4">
@@ -604,24 +635,13 @@ export default function SavingsWizard() {
                 </div>
 
                 <p className="mt-5 text-[15px] text-muted">
-                  That&rsquo;s the raw starting point. Step 2 puts write-offs and
-                  strategies to work.
+                  That&rsquo;s the raw starting point. In Step 2 we put your
+                  write-offs and our strategies to work.
                 </p>
                 <p className="mt-4 border-t border-edge pt-3.5 text-[12.5px] text-faint">
                   About a {anchor.effRate.toFixed(1)}% effective rate in{" "}
-                  {usState}, before any deductions
+                  {usState}, before any write-offs or deductions
                   {base.w2 > 0 ? " (W-2 stacks on top of business income)" : ""}
-                  {[
-                    !useStd ? "no standard deduction" : null,
-                    !useQBI ? "no QBI deduction" : null,
-                  ].filter(Boolean).length > 0
-                    ? ` · ${[
-                        !useStd ? "no standard deduction" : null,
-                        !useQBI ? "no QBI deduction" : null,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}`
-                    : ""}
                   . Step 2 brings it down.
                 </p>
               </div>
@@ -641,10 +661,10 @@ export default function SavingsWizard() {
                 </p>
                 <p className="mt-1 text-[13px] text-muted">
                   A lot of creators come to us behind on filing. Pick the tax
-                  year and this shows what the IRS failure-to-file and
-                  failure-to-pay penalties plus interest add up to — and how an
-                  extension changes it. Today&rsquo;s date is read automatically,
-                  so the numbers stay accurate.
+                  year and here&rsquo;s what the IRS failure-to-file and
+                  failure-to-pay penalties plus interest add up to — and how
+                  filing an extension changes it. Today&rsquo;s date is read
+                  automatically, so the numbers stay accurate.
                 </p>
               </div>
               <Switch
@@ -799,12 +819,96 @@ export default function SavingsWizard() {
                   What we can do
                 </h3>
                 <p className="mb-5 mt-1 text-[13.5px] text-muted">
-                  Toggle the strategies we&rsquo;d put in place. Your tax bill
-                  drops in real time — every estimate is deliberately
+                  Toggle the strategies we&rsquo;d put in place. Watch the tax
+                  bill drop in real time — every estimate is deliberately
                   conservative.
                 </p>
 
                 <div className="flex flex-col gap-3.5">
+                  <StrategyCard
+                    title="Standard deduction"
+                    note="The flat deduction every filer gets against taxable income — it scales with your filing status."
+                    gain={`+${money(c.gains.std)}`}
+                    on={onStd}
+                    onToggle={setOnStd}
+                  >
+                    <KpiRow cols={2}>
+                      <Kpi label="Deduction amount" value={money(STD_DED[status])} />
+                      <Kpi label="Tax saved" value={money(c.gains.std)} tone="pos" />
+                    </KpiRow>
+                    <p className="mt-2.5 text-[12px] text-dusk">
+                      Standard deduction for {STATUS_LABEL[status]} in 2026.
+                    </p>
+                  </StrategyCard>
+
+                  <StrategyCard
+                    title="QBI deduction (20%)"
+                    note="Deduct up to 20% of qualified business income — but it phases out at higher incomes for service businesses."
+                    gain={`+${money(c.gains.qbi)}`}
+                    on={onQbi}
+                    onToggle={setOnQbi}
+                  >
+                    <KpiRow cols={2}>
+                      <Kpi label="Deduction amount" value={money(c.full.qbiDed)} />
+                      <Kpi label="Tax saved" value={money(c.gains.qbi)} tone="pos" />
+                    </KpiRow>
+
+                    {/* What the SSTB phase-out leaves of the deduction. */}
+                    <div className="mt-3.5">
+                      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                        <Mono className="text-faint">
+                          {qbiLeft >= 1 ? "Phase-out headroom" : "Phase-out"}
+                        </Mono>
+                        <Mono className="font-bold text-muted">
+                          {Math.round(qbiLeft * 100)}% available
+                        </Mono>
+                      </div>
+                      <div className="h-[7px] overflow-hidden rounded-full border border-edge bg-panel-2">
+                        <div
+                          className={`h-full rounded-full transition-[width,background-color] duration-500 ${
+                            qbiLeft <= 0
+                              ? "bg-danger"
+                              : qbiLeft < 1
+                                ? "bg-tier-warn"
+                                : "bg-teal"
+                          }`}
+                          style={{ width: `${Math.max(0, qbiLeft) * 100}%` }}
+                        />
+                      </div>
+                      <div className="mt-1.5 flex justify-between">
+                        <Mono className="text-faint">{money(qbiRange[0])}</Mono>
+                        <Mono className="text-faint">{money(qbiRange[1])}</Mono>
+                      </div>
+                    </div>
+
+                    {qbiLeft <= 0 ? (
+                      <p className="mt-3 rounded-[10px] border border-danger/30 bg-danger/[0.08] px-3 py-2.5 text-[12.5px] leading-relaxed text-danger">
+                        <b>Fully phased out.</b> At {money(qbiPre)} of taxable{" "}
+                        income you&rsquo;re above the {money(qbiRange[1])}{" "}
+                        ceiling for {STATUS_PLURAL[status]}, so the QBI deduction
+                        is $0. Bringing taxable income below {money(qbiRange[1])}{" "}
+                        would start restoring it.
+                      </p>
+                    ) : qbiLeft < 1 ? (
+                      <p className="mt-3 rounded-[10px] border border-tier-warn/30 bg-tier-warn/[0.09] px-3 py-2.5 text-[12.5px] leading-relaxed text-tier-warn">
+                        <b>You&rsquo;re in the QBI phase-out range.</b> At{" "}
+                        {money(qbiPre)} of taxable income you&rsquo;re{" "}
+                        {money(Math.max(0, qbiPre - qbiRange[0]))} into the{" "}
+                        {money(qbiRange[0])}–{money(qbiRange[1])} range for{" "}
+                        {STATUS_PLURAL[status]}, so only{" "}
+                        {Math.round(qbiLeft * 100)}% of the deduction survives.
+                        Every dollar of taxable income we remove restores part of
+                        it.
+                      </p>
+                    ) : null}
+
+                    <Note>
+                      Modelled as a specified service business (SSTB) — the usual
+                      treatment for creators, where the deduction phases out
+                      entirely across the range above.
+                    </Note>
+                  </StrategyCard>
+
                   <StrategyCard
                     title="Your existing write-offs"
                     note="The expenses you already write off each year — clean books make sure every one of them actually counts."
@@ -815,11 +919,11 @@ export default function SavingsWizard() {
                     <Field label="Annual business expenses (same write-offs as last year)">
                       <NumInput value={curExp} onChange={setCurExp} prefix="$" align="left" />
                     </Field>
-                    {writeoffSplit.cx > 0 ? (
+                    {c.curExpAmt > 0 ? (
                       <p className="mt-2.5 text-[13px] text-muted">
                         Same write-offs as last year → saves{" "}
                         <b className="font-display font-semibold text-teal">
-                          {money(writeoffSplit.savX)}/yr
+                          {money(c.gains.yours)}/yr
                         </b>
                       </p>
                     ) : null}
@@ -836,12 +940,12 @@ export default function SavingsWizard() {
                     <Field label="Additional deductions we typically find">
                       <NumInput value={found} onChange={setFound} prefix="$" align="left" />
                     </Field>
-                    {writeoffSplit.fd > 0 ? (
+                    {c.foundAmt > 0 ? (
                       <p className="mt-2.5 text-[13px] text-muted">
-                        We typically find an extra {money(writeoffSplit.fd)} → an
+                        We typically find an extra {money(c.foundAmt)} → an
                         additional{" "}
                         <b className="font-display font-semibold text-teal">
-                          {money(writeoffSplit.savY)}/yr
+                          {money(c.gains.ours)}/yr
                         </b>
                       </p>
                     ) : null}
@@ -992,7 +1096,8 @@ export default function SavingsWizard() {
                     ) : null}
 
                     <p className="mt-3 inline-block rounded-full border border-teal/40 px-2.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[1px] text-teal">
-                      2026 limits · both capped at {money(LIMITS.dcLimit)}
+                      2026 limits · under-50 · both capped at{" "}
+                      {money(LIMITS.dcLimit)}
                     </p>
                   </div>
                 </div>
@@ -1007,26 +1112,34 @@ export default function SavingsWizard() {
                   <LineRow
                     display
                     label="Current expenses"
-                    value={money(writeoffSplit.cx)}
+                    value={money(c.curExpAmt)}
                   />
-                  {writeoffSplit.fd > 0 ? (
+                  {c.foundAmt > 0 ? (
                     <LineRow
                       display
                       tone="pos"
                       label="Additional deductions we find"
-                      value={`+${money(writeoffSplit.fd)}`}
+                      value={`+${money(c.foundAmt)}`}
+                    />
+                  ) : null}
+                  {hoDed > 0 ? (
+                    <LineRow
+                      display
+                      tone="pos"
+                      label="Home office deduction"
+                      value={`+${money(hoDed)}`}
                     />
                   ) : null}
                   <LineRow
                     total
                     display
                     label="Total business expenses"
-                    value={money(writeoffSplit.cx + writeoffSplit.fd)}
+                    value={money(opEx)}
                   />
-                  <LineRow display label="New net profit" value={money(newNet)} />
+                  <LineRow display label="Operating net profit" value={money(opNet)} />
                   <LineRow
                     display
-                    label="Net profit margin"
+                    label="Operating margin"
                     value={`${marginPct.toFixed(1)}%`}
                     tone={marginOut ? "neg" : "plain"}
                   />
@@ -1035,6 +1148,28 @@ export default function SavingsWizard() {
                   {marginOut
                     ? `Most creators land between 20% and 70% — this one's ${marginPct > 70 ? "above" : "below"} that range.`
                     : "Most creators land between 20% and 70%."}
+                </p>
+
+                <div className="mt-2.5">
+                  {retAmt > 0 ? (
+                    <LineRow
+                      display
+                      tone="pos"
+                      label="Retirement contribution"
+                      value={`+${money(retAmt)}`}
+                    />
+                  ) : null}
+                  <LineRow
+                    total
+                    display
+                    label="Net profit after everything"
+                    value={money(trueNet)}
+                  />
+                </div>
+                <p className="mt-2 text-[12px] text-dusk">
+                  {onScorp
+                    ? `With the S-Corp, ${money(c.full.salary)} of this comes to you as W-2 salary and the rest as distributions — it's still your money, just taxed differently.`
+                    : "After every write-off, the home office, and your retirement contribution."}
                 </p>
 
                 <div className="mt-4 border-t border-edge pt-3.5">
@@ -1092,7 +1227,7 @@ export default function SavingsWizard() {
                   [ live comparison ]
                 </Mono>
                 <h3 className="mb-5 mt-2 font-display text-[20px] font-semibold text-fog">
-                  The tax bill, before and after
+                  Your tax bill, before and after
                 </h3>
 
                 <div className="mb-2 flex justify-center gap-14 px-2.5">
@@ -1292,7 +1427,7 @@ export default function SavingsWizard() {
             </div>
 
             <div className="mt-6 inline-flex flex-col items-center gap-1 rounded-[16px] border border-teal/30 bg-gradient-to-b from-teal/10 to-teal/[0.02] px-11 py-5">
-              <Mono className="text-muted">Annual savings</Mono>
+              <Mono className="text-muted">Your annual savings</Mono>
               <span className="font-display text-[34px] font-bold leading-none text-teal">
                 <MoneyFlow value={c.totalSavings} />
                 <small className="ml-1 text-[15px] font-semibold text-muted">
@@ -1305,7 +1440,7 @@ export default function SavingsWizard() {
               Estimates use 2026 figures and are intentionally conservative —
               your actual result depends on the full return. Not tax advice;
               final numbers are confirmed when we prepare it. State brackets are
-              current-year approximations.
+              current-year approximations pending verification.
             </p>
           </div>
 
@@ -1344,7 +1479,7 @@ export default function SavingsWizard() {
             </div>
 
             <Mono className="mb-2 mt-5 block font-bold text-mist">
-              How much of the savings gets invested
+              How much of the savings you invest
             </Mono>
             <ChipRow
               value={investPct}

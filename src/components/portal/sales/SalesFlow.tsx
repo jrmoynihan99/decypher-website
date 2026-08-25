@@ -39,6 +39,7 @@ import {
   partnerPayout,
   payoutDate,
 } from "@/lib/sales/options";
+import { csvFilename } from "@/lib/sales/csv";
 import type {
   CreatorOption,
   ReferrerRow,
@@ -293,6 +294,7 @@ export default function SalesFlow({
   const [error, setError] = useState<string | null>(null);
   /** `${id}:${field}` while a write is in flight, so one cell greys, not the row. */
   const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   const busy = useCallback(
     (id: string, field: string) => saving.has(`${id}:${field}`),
@@ -704,6 +706,65 @@ export default function SalesFlow({
     [compareTo, boundsLabel],
   );
 
+  /* ── export ──
+   *
+   * EVERY FILTERED ROW, not the rendered page. `rows` is the full filtered set
+   * and `page` is the DOM window over it, so exporting `page` would silently
+   * hand over the first 75 of 400 matches with nothing to indicate the rest
+   * were dropped — the one failure mode that makes an export worse than no
+   * export. The render cap is a browser concern and stops at the browser.
+   *
+   * The file itself is built server-side: the intake Q&A that makes it a record
+   * of the person rather than of the deal never travels to this component (see
+   * the note in lib/sales/types.ts), so all the browser sends is which rows,
+   * in which order, and what clock to write the timestamps in.
+   */
+  const exportView = showArchived
+    ? "deleted"
+    : tab === "deals"
+      ? "deal-desk"
+      : tab === "referrals"
+        ? "referrals"
+        : "booked-calls";
+
+  const exportCsv = useCallback(async () => {
+    if (!rows.length || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/portal/sales/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: rows.map((r) => r.id),
+          // The grid renders every date in this zone; a file in UTC would put
+          // a Monday-evening booking on Tuesday and disagree with the row it
+          // came from.
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `Export failed (${res.status})`);
+      }
+
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = csvFilename(exportView, rangeLabel, new Date());
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Freed on the next tick rather than immediately: revoking inside the
+      // same task can beat the download starting in Safari.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't export those rows");
+    } finally {
+      setExporting(false);
+    }
+  }, [rows, exporting, exportView, rangeLabel]);
+
   /* ── column widths, one saved set per table ── */
 
   const bookedCols = useColumnWidths("booked", BOOKED_COLUMNS);
@@ -923,6 +984,26 @@ export default function SalesFlow({
             }`}
           >
             ＋ Add row
+          </button>
+        ) : null}
+
+        {/* Whatever the filters currently select, whole — not the rendered
+            window. Sits next to the filters because that's what it exports. */}
+        {tab !== "stats" ? (
+          <button
+            type="button"
+            onClick={() => void exportCsv()}
+            disabled={exporting || rows.length === 0}
+            title={
+              rows.length
+                ? `Download all ${rows.length.toLocaleString()} matching rows as a CSV — every field we hold, including what they typed into the booking form`
+                : "Nothing matches the current filters"
+            }
+            className="cursor-pointer rounded-[10px] border border-edge-mid px-3 py-2 font-mono text-[11px] uppercase tracking-[0.8px] text-dusk transition-colors duration-150 hover:border-magenta hover:text-fog disabled:cursor-default disabled:opacity-40 disabled:hover:border-edge-mid disabled:hover:text-dusk"
+          >
+            {exporting
+              ? "Exporting…"
+              : `↓ Export CSV${rows.length ? ` (${rows.length.toLocaleString()})` : ""}`}
           </button>
         ) : null}
 
