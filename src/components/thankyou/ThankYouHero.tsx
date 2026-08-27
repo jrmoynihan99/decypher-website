@@ -11,14 +11,18 @@ import type { CmsThankYouPage } from "@/sanity/types";
 
 /**
  * The top of a thank-you page. A deliberately short header — "see you in our
- * call" / "but first…" — trails straight into the star of the page: the big
- * pre-call video the client should watch before the call. The creator wall,
- * the reviews and the stats follow in the template.
+ * call" / "but first…" — trails straight into whatever the page is really for.
  *
- * Copy and the video URL come from the page's own document (Studio → Thank You
- * Pages), with the defaults below as fallback so a page created and left half
- * filled still reads as finished. The optional eyebrow/title over the video
- * stay empty by default — the body line does the introducing.
+ * With `showVideo` (Studio → Thank You Pages → "Include the hero video") that
+ * is the big pre-call briefing the client should watch before the call; the
+ * creator wall, the reviews and the stats follow in the template. Without it
+ * the video section isn't rendered at all and the header hands off directly to
+ * the creator wall, so the fallback body line changes to say so.
+ *
+ * Copy and the video URL come from the page's own document, with the defaults
+ * below as fallback so a page created and left half filled still reads as
+ * finished. The optional eyebrow/title over the video stay empty by default —
+ * the body line does the introducing.
  *
  * The header stays tight on phones (smaller type, tighter gaps) so the hero
  * video lands above the fold without scrolling.
@@ -29,6 +33,9 @@ const DEFAULTS = {
   title: "See you in our call.",
   body: "But first…",
 };
+
+/** Without a video the header is the wall's only introduction, so it names it. */
+const NO_VIDEO_BODY = "But first, hear it from the creators.";
 
 /** On-brand awaiting-asset frame shown until the video URL exists in the Studio. */
 function HeroVideoPlaceholder() {
@@ -54,9 +61,12 @@ function HeroVideoPlaceholder() {
 export default function ThankYouHero({
   header = {},
   video = {},
+  showVideo = true,
 }: {
   header?: NonNullable<CmsThankYouPage["header"]>;
   video?: NonNullable<CmsThankYouPage["video"]>;
+  /** False drops the whole video section; the header runs into the wall. */
+  showVideo?: boolean;
 }) {
   return (
     <SectionReveal>
@@ -87,13 +97,13 @@ export default function ThankYouHero({
             delay={0.3}
             className="relative mx-auto mt-3 max-w-[52ch] text-[14px] leading-relaxed text-mist [text-wrap:pretty] md:mt-[18px] md:text-[clamp(15.5px,1.7vw,17.5px)]"
           >
-            {header.body ?? DEFAULTS.body}
+            {header.body ?? (showVideo ? DEFAULTS.body : NO_VIDEO_BODY)}
           </ParagraphReveal>
         </div>
 
         {/* optional kicker over the video — empty in Studio by default, the
             "but first…" body line above does the introducing */}
-        {(video.eyebrow || video.title) && (
+        {showVideo && (video.eyebrow || video.title) && (
           <div className="relative mt-7 md:mt-11">
             {video.eyebrow && (
               <SubheadingReveal delay={0.35} className="relative">
@@ -113,18 +123,22 @@ export default function ThankYouHero({
           </div>
         )}
 
-        {/* the pre-call briefing video, the star of this page */}
-        <Reveal delay={0.5} amount={0.15} className="relative mt-6 md:mt-9">
-          {video.videoUrl ? (
-            <AutoplayVideo
-              url={video.videoUrl}
-              title={video.title ?? "Pre-call briefing"}
-              variant="hero"
-            />
-          ) : (
-            <HeroVideoPlaceholder />
-          )}
-        </Reveal>
+        {/* the pre-call briefing video, the star of this page — unless the
+            page is switched to hand straight off to the creator wall, in which
+            case nothing renders here, placeholder included */}
+        {showVideo && (
+          <Reveal delay={0.5} amount={0.15} className="relative mt-6 md:mt-9">
+            {video.videoUrl ? (
+              <AutoplayVideo
+                url={video.videoUrl}
+                title={video.title ?? "Pre-call briefing"}
+                variant="hero"
+              />
+            ) : (
+              <HeroVideoPlaceholder />
+            )}
+          </Reveal>
+        )}
       </section>
     </SectionReveal>
   );

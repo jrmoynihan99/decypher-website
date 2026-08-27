@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
@@ -9,10 +10,19 @@ import type { CmsVideoTestimonial, SectionHeadingContent } from "@/sanity/types"
 
 /**
  * The creator-video wall on a thank-you page, beneath the pre-call hero video.
- * Cards come from the Video Testimonials collection; the heading is shared by
- * every thank-you page and editable in Sanity (Book a Call → Thank You), with
- * these defaults as fallback. Embeds are click-to-load (ClickToPlayVideo) — a
- * grid of live YouTube iframes would drag any phone under.
+ * Cards are picked per page (Thank You Pages → Creator videos) and fall back to
+ * the whole Video Testimonials collection; the heading is shared by every
+ * thank-you page and editable in Sanity (Book a Call → Thank You), with these
+ * defaults as fallback. Embeds are click-to-load (ClickToPlayVideo) — a grid of
+ * live YouTube iframes would drag any phone under.
+ *
+ * A page may carry up to forty videos, which is more wall than any visitor
+ * scrolls, so only the first INITIAL are rendered and the rest wait behind a
+ * button. That's the part that actually costs: each card carries a Reveal
+ * (a motion element + its own IntersectionObserver) and a thumbnail request,
+ * and forty of those mounted on a phone for the sake of the two people who
+ * reach the bottom is the wrong trade. Thumbnails below the fold are lazy
+ * either way, so an expanded wall still only fetches what's scrolled to.
  */
 
 const DEFAULTS = {
@@ -20,6 +30,9 @@ const DEFAULTS = {
   title: "Hear it from the creators.",
   sub: "// REAL CLIENTS. REAL RESULTS. TAP A VIDEO TO PLAY.",
 };
+
+/** Cards rendered before the "show all" button — three full rows at lg. */
+const INITIAL = 9;
 
 function VideoCard({ v, i }: { v: CmsVideoTestimonial; i: number }) {
   return (
@@ -70,42 +83,75 @@ function PlaceholderCard({ i }: { i: number }) {
 export default function VideoWall({
   content = {},
   videos,
+  showHeading = true,
 }: {
   content?: SectionHeadingContent;
   videos: CmsVideoTestimonial[];
+  /**
+   * False on a thank-you page with the hero video switched off: there the page
+   * header stands directly over this grid and already introduces it, and two
+   * headings for one wall reads as a mistake.
+   */
+  showHeading?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const sub = content.sub ?? DEFAULTS.sub;
+  const hidden = Math.max(0, videos.length - INITIAL);
+  const shown = expanded || !hidden ? videos : videos.slice(0, INITIAL);
+
   return (
     <section
       id="videos"
-      className="relative z-[1] mx-auto max-w-[1160px] px-4 pt-7 md:px-6 md:pt-14"
+      className={`relative z-[1] mx-auto max-w-[1160px] px-4 md:px-6 ${
+        // With no heading the grid is what sits under the page header, so it
+        // needs the breathing room the heading block would otherwise supply.
+        showHeading ? "pt-7 md:pt-14" : "pt-9 md:pt-16"
+      }`}
     >
-      <SectionReveal className="relative mx-auto max-w-[860px] px-2 text-center">
-        <SubheadingReveal className="relative">
-          <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
-            {content.eyebrow ?? DEFAULTS.eyebrow}
-          </p>
-        </SubheadingReveal>
-        <DecryptOnView
-          as="h2"
-          text={content.title ?? DEFAULTS.title}
-          threshold={0}
-          className="relative mt-2.5 font-display text-[clamp(24px,3.2vw,40px)] font-bold leading-[1.08] tracking-[-0.025em] text-fog md:mt-4"
-        />
-        {sub && (
-          <SubheadingReveal delay={0.3} className="relative mt-2.5 md:mt-4">
-            <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint md:text-[11.5px]">
-              {sub}
+      {showHeading && (
+        <SectionReveal className="relative mx-auto max-w-[860px] px-2 text-center">
+          <SubheadingReveal className="relative">
+            <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-magenta">
+              {content.eyebrow ?? DEFAULTS.eyebrow}
             </p>
           </SubheadingReveal>
-        )}
-      </SectionReveal>
+          <DecryptOnView
+            as="h2"
+            text={content.title ?? DEFAULTS.title}
+            threshold={0}
+            className="relative mt-2.5 font-display text-[clamp(24px,3.2vw,40px)] font-bold leading-[1.08] tracking-[-0.025em] text-fog md:mt-4"
+          />
+          {sub && (
+            <SubheadingReveal delay={0.3} className="relative mt-2.5 md:mt-4">
+              <p className="m-0 font-mono text-[11px] tracking-[0.14em] text-faint md:text-[11.5px]">
+                {sub}
+              </p>
+            </SubheadingReveal>
+          )}
+        </SectionReveal>
+      )}
 
-      <div className="mt-6 grid gap-x-4 gap-y-6 sm:grid-cols-2 md:mt-10 md:gap-x-6 md:gap-y-8 lg:grid-cols-3">
+      <div
+        className={`grid gap-x-4 gap-y-6 sm:grid-cols-2 md:gap-x-6 md:gap-y-8 lg:grid-cols-3 ${
+          showHeading ? "mt-6 md:mt-10" : ""
+        }`}
+      >
         {videos.length
-          ? videos.map((v, i) => <VideoCard key={`${v.videoUrl}-${i}`} v={v} i={i} />)
+          ? shown.map((v, i) => <VideoCard key={`${v.videoUrl}-${i}`} v={v} i={i} />)
           : Array.from({ length: 3 }, (_, i) => <PlaceholderCard key={i} i={i} />)}
       </div>
+
+      {hidden > 0 && !expanded && (
+        <div className="mt-8 flex justify-center md:mt-10">
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="cursor-pointer rounded-full border border-white/15 px-5 py-2.5 font-mono text-[12px] uppercase tracking-[1.2px] text-mist transition-colors duration-150 hover:border-magenta hover:text-fog"
+          >
+            {`Show all ${videos.length} videos`}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

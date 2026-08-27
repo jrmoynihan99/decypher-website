@@ -211,12 +211,22 @@ export interface CmsThankYouPage {
     title?: string;
     body?: string;
   };
+  /**
+   * Whether the pre-call video section runs at all. Undefined on documents
+   * that predate the toggle, so only an explicit `false` turns it off.
+   */
+  showHeroVideo?: boolean;
   /** The big "but first" pre-call video under the header. */
   video?: {
     eyebrow?: string;
     title?: string;
     videoUrl?: string;
   };
+  /**
+   * This page's own pick of creator videos, in Studio order. Empty or absent
+   * means the whole Video Testimonials collection — see renderThankYou.
+   */
+  videos?: CmsVideoTestimonial[];
   /** Conversion snippet for this page only; the base pixel is site-wide. */
   trackingCode?: string;
 }

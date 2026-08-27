@@ -60,6 +60,9 @@ export default function ClickToPlayVideo({
               src={youTubeThumb(id, hero ? "maxres" : "hq")}
               alt=""
               loading="lazy"
+              // A wall can run to forty of these; decoding off the main thread
+              // keeps a phone's scroll smooth as they come into view.
+              decoding="async"
               onLoad={(e) => {
                 const img = e.currentTarget;
                 if (img.naturalWidth < 320 && !img.src.includes("hqdefault"))

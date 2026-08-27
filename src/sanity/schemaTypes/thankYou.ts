@@ -11,11 +11,11 @@ import { pageLinkField } from "./pageLink";
  * parameter it falls back to the page set in Book a Call → Thank You.
  *
  * Deliberately thinner than the affiliate form. Only the header copy, the
- * pre-call video and the tracking snippet differ between campaigns — the
- * creator-video wall, the review carousel and the stats are identical on every
- * one of these and are resolved by the template from the collections and from
- * Book a Call. A new campaign page should be a two-minute job: name it, set a
- * route, paste a video URL.
+ * pre-call video, which creator videos run on the wall and the tracking
+ * snippet differ between campaigns — the wall's heading, the review carousel
+ * and the stats are identical on every one of these and are resolved by the
+ * template from the collections and from Book a Call. A new campaign page
+ * should be a two-minute job: name it, set a route, paste a video URL.
  *
  * Slugs live under /thank-you/, so unlike an affiliate page they can't shadow
  * a real route — the only collision possible is with each other.
@@ -74,7 +74,7 @@ export const thankYouPage = defineType({
       type: "object",
       group: "content",
       description:
-        "The few lines above the video. Keep them short — the video is what this page is for, and on a phone anything longer pushes it off the screen.",
+        "The few lines at the top of the page. Keep them short — on a phone anything longer pushes what follows off the screen.",
       fields: [
         defineField({
           name: "eyebrow",
@@ -87,15 +87,26 @@ export const thankYouPage = defineType({
           type: "text",
           rows: 3,
           description:
-            'The line that hands off to the video, e.g. "But first…".',
+            'The line that hands off to whatever comes next — "But first…" above a hero video, or "But first, hear it from the creators." with the hero video switched off.',
         }),
       ],
+    }),
+    defineField({
+      name: "showHeroVideo",
+      title: "Include the hero video",
+      type: "boolean",
+      group: "content",
+      initialValue: true,
+      description:
+        "On: the header hands off to a big pre-call video, with the creator wall under it. Off: the whole video section goes away and the header runs straight into the creator wall — the wall's own heading is hidden too, so write the header body to introduce it (\"But first, hear it from the creators.\").",
     }),
     defineField({
       name: "video",
       title: "Hero video",
       type: "object",
       group: "content",
+      // Nothing in here renders with the toggle off, so don't offer it.
+      hidden: ({ document }) => document?.showHeroVideo === false,
       description:
         "The big pre-call video under the header. An on-brand placeholder frame shows until the URL is set.",
       fields: [
@@ -117,6 +128,25 @@ export const thankYouPage = defineType({
           description: "Any YouTube link works — watch, share, or unlisted.",
         }),
       ],
+    }),
+    defineField({
+      name: "videos",
+      title: "Creator videos",
+      type: "array",
+      group: "content",
+      of: [
+        {
+          type: "reference",
+          to: [{ type: "videoTestimonial" }],
+          options: { disableNew: false },
+        },
+      ],
+      // 40 is a wall, not a page — see VideoWall, which renders the first nine
+      // and puts the rest behind a button so a phone isn't asked to mount
+      // forty cards nobody scrolled to.
+      validation: (r) => r.max(40).unique(),
+      description:
+        "Which creator testimonials run on the wall, in this order — drag to reorder. Leave empty to show the whole Video Testimonials collection in its own order, which is what every page did before this field existed. Up to 40; the page shows the first nine and puts the rest behind a “show all” button.",
     }),
     defineField({
       name: "trackingCode",
