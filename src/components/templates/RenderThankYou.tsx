@@ -15,11 +15,16 @@ import type { CmsThankYouPage } from "@/sanity/types";
  * within one render are deduped by Next's fetch memoization.
  */
 export async function renderThankYou(page: CmsThankYouPage | null) {
+  // A page that picks its own creator videos already carries them (they come
+  // back dereferenced with the document), so the collection read is skipped
+  // outright rather than fetched and thrown away.
+  const picked = page?.videos ?? [];
+
   const [settings, shared, testimonials, videos] = await Promise.all([
     getSiteSettings().then(withLiveStats),
     getThankYouSharedSections(),
     getTestimonials(),
-    getVideoTestimonials(),
+    picked.length ? picked : getVideoTestimonials(),
   ]);
 
   return (

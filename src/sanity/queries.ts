@@ -79,12 +79,30 @@ export async function getAllPageSlugs(
 export async function getThankYouPageBySlug(
   slug: string,
 ): Promise<CmsThankYouPage | null> {
-  return freshClient.fetch(
+  // Dereferenced picks come back one of three ways: a whole video, a null (the
+  // referenced document was deleted, or only ever existed as a draft), or a row
+  // missing the required URL. Only the first is renderable.
+  type RawVideo = { name?: string; handle?: string; videoUrl?: string } | null;
+  const page:
+    | (Omit<CmsThankYouPage, "videos"> & { videos?: RawVideo[] })
+    | null = await freshClient.fetch(
     `*[_type == "thankYouPage" && slug.current == $slug][0]{
-      title, "slug": slug.current, header, video, trackingCode
+      title, "slug": slug.current, header, showHeroVideo, video, trackingCode,
+      "videos": videos[]->{ name, handle, videoUrl }
     }`,
     { slug },
   );
+  if (!page) return null;
+  return {
+    ...page,
+    // Drop the unrenderable ones rather than letting one stale pick take the
+    // wall down — the page is the last step of a booking, not a place to fail.
+    videos: (page.videos ?? []).flatMap((v) =>
+      v?.videoUrl
+        ? [{ name: v.name ?? "", handle: v.handle ?? "", videoUrl: v.videoUrl }]
+        : [],
+    ),
+  };
 }
 
 export async function getAllThankYouSlugs(): Promise<string[]> {
