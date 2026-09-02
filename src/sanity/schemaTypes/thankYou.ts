@@ -87,7 +87,7 @@ export const thankYouPage = defineType({
           type: "text",
           rows: 3,
           description:
-            'The line that hands off to whatever comes next — "But first…" above a hero video, or "But first, hear it from the creators." with the hero video switched off.',
+            'Optional line under the title, handing off to whatever comes next — "But first…" above a hero video, or "But first, hear it from the creators." with the hero video switched off. Leave it empty and nothing is shown: no stand-in copy, no gap. Skip it when the title already does the handing off.',
         }),
       ],
     }),
@@ -141,12 +141,12 @@ export const thankYouPage = defineType({
           options: { disableNew: false },
         },
       ],
-      // 40 is a wall, not a page — see VideoWall, which renders the first nine
-      // and puts the rest behind a button so a phone isn't asked to mount
-      // forty cards nobody scrolled to.
+      // 40 is a wall, not a page — see VideoWall, which mounts the first nine
+      // and adds the rest as they're scrolled to, so a phone is never asked to
+      // mount forty cards nobody reached.
       validation: (r) => r.max(40).unique(),
       description:
-        "Which creator testimonials run on the wall, in this order — drag to reorder. Leave empty to show the whole Video Testimonials collection in its own order, which is what every page did before this field existed. Up to 40; the page shows the first nine and puts the rest behind a “show all” button.",
+        "Which creator testimonials run on the wall, in this order — drag to reorder. Leave empty to show the whole Video Testimonials collection in its own order, which is what every page did before this field existed. Up to 40; they all appear as the visitor scrolls, loading a few rows at a time so the page stays quick to open. The heading over this wall is shared by every thank-you page — edit it in Book a Call → Confirmation → Video wall heading.",
     }),
     defineField({
       name: "trackingCode",
