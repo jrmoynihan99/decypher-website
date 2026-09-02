@@ -17,25 +17,28 @@ import type { CmsThankYouPage } from "@/sanity/types";
  * is the big pre-call briefing the client should watch before the call; the
  * creator wall, the reviews and the stats follow in the template. Without it
  * the video section isn't rendered at all and the header hands off directly to
- * the creator wall, so the fallback body line changes to say so.
+ * the creator wall.
  *
- * Copy and the video URL come from the page's own document, with the defaults
- * below as fallback so a page created and left half filled still reads as
- * finished. The optional eyebrow/title over the video stay empty by default —
- * the body line does the introducing.
+ * Copy and the video URL come from the page's own document. The eyebrow and
+ * title fall back to the defaults below so a page created and left half filled
+ * still reads as finished; the body line deliberately does NOT. It's the one
+ * piece of header copy that repeats what the title usually already says, so a
+ * stock line there lands as "See you in our call soon, but first…" over "But
+ * first…". Cleared in the Studio it disappears, margin and all.
  *
  * The header stays tight on phones (smaller type, tighter gaps) so the hero
  * video lands above the fold without scrolling.
+ *
+ * On desktop the video is capped narrower than the text column above it. Left
+ * at the section's full width it ends the page at the fold, and a visitor who
+ * doesn't scroll never learns the creator wall exists — which is the thing
+ * this page is really selling. Narrower video, wall broken by the fold.
  */
 
 const DEFAULTS = {
   eyebrow: "● CHANNEL OPEN",
   title: "See you in our call.",
-  body: "But first…",
 };
-
-/** Without a video the header is the wall's only introduction, so it names it. */
-const NO_VIDEO_BODY = "But first, hear it from the creators.";
 
 /** On-brand awaiting-asset frame shown until the video URL exists in the Studio. */
 function HeroVideoPlaceholder() {
@@ -68,6 +71,12 @@ export default function ThankYouHero({
   /** False drops the whole video section; the header runs into the wall. */
   showVideo?: boolean;
 }) {
+  // Deleted in the Studio comes back as undefined, cleared comes back as "" —
+  // both mean "no body line". Nothing is substituted and nothing is rendered,
+  // so the title runs straight into the video with no blank row holding a
+  // margin open.
+  const body = header.body?.trim();
+
   return (
     <SectionReveal>
       <section className="relative z-[1] mx-auto max-w-[960px] px-4 pt-3 text-center md:px-6 md:pt-[64px]">
@@ -93,12 +102,14 @@ export default function ThankYouHero({
             style={{ maxWidth: "22ch" }}
             className="relative mx-auto mt-3 font-display text-[clamp(32px,4.6vw,56px)] font-bold leading-[1.05] tracking-[-0.03em] text-fog md:mt-[18px]"
           />
-          <ParagraphReveal
-            delay={0.3}
-            className="relative mx-auto mt-3 max-w-[52ch] text-[14px] leading-relaxed text-mist [text-wrap:pretty] md:mt-[18px] md:text-[clamp(15.5px,1.7vw,17.5px)]"
-          >
-            {header.body ?? (showVideo ? DEFAULTS.body : NO_VIDEO_BODY)}
-          </ParagraphReveal>
+          {body && (
+            <ParagraphReveal
+              delay={0.3}
+              className="relative mx-auto mt-3 max-w-[52ch] text-[14px] leading-relaxed text-mist [text-wrap:pretty] md:mt-[18px] md:text-[clamp(15.5px,1.7vw,17.5px)]"
+            >
+              {body}
+            </ParagraphReveal>
+          )}
         </div>
 
         {/* optional kicker over the video — empty in Studio by default, the
@@ -127,7 +138,11 @@ export default function ThankYouHero({
             page is switched to hand straight off to the creator wall, in which
             case nothing renders here, placeholder included */}
         {showVideo && (
-          <Reveal delay={0.5} amount={0.15} className="relative mt-6 md:mt-9">
+          <Reveal
+            delay={0.5}
+            amount={0.15}
+            className="relative mx-auto mt-6 md:mt-9 md:max-w-[720px]"
+          >
             {video.videoUrl ? (
               <AutoplayVideo
                 url={video.videoUrl}
