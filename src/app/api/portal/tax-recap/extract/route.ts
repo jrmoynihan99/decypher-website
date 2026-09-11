@@ -70,6 +70,25 @@ export async function POST(req: Request) {
     }
   }
 
+  // Present when the browser trimmed the return to the pages that matter:
+  // the original page number of each page actually sent.
+  let pageMap: number[] | null = null;
+  const rawMap = form.get("pageMap");
+  if (typeof rawMap === "string" && rawMap.length <= 20_000) {
+    try {
+      const parsed: unknown = JSON.parse(rawMap);
+      if (
+        Array.isArray(parsed) &&
+        parsed.every((p) => Number.isInteger(p) && (p as number) > 0) &&
+        (!pageTexts || parsed.length === pageTexts.length)
+      ) {
+        pageMap = parsed as number[];
+      }
+    } catch {
+      /* citations just stay as sent-page numbers */
+    }
+  }
+
   // Either the bytes came in this request, or they were staged in pieces.
   let bytes: Buffer;
   let staged: string | null = null;
@@ -103,7 +122,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await extractReturn(bytes, kind, pageTexts);
+    const result = await extractReturn(bytes, kind, pageTexts, pageMap);
     return NextResponse.json({
       ok: true,
       kind,

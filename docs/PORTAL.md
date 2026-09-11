@@ -162,14 +162,30 @@ the tab is the tax team.
 
 - **Flow.** Two PDFs (before = income only, after = final) go to
   `POST /api/portal/tax-recap/extract`, one request each (Vercel's ~4.5MB body
-  cap; `maxDuration = 300` because a 40-page print is a minute-plus of model
-  time). A PDF over ~3.5MB — a scanned client copy runs 15-20MB — is first
-  staged in 750KiB pieces via `POST /api/portal/tax-recap/upload`
+  cap; `maxDuration = 300` because a long print is a minute-plus of model
+  time). Before either is sent, the browser prepares it
+  (`src/components/portal/tax-recap/pdf-prepare.ts`): pdfjs pulls the per-page
+  text, `src/lib/tax-recap/pages.ts` picks the pages that carry the lines the
+  recap reads, and pdf-lib builds a copy of just those. A PDF still over
+  ~3.5MB — a scanned client copy runs 15-20MB and can't be trimmed — is staged
+  in 750KiB pieces via `POST /api/portal/tax-recap/upload`
   (`taxRecapUploads`, `src/lib/tax-recap/uploads.ts`; owner-checked, deleted
   the moment the read finishes, stale ones swept after two hours) and the
   extract route takes the `uploadId` instead of the file. A scan has no text
   layer, so it reads fine but nothing can be cross-checked; the builder says
-  so. The browser first pulls per-page text with pdfjs and sends it along.
+  so.
+- **Page trimming is where the cost and the clock go.** A client copy is
+  25-45 pages and about a dozen carry anything the recap reads; the rest is
+  cover letters, vouchers, W-2 copies, K-1s and worksheets, all billed and
+  none read. Measured across the three sample pairings, trimming cut input
+  tokens 53% and brought the slowest text-based read from 65s to 42s. Two
+  rules in `pages.ts` keep it safe: anchors are the field map's own printed
+  wording rather than form names, and every bail-out sends the whole
+  document. **Exclusions match the page header only** — a form names other
+  forms constantly, and whole-page matching dropped Schedule C, 1040 page 2
+  and both New Jersey pages over incidental references. The browser sends a
+  `pageMap` so cited page numbers are translated back to the real return
+  before the reviewer sees them.
   The server hands the rendered PDF to Claude (`claude-opus-5`, structured
   outputs against the schema in `src/lib/tax-recap/extract.ts`), then checks
   every number it reports against the text of the page it cited
