@@ -18,6 +18,10 @@ export const PERMISSION_KEYS = [
   "tools-hub",
   "tax-strategy",
   "refund-calculator",
+  // The Tax Recap tab. The key string is the Receipt Analyzer placeholder's,
+  // which this tool replaced in the same sidebar slot — kept so every grant
+  // staff already held carries over without a backfill. Renaming it would
+  // mean rewriting the array on every user doc for no functional gain.
   "receipts",
   "sales-flow",
   "creator-finances",
@@ -31,7 +35,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "tools-hub": "Tools Hub",
   "tax-strategy": "Tax Strategy",
   "refund-calculator": "Service Ledger",
-  receipts: "Receipt Analyzer",
+  receipts: "Tax Recap",
   "sales-flow": "Sales Flow",
   "creator-finances": "Creator Finances",
   leads: "Leads",

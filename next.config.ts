@@ -66,6 +66,13 @@ const nextConfig: NextConfig = {
         source: "/:prefix(portal|api/portal)",
         headers: NO_STORE,
       },
+      {
+        // Client-facing tax recaps: one person's tax figures behind an
+        // unguessable token. No session cookie here, so nothing else would
+        // stop a shared cache from keeping a copy.
+        source: "/recap/:path*",
+        headers: NO_STORE,
+      },
     ];
   },
 };

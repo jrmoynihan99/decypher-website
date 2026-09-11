@@ -56,12 +56,16 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     live: true,
   },
   {
-    href: "/portal/receipts",
-    name: "Receipt Analyzer",
-    blurb: "Drop a PDF, pull out the line items, categorise them for filing.",
-    note: "Needs file storage + a parsing pass",
-    icon: "M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21zM9 8h6M9 12h6",
+    // Took over the Receipt Analyzer placeholder's slot and permission key
+    // (see lib/permissions), so it appeared for everyone who had that tab.
+    href: "/portal/tax-recap",
+    name: "Tax Recap",
+    blurb:
+      "Upload the before and after returns, check the numbers, and share a recap page with the client.",
+    note: "Reads ProSeries PDFs with Claude",
+    icon: "M4 4h11l5 5v11H4zM15 4v5h5M8 13h8M8 17h5",
     permission: "receipts",
+    live: true,
   },
   {
     href: "/portal/sales-flow",
