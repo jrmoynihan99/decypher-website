@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { RETURN_FIELDS, RETURN_FIELD_KEYS, sanitizeExtract, type ReturnExtract } from "./schema";
-import { unbundleStatePenalty, verifyAgainstText } from "./verify";
+import { remapPages, unbundleStatePenalty, verifyAgainstText } from "./verify";
 
 /**
  * Read one ProSeries return PDF into the numbers the recap needs.
@@ -197,6 +197,8 @@ export async function extractReturn(
   pdf: Buffer,
   kind: "before" | "after",
   pageTexts: string[] | null,
+  /** Original page number of each sent page, when the return was trimmed. */
+  pageMap: number[] | null = null,
 ): Promise<ExtractResult> {
   if (!pdf.length) throw new TaxRecapExtractError("Empty PDF");
   if (pdf.length > PDF_MAX_BYTES) {
@@ -282,7 +284,11 @@ export async function extractReturn(
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 
   const verified = verifyAgainstText(raw, pageTexts);
-  const { extract, notes } = unbundleStatePenalty(verified.extract);
+  const unbundled = unbundleStatePenalty(verified.extract);
+  // Verification runs against the pages as sent; the page numbers are only
+  // translated back afterwards, once nothing else needs to index into them.
+  const extract = remapPages(unbundled.extract, pageMap);
+  const notes = unbundled.notes;
   const { unverified, noText } = verified;
 
   const warnings: string[] = [...notes];
@@ -304,7 +310,8 @@ export async function extractReturn(
   if (extract.notes) warnings.push(`Reader notes: ${extract.notes}`);
 
   console.log(
-    `[tax-recap] read ${kind} return with ${model}: ${message.usage.input_tokens} in / ${message.usage.output_tokens} out, ${unverified.length} unverified`,
+    `[tax-recap] read ${kind} return with ${model}: ${pageTexts?.length ?? "?"} pages sent, ` +
+      `${message.usage.input_tokens} in / ${message.usage.output_tokens} out, ${unverified.length} unverified`,
   );
 
   return {

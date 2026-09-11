@@ -75,6 +75,26 @@ export function verifyAgainstText(
 }
 
 /**
+ * Translate cited page numbers back to the original return.
+ *
+ * When a return is trimmed before sending (see lib/tax-recap/pages), the
+ * model cites positions in the trimmed copy. The reviewer is holding the
+ * real return, so "page 3" has to become the page it actually came from or
+ * the citation is worse than useless.
+ */
+export function remapPages(extract: ReturnExtract, pageMap: number[] | null): ReturnExtract {
+  if (!pageMap?.length) return extract;
+  const fields = { ...extract.fields };
+  for (const key of RETURN_FIELD_KEYS) {
+    const f = fields[key];
+    if (f.page === null) continue;
+    const original = pageMap[f.page - 1];
+    if (original) fields[key] = { ...f, page: original };
+  }
+  return { ...extract, fields };
+}
+
+/**
  * If the state's "total tax" came back with the underpayment penalty inside
  * it, take the penalty out. The arithmetic proves the case: due = tax −
  * payments + penalty when the penalty is separate, so a total due that

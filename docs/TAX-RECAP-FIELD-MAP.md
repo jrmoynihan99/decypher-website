@@ -136,6 +136,8 @@ Across before and after (the same ProSeries file, income untouched):
 
 Six pages per return carry everything above: Form 8879, 1040 page 1, 1040 page 2, Schedule 1 page 1, Schedule C page 1, 540NR sides 3 and 5. Schedule 2, Schedule SE, and Form 8829 add the cross-checks.
 
+**This is now automated.** `src/lib/tax-recap/pages.ts` picks the pages before sending, keyed on the printed line wording in the table above, and lands on 10-13 pages of a 26-43 page print. Keep the two in step: an anchor there is a line here. Note that Schedule SE is deliberately not an anchor — its text layer is mojibake on these prints — so self-employment tax is taken from Schedule 2 line 4, which is the same figure.
+
 ## What three pairings showed
 
 Run through the real extraction (2026-09-11, `claude-sonnet-5`) and compared to the Canva recaps:

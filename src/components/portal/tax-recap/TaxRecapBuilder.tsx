@@ -33,7 +33,7 @@ import {
   type ReturnFieldKey,
   type ReturnNumbers,
 } from "@/lib/tax-recap/schema";
-import { pdfPageTexts } from "./pdf-text";
+import { preparePdf } from "./pdf-prepare";
 
 /**
  * The recap builder: two PDFs in, a shareable page out.
@@ -63,7 +63,10 @@ type SideState = {
   message: string;
   extract: ReturnExtract | null;
   warnings: string[];
+  /** Pages in the return as printed. */
   pages: number | null;
+  /** Pages actually sent to the model, after trimming. */
+  sentPages: number | null;
 };
 
 const idleSide = (): SideState => ({
@@ -73,6 +76,7 @@ const idleSide = (): SideState => ({
   extract: null,
   warnings: [],
   pages: null,
+  sentPages: null,
 });
 
 const toRaw = (n: ReturnNumbers): RawNumbers =>
@@ -153,47 +157,49 @@ export default function TaxRecapBuilder({ initial }: { initial: RecapDoc | null 
     setSides((s) => ({ ...s, [kind]: { ...idleSide(), file } }));
 
   const readOne = async (kind: Kind, file: File) => {
+    const say = (message: string) =>
+      setSides((s) => ({ ...s, [kind]: { ...s[kind], status: "reading", message } }));
+
+    say("Opening the PDF…");
+    // Reads the page text and trims the return to the pages the recap needs,
+    // which is what keeps both the bill and the read time down.
+    const prepared = await preparePdf(file);
     setSides((s) => ({
       ...s,
-      [kind]: { ...s[kind], status: "reading", message: "Pulling page text…" },
+      [kind]: { ...s[kind], pages: prepared.totalPages, sentPages: prepared.sentPages },
     }));
-    const texts = await pdfPageTexts(file);
-    setSides((s) => ({
-      ...s,
-      [kind]: {
-        ...s[kind],
-        pages: texts?.length ?? null,
-        message: texts
-          ? `Reading ${texts.length} pages with Claude — this takes a minute or two…`
-          : "Couldn't read the PDF text; reading with Claude without cross-checks…",
-      },
-    }));
+
+    const reading =
+      prepared.trimmed
+        ? `Reading the ${prepared.sentPages} pages that hold the numbers, out of ${prepared.totalPages}…`
+        : prepared.fallback === "no-text-layer"
+          ? "Reading a scanned copy — no text layer, so numbers can't be cross-checked…"
+          : `Reading all ${prepared.totalPages} pages — this takes a minute or two…`;
 
     const fd = new FormData();
     fd.append("kind", kind);
-    if (texts) fd.append("pageTexts", JSON.stringify(texts));
+    fd.append("pageTexts", JSON.stringify(prepared.pageTexts));
+    // Page numbers the model cites are positions in the trimmed copy; this
+    // maps them back so the reviewer sees the page of the real return.
+    fd.append("pageMap", JSON.stringify(prepared.pageMap));
 
-    if (file.size > DIRECT_MAX) {
-      // Too big for one request (Vercel's body cap) — a scanned client copy
-      // usually is. Stage it in pieces; the extract route reassembles them.
+    if (prepared.sentBytes > DIRECT_MAX) {
+      // Still too big for one request (Vercel's body cap) — a scan can't be
+      // trimmed. Stage it in pieces; the extract route reassembles them.
       const uploadId = crypto.randomUUID();
-      const total = Math.ceil(file.size / CHUNK);
+      const total = Math.ceil(prepared.sentBytes / CHUNK);
       for (let i = 0; i < total; i += PER_REQUEST) {
         const part = new FormData();
         part.append("uploadId", uploadId);
         part.append("total", String(total));
-        part.append("size", String(file.size));
+        part.append("size", String(prepared.sentBytes));
         part.append("name", file.name);
         for (let j = i; j < Math.min(total, i + PER_REQUEST); j++) {
-          part.append(`chunk-${j}`, file.slice(j * CHUNK, (j + 1) * CHUNK), String(j));
+          part.append(`chunk-${j}`, prepared.data.slice(j * CHUNK, (j + 1) * CHUNK), String(j));
         }
-        setSides((s) => ({
-          ...s,
-          [kind]: {
-            ...s[kind],
-            message: `Uploading ${fmtBytes(Math.min(file.size, (i + PER_REQUEST) * CHUNK))} of ${fmtBytes(file.size)}…`,
-          },
-        }));
+        say(
+          `Uploading ${fmtBytes(Math.min(prepared.sentBytes, (i + PER_REQUEST) * CHUNK))} of ${fmtBytes(prepared.sentBytes)}…`,
+        );
         const r = await fetch("/api/portal/tax-recap/upload", { method: "POST", body: part });
         if (!r.ok) {
           const d = (await r.json().catch(() => ({}))) as { message?: string };
@@ -201,18 +207,10 @@ export default function TaxRecapBuilder({ initial }: { initial: RecapDoc | null 
         }
       }
       fd.append("uploadId", uploadId);
-      setSides((s) => ({
-        ...s,
-        [kind]: {
-          ...s[kind],
-          message: texts?.some((t) => t.trim())
-            ? `Reading ${texts.length} pages with Claude — this takes a minute or two…`
-            : "Reading a scanned copy with Claude — no text layer, so numbers can't be cross-checked…",
-        },
-      }));
     } else {
-      fd.append("file", file);
+      fd.append("file", prepared.data, file.name);
     }
+    say(reading);
 
     const res = await fetch("/api/portal/tax-recap/extract", { method: "POST", body: fd });
     const data = (await res.json().catch(() => ({}))) as {
@@ -497,7 +495,11 @@ export default function TaxRecapBuilder({ initial }: { initial: RecapDoc | null 
               return (
                 <Chip key={k} tone={unverified ? "warn" : "pos"}>
                   {k}: {n} lines read
-                  {s.pages ? ` from ${s.pages} pages` : ""}
+                  {s.pages
+                    ? s.sentPages && s.sentPages < s.pages
+                      ? ` from ${s.sentPages} of ${s.pages} pages`
+                      : ` from ${s.pages} pages`
+                    : ""}
                   {unverified ? `, ${unverified} to check` : ""}
                 </Chip>
               );
