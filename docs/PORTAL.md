@@ -151,6 +151,53 @@ only**, because it's one document the whole team renders from.
   `https://taxgpt.internal/`, `https://timeoff.decypher.internal/` and the
   `notion.so/decypher/*-sop` links don't resolve. Fix them in Edit tools.
 
+## Tax Recap
+
+`/portal/tax-recap` — turns a client's before/after ProSeries returns into a
+shareable recap page. Gate `receipts` — the key string belongs to the Receipt
+Analyzer placeholder this tool replaced in the same sidebar slot, kept so every
+existing grant carried over with no backfill (`/portal/receipts` redirects
+here). No admin tier, because building a recap is writing one and everyone with
+the tab is the tax team.
+
+- **Flow.** Two PDFs (before = income only, after = final) go to
+  `POST /api/portal/tax-recap/extract`, one request each (Vercel's ~4.5MB body
+  cap; `maxDuration = 300` because a 40-page print is a minute-plus of model
+  time). A PDF over ~3.5MB — a scanned client copy runs 15-20MB — is first
+  staged in 750KiB pieces via `POST /api/portal/tax-recap/upload`
+  (`taxRecapUploads`, `src/lib/tax-recap/uploads.ts`; owner-checked, deleted
+  the moment the read finishes, stale ones swept after two hours) and the
+  extract route takes the `uploadId` instead of the file. A scan has no text
+  layer, so it reads fine but nothing can be cross-checked; the builder says
+  so. The browser first pulls per-page text with pdfjs and sends it along.
+  The server hands the rendered PDF to Claude (`claude-opus-5`, structured
+  outputs against the schema in `src/lib/tax-recap/extract.ts`), then checks
+  every number it reports against the text of the page it cited
+  (`src/lib/tax-recap/verify.ts`). Staff review the grid — each cell shows its
+  page and whether it was found — fix anything, and save.
+- **Math lives in code.** `src/lib/tax-recap/compute.ts` derives every recap
+  figure from the reviewed numbers and runs the arithmetic identities the
+  forms must satisfy (line 24 = 16 + SE tax, Schedule C, before/after gross
+  receipts equal, …). The model never adds anything up. The line map it
+  follows is `docs/TAX-RECAP-FIELD-MAP.md`.
+- **Store.** `taxRecaps` in Firestore via `src/lib/tax-recap/store.ts`: the
+  reviewed numbers, strategies, next steps, and the raw extraction as an audit
+  trail. **Never the PDFs** — they hold SSNs and bank details. `savings` is
+  denormalised for the list (and, later, the marketing aggregate).
+- **Client page.** `/recap/<token>` — outside the `(site)` group (no marketing
+  nav), `force-dynamic`, `noindex`, `no-store` (next.config). Token is 144
+  random bits; a revoked recap 404s identically to a bad token. Print → the
+  canvas layers drop out and cards don't split.
+- **Env.** `ANTHROPIC_API_KEY`. Unset means "Read both returns" returns a
+  clear 400; nothing else is affected. `AI_MODEL` (optional) picks the model,
+  default `claude-opus-5`; the server log line `[tax-recap] read … with
+  <model>: N in / N out, N unverified` is the per-read cost and quality trail.
+- **Inputs.** Client name, tax year and state are read off the returns and
+  shown prefilled at review; only prior-year income is typed (it's on last
+  year's return, not these).
+- **Shipping.** Nothing to grant: it rides the `receipts` key staff already
+  hold. A new hire gets it from the Staff page like any other tab.
+
 ## Inbox tabs
 
 **Leads** (`/portal/leads`) reads `leadMagnetLeads` via `listLeads()` in
@@ -171,3 +218,9 @@ only the password store.
 `toolsHub/catalog` — `departments: {id, label}[]`, `tools: ToolEntry[]`,
 `updatedAt`, `updatedBy`. One document, written whole. Absent = shipped
 defaults.
+
+`taxRecaps/{id}` — `token`, `revoked`, `clientName`, `taxYear`,
+`priorYearIncome`, `stateCode`, `before` / `after` (`ReturnNumbers`),
+`strategies`, `nextSteps`, `extraction` (`{before, after}` raw reads with
+page + verified per value), `savings` (denormalised), `createdAt/By`,
+`updatedAt/By`. Schema in `src/lib/tax-recap/schema.ts`.

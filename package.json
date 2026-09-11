@@ -27,6 +27,7 @@
     "stats:activate-live": "node scripts/activate-live-revenue-stat.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@number-flow/react": "^0.6.1",
     "@sanity/image-url": "^2.1.1",
     "@sanity/vision": "^6.4.0",

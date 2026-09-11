@@ -1,12 +1,10 @@
-import { requirePermission } from "@/lib/firebase/session";
-import { PORTAL_WIDGETS } from "@/components/portal/nav-items";
-import WidgetPlaceholder from "@/components/portal/WidgetPlaceholder";
+import { redirect } from "next/navigation";
 
-const widget = PORTAL_WIDGETS.find((w) => w.href === "/portal/receipts")!;
-
-export const metadata = { title: "Receipt Analyzer — DeCypher Portal" };
-
-export default async function ReceiptsPage() {
-  await requirePermission("receipts");
-  return <WidgetPlaceholder widget={widget} />;
+/**
+ * The Receipt Analyzer placeholder lived here until the Tax Recap tool took
+ * over its sidebar slot and permission key. Kept as a redirect so an old
+ * bookmark still lands somewhere useful.
+ */
+export default function ReceiptsPage() {
+  redirect("/portal/tax-recap");
 }
