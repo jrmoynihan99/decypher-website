@@ -10,12 +10,12 @@
  *     USD. There is no warning for that, no test that fails; it just quietly
  *     stops being true. So it's structural rather than a TODO.
  *
- *  2. The average states its denominator. An average over 150 creators where 8
- *     have a broken connection is a different number depending on whether you
+ *  2. The benchmarks state their denominator. An average over 150 creators where
+ *     8 have a broken connection is a different number depending on whether you
  *     divide by 142 or 150, and nobody looking at the tile can tell which you
- *     picked. We include creators whose books genuinely show zero (a real $0 is
- *     a real data point) and exclude ones we simply couldn't read — counting a
- *     broken connection as $0 drags the firm's average down by a bug.
+ *     picked. Two things are left out of it — a connection we couldn't read, and
+ *     a creator with no income in the period — and both are counted so the UI
+ *     can name them. See benchmarksFor.
  *
  * Pure — no I/O, no clock.
  */
@@ -48,13 +48,21 @@ function addCategories(
   }
 }
 
+/** The company file's home currency. Never sum across two of these. */
+const currencyOf = (row: CreatorFinanceRow) =>
+  row.data?.currency || row.currency || "USD";
+
+/** Rows carrying a figure we're willing to count — see COUNTABLE. */
+const readable = (row: CreatorFinanceRow) =>
+  row.connection !== "disabled" && COUNTABLE.includes(row.dataStatus) && !!row.data;
+
 export function aggregateRows(rows: CreatorFinanceRow[]): FinanceAggregate {
   const byCurrency: Record<string, AggregateBucket> = {};
   const excluded: FinanceAggregate["excluded"] = [];
 
   for (const row of rows) {
     if (row.connection === "disabled") continue; // deliberately off, not a failure
-    if (!COUNTABLE.includes(row.dataStatus) || !row.data) {
+    if (!readable(row) || !row.data) {
       excluded.push({
         realmId: row.realmId,
         displayName: row.displayName,
@@ -63,8 +71,7 @@ export function aggregateRows(rows: CreatorFinanceRow[]): FinanceAggregate {
       continue;
     }
 
-    const currency = row.data.currency || row.currency || "USD";
-    const bucket = (byCurrency[currency] ??= emptyBucket());
+    const bucket = (byCurrency[currencyOf(row)] ??= emptyBucket());
     for (const key of TOTALS_KEYS) bucket[key] += row.data[key];
     bucket.count += 1;
     addCategories(bucket.incomeByCategory, row.data.incomeByCategory);
@@ -85,16 +92,78 @@ export function aggregateRows(rows: CreatorFinanceRow[]): FinanceAggregate {
   };
 }
 
+/** What a typical creator looks like — the two rows the roster reads against. */
+export type Benchmarks = {
+  average: ProfitAndLossTotals;
+  median: ProfitAndLossTotals;
+  /** The denominator both rows state. Never imply it. */
+  count: number;
+  /** In the totals, out of these two: creators showing no income at all. */
+  zeroIncome: number;
+};
+
 /**
- * Per-creator mean for one currency bucket. Integer cents throughout, so the
- * rounding happens once, here, rather than compounding through the UI.
- * Returns zeros for an empty bucket rather than NaN.
+ * The average and median creator, for one currency.
+ *
+ * Computed from the per-creator rows rather than from the bucket, because a
+ * median can't be recovered from a sum — the bucket has already thrown away
+ * the distribution by the time it reaches here.
+ *
+ * Creators with NO INCOME in the period are excluded from both. A zero there is
+ * almost never a creator who earned nothing; it's a client whose books aren't
+ * done yet, or one who joined last week — and each one dilutes the average
+ * everybody else is coached against. They stay in the totals (a sum is a sum)
+ * and they're counted here so the UI can say how many stepped out.
+ *
+ * Integer cents throughout: the rounding happens once, here, rather than
+ * compounding through the UI. Zeros rather than NaN when nothing qualifies.
  */
-export function averageOf(bucket: AggregateBucket | undefined): ProfitAndLossTotals {
-  if (!bucket?.count) return zeroTotals();
+export function benchmarksFor(
+  rows: CreatorFinanceRow[],
+  currency: string,
+): Benchmarks {
+  const counted = rows
+    .filter((row) => readable(row) && currencyOf(row) === currency)
+    .map((row) => row.data!);
+  const earning = counted.filter((t) => t.income !== 0);
+
+  return {
+    average: meanOf(earning),
+    median: medianOf(earning),
+    count: earning.length,
+    zeroIncome: counted.length - earning.length,
+  };
+}
+
+function meanOf(list: ProfitAndLossTotals[]): ProfitAndLossTotals {
+  if (!list.length) return zeroTotals();
   return Object.fromEntries(
-    TOTALS_KEYS.map((k) => [k, Math.round(bucket[k] / bucket.count)]),
+    TOTALS_KEYS.map((k) => [
+      k,
+      Math.round(list.reduce((sum, t) => sum + t[k], 0) / list.length),
+    ]),
   ) as ProfitAndLossTotals;
+}
+
+/**
+ * Column by column, not "the median creator" — there is no single creator whose
+ * every figure is the middle one. Which means the lines don't add across the
+ * row the way a real creator's do; the UI says so where it's rendered.
+ */
+function medianOf(list: ProfitAndLossTotals[]): ProfitAndLossTotals {
+  if (!list.length) return zeroTotals();
+  return Object.fromEntries(
+    TOTALS_KEYS.map((k) => [k, middleOf(list.map((t) => t[k]))]),
+  ) as ProfitAndLossTotals;
+}
+
+/** Median of one column. An even count takes the mean of the middle two. */
+function middleOf(values: MoneyCents[]): MoneyCents {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2
+    ? sorted[mid]
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
 /** The bucket the headline tiles should show. */

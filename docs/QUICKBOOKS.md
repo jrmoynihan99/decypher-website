@@ -337,6 +337,38 @@ connection `disabled`. The document is kept — snapshots and history reference
 it, and a disabled connection is excluded from the sync queue and from the
 aggregate (deliberately off, not a failure).
 
+## What the roster opens on
+
+**Nothing selected.** The creator picker's first option is *— None (whole book)
+—* and that's the default: the tiles, the margin meter and both benchmark rows
+are firm-wide, and a creator's row only appears once someone picks one. It used
+to land on the first live connection, which put one client's figures on screen
+for a reason nobody could name — and on a screen-shared call, in front of a
+reader with no way to tell "the one you asked about" from "whoever sorts first".
+The one exception is a company connected seconds ago; that arrives selected.
+
+The selection is shared by all three tabs, so none means none on all three —
+per-creator and category mapping each render their picker above an empty state
+rather than standing in a client of their own choosing.
+
+## Average and median
+
+Two benchmark rows, each followed by the selected creator's distance from it,
+and each independently hideable from the panel header (`benchmarksFor` in
+`aggregate.ts`).
+
+Both are computed over creators **with income in the period**. A zero there is
+almost never a creator who earned nothing — it's a client whose books aren't
+done yet, or one who joined last week — and each one dilutes the number
+everybody else is coached against. They stay in the totals (a sum is a sum) and
+they're counted, so the note under the table can say how many stepped out. The
+denominator is rendered on the row itself: *of 135 creators*.
+
+The median is per column, not "the median creator" — no single client's every
+figure is the middle one — so its lines deliberately don't add across the row.
+It's computed from the per-creator rows rather than from the aggregate bucket,
+because a median can't be recovered from a sum.
+
 ## All creators, sortable
 
 The roster's "All creators" panel is collapsed by default (`View all N`) and

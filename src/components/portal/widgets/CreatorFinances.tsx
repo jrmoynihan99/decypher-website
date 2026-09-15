@@ -43,7 +43,12 @@ import {
   TableHead,
 } from "@/components/portal/widgets/ui";
 import { money2, pct } from "@/lib/widget-format";
-import { averageOf, netMargin, primaryBucket } from "@/lib/quickbooks/aggregate";
+import {
+  benchmarksFor,
+  netMargin,
+  primaryBucket,
+  type Benchmarks,
+} from "@/lib/quickbooks/aggregate";
 import { splitCosts } from "@/lib/quickbooks/ledger";
 import {
   CATEGORY_LABELS,
@@ -204,6 +209,9 @@ function OperatingMarginMeter({ totals }: { totals: ProfitAndLossTotals }) {
  * select on purpose: the book is ~150 companies, so the operator arrives
  * knowing the name and shouldn't have to scroll to find it.
  */
+/** The roster's "no creator" option — see the selection comment above. */
+const NONE_LABEL = "— None (whole book) —";
+
 const creatorOptions = (rows: CreatorFinanceRow[]) =>
   rows.map((row) => ({
     value: row.realmId,
@@ -240,16 +248,20 @@ export default function CreatorFinances({
   const [payload, setPayload] = useState(initial);
   const [period, setPeriod] = useState<PeriodKey>(initial.period);
   const [tab, setTab] = useState<Tab>("roster");
-  // A freshly connected company should be the one on screen, so it's chosen in
-  // the initialiser rather than by an effect that would re-render immediately.
+  /**
+   * Nothing is selected on arrival, deliberately.
+   *
+   * This used to land on the first creator alphabetically, which put one
+   * client's figures on screen for no reason anyone could name — and on a
+   * screen-shared call, in front of a reader who has no way to tell "the one
+   * you asked about" from "whoever sorts first". The firm-wide roll-up is the
+   * honest default; a creator appears when someone picks one.
+   *
+   * The exception is a company connected seconds ago: that IS a named reason.
+   * Chosen in the initialiser rather than by an effect that would re-render.
+   */
   const [selected, setSelected] = useState<string | null>(
-    (notice?.kind === "connected" ? notice.realm : null) ??
-      // A disconnected client is a poor thing to land on: its figures are
-      // frozen and half the controls are off. Only fall back to one when the
-      // whole book is disconnected.
-      initial.rows.find((r) => r.connection !== "disabled")?.realmId ??
-      initial.rows[0]?.realmId ??
-      null,
+    (notice?.kind === "connected" ? notice.realm : null) ?? null,
   );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -391,8 +403,12 @@ export default function CreatorFinances({
     void load(next);
   };
 
-  const bucket = primaryBucket(payload.aggregate);
-  const average = useMemo(() => averageOf(bucket), [bucket]);
+  // Computed here rather than in Roster so a future tab reads the same two
+  // numbers, and recomputed only when the payload does — it walks every row.
+  const benchmarks = useMemo(
+    () => benchmarksFor(payload.rows, payload.aggregate.primaryCurrency),
+    [payload.rows, payload.aggregate.primaryCurrency],
+  );
 
   /**
    * The clients we still hold books for.
@@ -418,13 +434,12 @@ export default function CreatorFinances({
   // one you were just looking at. The mapping tab used to hold its own state,
   // initialised to the first client, so it silently ignored the creator you had
   // open and threw away the one you picked in it the moment you left the tab.
-  // The fallback prefers a live connection, and only lands on a disconnected
-  // client when the whole book is disconnected.
-  const current =
-    payload.rows.find((r) => r.realmId === selected) ??
-    live[0] ??
-    payload.rows[0] ??
-    null;
+  // No fallback: none means none, on every tab. Each one renders its picker
+  // above an empty state rather than quietly standing in a creator of its own
+  // choosing.
+  const current = payload.rows.find((r) => r.realmId === selected) ?? null;
+  // "" is the roster picker's None option — the same nothing as null.
+  const select = useCallback((realmId: string) => setSelected(realmId || null), []);
 
   if (!payload.rows.length) {
     return (
@@ -480,10 +495,10 @@ export default function CreatorFinances({
           payload={payload}
           live={live}
           disconnected={disconnected}
-          average={average}
+          benchmarks={benchmarks}
           selected={current}
           busy={busy}
-          onSelect={setSelected}
+          onSelect={select}
           onOpen={(realmId) => {
             setSelected(realmId);
             setTab("creator");
@@ -496,7 +511,7 @@ export default function CreatorFinances({
         <CreatorDetail
           rows={payload.rows}
           selected={current}
-          onSelect={setSelected}
+          onSelect={select}
           onSync={sync}
           onDisconnect={disconnect}
           busy={busy}
@@ -504,20 +519,17 @@ export default function CreatorFinances({
       ) : null}
 
       {/* Live clients only. Mapping reads a chart of accounts from QuickBooks,
-          which is exactly what a disconnected company no longer answers — so
-          this is the one tab that can't follow the shared selection all the way.
-          It falls back to a client it can actually open rather than landing on
-          an error, and picking one here still moves the selection for the other
-          two tabs. */}
+          which is exactly what a disconnected company no longer answers — so a
+          disconnected selection reads here as no selection, and the tab prompts
+          for one rather than standing in a client of its own choosing. Picking
+          one here still moves the selection for the other two tabs. */}
       {tab === "mapping" ? (
         <Mapping
           rows={live}
           realmId={
-            current && current.connection !== "disabled"
-              ? current.realmId
-              : (live[0]?.realmId ?? "")
+            current && current.connection !== "disabled" ? current.realmId : ""
           }
-          onSelect={setSelected}
+          onSelect={select}
           onSaved={() => void load(period)}
         />
       ) : null}
@@ -656,7 +668,7 @@ function FirstRun() {
 /* ──────────────────────── all creators ──────────────────────── */
 
 /**
- * The firm-wide roll-up, then one creator read against the average.
+ * The firm-wide roll-up, then one creator read against the book.
  *
  * This was a row per connected company, which is the obvious shape and the
  * wrong one: at ~150 clients it's a wall of figures nobody scans, and the
@@ -664,7 +676,7 @@ function FirstRun() {
  * rest of the book — was the one thing you had to work out in your head.
  *
  * So the totals stay in the tiles, the list collapses to a picker, and the
- * table is three lines: creator, average, difference. There's no total line in
+ * table is a creator read against two benchmark rows. There's no total line in
  * it because the total is the strip directly above; printing it twice invites
  * the reader to check whether the two agree.
  */
@@ -672,7 +684,7 @@ function Roster({
   payload,
   live,
   disconnected,
-  average,
+  benchmarks,
   selected,
   busy,
   onSelect,
@@ -684,7 +696,7 @@ function Roster({
   live: CreatorFinanceRow[];
   /** Handed back. Kept for their history, out of every total and count here. */
   disconnected: CreatorFinanceRow[];
-  average: ProfitAndLossTotals;
+  benchmarks: Benchmarks;
   selected: CreatorFinanceRow | null;
   busy: string | null;
   onSelect: (realmId: string) => void;
@@ -694,16 +706,25 @@ function Roster({
   const bucket = primaryBucket(payload.aggregate);
   const { excluded, mixedCurrency, primaryCurrency } = payload.aggregate;
   const d = selected?.data ?? null;
+  // Either benchmark can be put away: which one the firm reads against is a
+  // house preference, and on a client call the row nobody is talking about is
+  // just another number to be asked about.
+  const [showAverage, setShowAverage] = useState(true);
+  const [showMedian, setShowMedian] = useState(true);
   // Live clients, plus whichever disconnected one is currently selected — the
   // selection is shared with the per-creator tab, and a picker that can't name
   // its own value renders blank next to a table full of that client's figures.
+  // None leads: it's the default, and it's how you get back to the firm-wide
+  // view without reloading the page.
   const options = useMemo(
-    () =>
-      creatorOptions(
+    () => [
+      { value: "", label: NONE_LABEL },
+      ...creatorOptions(
         payload.rows.filter(
           (r) => r.connection !== "disabled" || r.realmId === selected?.realmId,
         ),
       ),
+    ],
     [payload.rows, selected],
   );
 
@@ -744,12 +765,22 @@ function Roster({
       ) : null}
 
       <Panel
-        title="Creator vs. average"
+        title="Creator vs. the book"
         action={
-          <Mono className="text-dusk">
-            {live.length} connected
-            {disconnected.length ? ` · ${disconnected.length} disconnected` : ""}
-          </Mono>
+          <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            <Mono className="text-dusk">
+              {live.length} connected
+              {disconnected.length ? ` · ${disconnected.length} disconnected` : ""}
+            </Mono>
+            <span className="flex items-center gap-2.5">
+              <RowToggle on={showAverage} onToggle={() => setShowAverage((v) => !v)}>
+                Average
+              </RowToggle>
+              <RowToggle on={showMedian} onToggle={() => setShowMedian((v) => !v)}>
+                Median
+              </RowToggle>
+            </span>
+          </span>
         }
         bodyClassName="px-0 py-0"
       >
@@ -792,40 +823,64 @@ function Roster({
             <tbody>
               <tr>
                 <TableCell align="left">
-                  <span className="font-display font-semibold text-fog">
-                    {selected?.displayName ?? "—"}
-                  </span>
+                  {selected ? (
+                    <span className="font-display font-semibold text-fog">
+                      {selected.displayName}
+                    </span>
+                  ) : (
+                    <span className="font-body text-dusk">No creator selected</span>
+                  )}
                 </TableCell>
                 {d ? <TotalCells totals={d} /> : <BlankCells />}
               </tr>
-              <tr>
-                <TableCell align="left">
-                  <span className="text-mist">Average</span>
-                  {/* Naming the denominator is the point — an average over a
-                      different set of clients is a different number. */}
-                  <span className="ml-2 font-body text-[11px] text-dusk">
-                    of {bucket.count} creators
-                  </span>
-                </TableCell>
-                <TotalCells totals={average} />
-              </tr>
-              <tr className="border-t-2 border-edge-mid">
-                <TableCell align="left">
-                  <span className="font-display font-semibold text-fog">Difference</span>
-                </TableCell>
-                {d ? <DiffCells row={d} average={average} /> : <BlankCells />}
-              </tr>
+              {showAverage ? (
+                <BenchmarkRows
+                  label="Average"
+                  count={benchmarks.count}
+                  totals={benchmarks.average}
+                  row={d}
+                />
+              ) : null}
+              {showMedian ? (
+                <BenchmarkRows
+                  label="Median"
+                  count={benchmarks.count}
+                  totals={benchmarks.median}
+                  row={d}
+                />
+              ) : null}
             </tbody>
           </table>
         </div>
 
         <div className="px-4 pb-4">
-          <Note>
-            Difference is this creator minus the firm-wide average, with the share of
-            the average alongside it. Expenses aren&rsquo;t colour-coded: a creator
-            billing three times the average is supposed to spend more than it, so
-            above-average spend isn&rsquo;t a finding on its own — the net lines are.
-          </Note>
+          {showAverage || showMedian ? (
+            <Note>
+              Benchmark rows cover the {benchmarks.count} creators with income this
+              period
+              {benchmarks.zeroIncome
+                ? `, and leave out ${benchmarks.zeroIncome} showing none`
+                : ""}
+              {" "}— a zero there is nearly always books that haven&rsquo;t been done
+              yet rather than a creator who earned nothing, and averaging those in
+              drags the whole book down.{" "}
+              {showMedian ? (
+                <>
+                  The median is taken column by column, so unlike a creator&rsquo;s
+                  own row its lines don&rsquo;t add across.{" "}
+                </>
+              ) : null}
+              Difference is this creator minus the row above it, with the share of
+              that row alongside. Expenses aren&rsquo;t colour-coded: a creator
+              billing three times the average is supposed to spend more than it, so
+              above-average spend isn&rsquo;t a finding on its own — the net lines
+              are.
+            </Note>
+          ) : (
+            <Note>
+              Both benchmark rows are hidden — turn one back on from the header.
+            </Note>
+          )}
         </div>
       </Panel>
 
@@ -883,6 +938,74 @@ function Roster({
         </Panel>
       ) : null}
     </div>
+  );
+}
+
+/** Show/hide for one benchmark row. Marker plus colour — colour alone on a
+    two-word label is a coin toss as to which state is "on". */
+function RowToggle({
+  on,
+  onToggle,
+  children,
+}: {
+  on: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onToggle}
+      className={`flex cursor-pointer items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[1px] transition-colors duration-150 hover:text-fog ${
+        on ? "text-magenta" : "text-dusk"
+      }`}
+    >
+      <span aria-hidden>{on ? "◉" : "○"}</span>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * One benchmark and, when a creator is selected, that creator's distance from
+ * it. The pair is one unit: a difference row detached from the row it's a
+ * difference FROM is exactly the ambiguity two benchmarks would introduce.
+ */
+function BenchmarkRows({
+  label,
+  count,
+  totals,
+  row,
+}: {
+  label: string;
+  /** Rendered, never implied — a benchmark over a different set is a different number. */
+  count: number;
+  totals: ProfitAndLossTotals;
+  row: ProfitAndLossTotals | null;
+}) {
+  return (
+    <>
+      <tr className="border-t-2 border-edge-mid">
+        <TableCell align="left">
+          <span className="text-mist">{label}</span>{" "}
+          <span className="ml-1 font-body text-[11px] text-dusk">
+            of {count} creators
+          </span>
+        </TableCell>
+        <TotalCells totals={totals} />
+      </tr>
+      {row ? (
+        <tr>
+          <TableCell align="left">
+            <span className="font-body text-[12.5px] text-dusk">
+              vs. {label.toLowerCase()}
+            </span>
+          </TableCell>
+          <DiffCells row={row} benchmark={totals} />
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -1102,25 +1225,26 @@ const expensesOf = (t: ProfitAndLossTotals) => t.expenses + t.costOfGoodsSold;
 
 function DiffCells({
   row,
-  average,
+  benchmark,
 }: {
   row: ProfitAndLossTotals;
-  average: ProfitAndLossTotals;
+  /** Average or median — whichever row this one sits under. */
+  benchmark: ProfitAndLossTotals;
 }) {
   return (
     <>
-      <DiffCell value={row.income - average.income} base={average.income} />
+      <DiffCell value={row.income - benchmark.income} base={benchmark.income} />
       <DiffCell
-        value={expensesOf(row) - expensesOf(average)}
-        base={expensesOf(average)}
+        value={expensesOf(row) - expensesOf(benchmark)}
+        base={expensesOf(benchmark)}
         tone={false}
       />
       <DiffCell
-        value={row.netOperatingIncome - average.netOperatingIncome}
-        base={average.netOperatingIncome}
+        value={row.netOperatingIncome - benchmark.netOperatingIncome}
+        base={benchmark.netOperatingIncome}
       />
-      <DiffCell value={row.netIncome - average.netIncome} base={average.netIncome} />
-      <TableCell>{marginDelta(row, average)}</TableCell>
+      <DiffCell value={row.netIncome - benchmark.netIncome} base={benchmark.netIncome} />
+      <TableCell>{marginDelta(row, benchmark)}</TableCell>
     </>
   );
 }
@@ -1161,9 +1285,9 @@ const signedUsd = (cents: MoneyCents) =>
 const signedPct = (v: number) => (v < 0 ? "−" : "+") + pct(Math.abs(v), 0);
 
 /** Margin is a ratio, so the gap between two of them is points, not dollars. */
-function marginDelta(row: ProfitAndLossTotals, average: ProfitAndLossTotals) {
+function marginDelta(row: ProfitAndLossTotals, benchmark: ProfitAndLossTotals) {
   const a = netMargin(row);
-  const b = netMargin(average);
+  const b = netMargin(benchmark);
   if (a === null || b === null) return "—";
   const points = (a - b) * 100;
   return (
@@ -1227,10 +1351,12 @@ function CreatorDetail({
 }) {
   const options = useMemo(() => creatorOptions(rows), [rows]);
 
-  if (!selected) return <Panel title="Pick a creator">No creator selected.</Panel>;
-  const d = selected.data;
-  const syncing = busy === selected.realmId;
-  const disconnecting = busy === `disconnect:${selected.realmId}`;
+  // The picker stays on screen with nothing selected — which is how the
+  // dashboard now opens. Returning early instead left this tab with an empty
+  // state and no control on it to leave that state by.
+  const d = selected?.data ?? null;
+  const syncing = !!selected && busy === selected.realmId;
+  const disconnecting = !!selected && busy === `disconnect:${selected.realmId}`;
 
   /**
    * Net OPERATING profit, not net profit: the two lines above it are income and
@@ -1265,46 +1391,56 @@ function CreatorDetail({
         <SearchSelect
           label="Creator"
           className="w-[280px]"
-          value={selected.realmId}
+          value={selected?.realmId ?? ""}
           onChange={onSelect}
           options={options}
           placeholder="Search creators…"
           emptyLabel="No creator by that name."
         />
-        <div className="flex items-center gap-3">
-          <span className="text-[11.5px] text-dusk">
-            {selected.lastSyncedAt ? (
-              <>
-                Last synced{" "}
-                <time dateTime={selected.lastSyncedAt} suppressHydrationWarning>
-                  {new Date(selected.lastSyncedAt).toLocaleString()}
-                </time>
-              </>
-            ) : (
-              "Never synced"
-            )}
-          </span>
-          <button
-            onClick={() => onSync(selected.realmId)}
-            disabled={syncing || disconnecting}
-            className="cursor-pointer rounded-full border border-white/15 px-3 py-1 font-mono text-[11px] uppercase tracking-[1px] text-mist transition-colors duration-150 hover:border-mist hover:text-fog disabled:cursor-default disabled:opacity-40"
-          >
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
-          {/* Nothing left to hand back once it's already disconnected. */}
-          {selected.connection === "disabled" ? null : (
+        {selected ? (
+          <div className="flex items-center gap-3">
+            <span className="text-[11.5px] text-dusk">
+              {selected.lastSyncedAt ? (
+                <>
+                  Last synced{" "}
+                  <time dateTime={selected.lastSyncedAt} suppressHydrationWarning>
+                    {new Date(selected.lastSyncedAt).toLocaleString()}
+                  </time>
+                </>
+              ) : (
+                "Never synced"
+              )}
+            </span>
             <button
-              onClick={() => onDisconnect(selected)}
+              onClick={() => onSync(selected.realmId)}
               disabled={syncing || disconnecting}
-              className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-danger disabled:cursor-default disabled:opacity-40"
+              className="cursor-pointer rounded-full border border-white/15 px-3 py-1 font-mono text-[11px] uppercase tracking-[1px] text-mist transition-colors duration-150 hover:border-mist hover:text-fog disabled:cursor-default disabled:opacity-40"
             >
-              {disconnecting ? "Disconnecting…" : "Disconnect"}
+              {syncing ? "Syncing…" : "Sync now"}
             </button>
-          )}
-        </div>
+            {/* Nothing left to hand back once it's already disconnected. */}
+            {selected.connection === "disabled" ? null : (
+              <button
+                onClick={() => onDisconnect(selected)}
+                disabled={syncing || disconnecting}
+                className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1px] text-dusk transition-colors duration-150 hover:text-danger disabled:cursor-default disabled:opacity-40"
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect"}
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
 
-      {selected.connection !== "connected" || !d ? (
+      {!selected ? (
+        <Panel title="Pick a creator">
+          <p className="text-[13.5px] leading-relaxed text-mist">
+            Search for one above to see their profit &amp; loss — revenue streams,
+            expense categories, month by month. The all-creators tab opens a
+            breakdown straight from its table, too.
+          </p>
+        </Panel>
+      ) : selected.connection !== "connected" || !d ? (
         <Callout>
           {selected.connectionMessage || selected.dataMessage || "No figures for this client yet."}
         </Callout>
@@ -1626,7 +1762,17 @@ function Mapping({
       {/* Keyed on realmId so switching client remounts with empty state. That's
           why the table below never has to reset anything in an effect — the
           "loading" state is simply "mounted but nothing has arrived yet". */}
-      {realmId ? <AccountTable key={realmId} realmId={realmId} onSaved={onSaved} /> : null}
+      {realmId ? (
+        <AccountTable key={realmId} realmId={realmId} onSaved={onSaved} />
+      ) : (
+        <Panel title="Pick a client">
+          <p className="text-[13.5px] leading-relaxed text-mist">
+            Search for one above to see their chart of accounts. Only connected
+            clients are listed — the account list is read live from QuickBooks, so
+            a company whose books have been handed back can&rsquo;t be mapped.
+          </p>
+        </Panel>
+      )}
 
       <Note>
         Mapping a revenue account here is what makes the aggregate income breakdown mean
