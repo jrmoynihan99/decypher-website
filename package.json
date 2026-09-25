@@ -24,7 +24,8 @@
     "sales:import": "node scripts/sales-import-airtable.mjs",
     "sales:webhook": "node scripts/calendly-webhook.mjs",
     "leaderboard:seed": "node scripts/seed-leaderboard.mjs",
-    "stats:activate-live": "node scripts/activate-live-revenue-stat.mjs"
+    "stats:activate-live": "node scripts/activate-live-revenue-stat.mjs",
+    "recap:check": "node --import ./scripts/lib/resolve-ts.mjs scripts/tax-recap-derive-check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

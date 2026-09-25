@@ -1,7 +1,9 @@
 import type { StaffSession } from "@/lib/firebase/session";
-import SignOutButton from "@/components/portal/SignOutButton";
+import { RailSignOut } from "@/components/portal/PortalSidebar";
+import { RAIL_LABEL, cascade } from "@/components/portal/rail";
 
-/** Who you are + the way out, pinned to the foot of the rail. */
+/** Who you are + the way out, pinned to the foot of the rail. Collapsed, only
+ *  the avatar and the sign-out icon show. */
 export default function SidebarUser({ session }: { session: StaffSession }) {
   const label = session.displayName || session.email;
 
@@ -17,7 +19,7 @@ export default function SidebarUser({ session }: { session: StaffSession }) {
       .toUpperCase() || session.email[0]?.toUpperCase() || "?";
 
   return (
-    <div className="p-3">
+    <div className="flex flex-col gap-1 p-3">
       <div className="flex items-center gap-2.5 px-1 py-1">
         <div
           aria-hidden
@@ -25,7 +27,7 @@ export default function SidebarUser({ session }: { session: StaffSession }) {
         >
           {initials}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${RAIL_LABEL}`} style={cascade(1)}>
           <div className="truncate font-body text-[13px] leading-tight text-fog">
             {label}
           </div>
@@ -35,7 +37,7 @@ export default function SidebarUser({ session }: { session: StaffSession }) {
         </div>
       </div>
 
-      <SignOutButton className="mt-2.5 w-full" />
+      <RailSignOut i={2} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { gate } from "../_gate";
 import {
   DIRECT_UPLOAD_MAX_BYTES,
   TaxRecapExtractError,
+  extractEntityReturn,
   extractReturn,
 } from "@/lib/tax-recap/extract";
 import {
@@ -14,7 +15,7 @@ import {
 
 /**
  * Read one return. Multipart form data:
- *   kind       "before" | "after"
+ *   kind       "before" | "after" | "entity" (the corporation's 1120-S)
  *   file       the ProSeries PDF (up to ~4MB)
  *     — or —
  *   uploadId   id of a file staged in pieces via ../upload (up to 24MB)
@@ -50,9 +51,9 @@ export async function POST(req: Request) {
   }
 
   const kind = form.get("kind");
-  if (kind !== "before" && kind !== "after") {
+  if (kind !== "before" && kind !== "after" && kind !== "entity") {
     return NextResponse.json(
-      { ok: false, message: "`kind` must be before or after" },
+      { ok: false, message: "`kind` must be before, after or entity" },
       { status: 400 },
     );
   }
@@ -122,7 +123,10 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await extractReturn(bytes, kind, pageTexts, pageMap);
+    const result =
+      kind === "entity"
+        ? await extractEntityReturn(bytes, pageTexts, pageMap)
+        : await extractReturn(bytes, kind, pageTexts, pageMap);
     return NextResponse.json({
       ok: true,
       kind,

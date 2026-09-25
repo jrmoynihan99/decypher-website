@@ -9,9 +9,9 @@ import type { RecapSummary } from "@/lib/tax-recap/store";
 
 /**
  * Every recap built so far, newest first. Copy hands over the client link,
- * Edit reopens the builder on the saved numbers (no re-read — the extraction
- * is stored), Revoke kills the link without losing the record (a
- * wrong-recipient link, a number that has to come down now).
+ * PDF downloads the attachment, Edit reopens the builder on the saved
+ * numbers (no re-read — the extraction is stored), Delete removes the recap
+ * for good, link and all, after a confirm.
  *
  * The rows come from the server on every render, so a save in the builder
  * shows up here as soon as its router.refresh() resolves.
@@ -20,16 +20,15 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   /**
-   * Revokes applied here before the server round-trip lands. Rendered over the
-   * server's rows rather than replacing them: the builder calls
+   * Deletes applied here before the server round-trip lands. Filtered over
+   * the server's rows rather than replacing them: the builder calls
    * router.refresh() after every save, and a useState copy of the list would
    * ignore that and leave a just-saved recap invisible.
    */
-  const [pending, setPending] = useState<Record<string, boolean>>({});
-  const recaps = fromServer.map((r) =>
-    r.id in pending ? { ...r, revoked: pending[r.id] } : r,
-  );
+  const [deleted, setDeleted] = useState<Set<string>>(new Set());
+  const recaps = fromServer.filter((r) => !deleted.has(r.id));
 
   const copy = async (r: RecapSummary) => {
     try {
@@ -41,17 +40,24 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
     }
   };
 
-  const toggleRevoked = async (r: RecapSummary) => {
+  const remove = async (r: RecapSummary) => {
+    if (
+      !window.confirm(
+        `Delete ${r.clientName}'s ${r.taxYear} recap permanently?\n\nThe numbers are erased and the client's link and PDF stop working. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
     setBusy(r.id);
+    setError(null);
     try {
-      const res = await fetch(`/api/portal/tax-recap/${r.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revoked: !r.revoked }),
-      });
+      const res = await fetch(`/api/portal/tax-recap/${r.id}`, { method: "DELETE" });
       if (res.ok) {
-        setPending((p) => ({ ...p, [r.id]: !r.revoked }));
+        setDeleted((d) => new Set(d).add(r.id));
         router.refresh();
+      } else {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        setError(data.message ?? "Couldn't delete that recap");
       }
     } finally {
       setBusy(null);
@@ -67,7 +73,11 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
   }
 
   return (
-    <Panel title="Saved recaps" bodyClassName="!px-0 !py-0">
+    <Panel
+      title="Saved recaps"
+      bodyClassName="!px-0 !py-0"
+      action={error ? <span className="text-[12px] text-danger">{error}</span> : null}
+    >
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -115,6 +125,9 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
                         </Link>
                       </>
                     )}
+                    <a href={`/api/portal/tax-recap/${r.id}/pdf`} className={action}>
+                      PDF
+                    </a>
                     <Link
                       href={`/portal/tax-recap?edit=${r.id}`}
                       className={`${action} border-magenta/40 text-magenta hover:border-magenta hover:text-magenta`}
@@ -124,10 +137,10 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
                     <button
                       type="button"
                       disabled={busy === r.id}
-                      onClick={() => toggleRevoked(r)}
-                      className={`${action} ${r.revoked ? "" : "hover:text-danger"}`}
+                      onClick={() => remove(r)}
+                      className={`${action} hover:border-danger hover:text-danger`}
                     >
-                      {r.revoked ? "Restore" : "Revoke"}
+                      {busy === r.id ? "Deleting…" : "Delete"}
                     </button>
                   </div>
                 </TableCell>

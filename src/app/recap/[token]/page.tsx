@@ -9,11 +9,16 @@ import { getRecapByToken } from "@/lib/tax-recap/store";
  */
 export default async function RecapPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ open?: string }>;
 }) {
   const { token } = await params;
+  const { open } = await searchParams;
   const recap = await getRecapByToken(token);
   if (!recap || recap.revoked) notFound();
-  return <RecapView recap={recap} />;
+  // `?open` skips the seal (RecapGate): for checking numbers from the portal,
+  // and for anyone printing the page. The client's link never carries it.
+  return <RecapView recap={recap} sealed={open === undefined} />;
 }

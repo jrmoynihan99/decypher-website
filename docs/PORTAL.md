@@ -160,10 +160,10 @@ existing grant carried over with no backfill (`/portal/receipts` redirects
 here). No admin tier, because building a recap is writing one and everyone with
 the tab is the tax team.
 
-- **Flow.** Two PDFs (before = income only, after = final) go to
-  `POST /api/portal/tax-recap/extract`, one request each (Vercel's ~4.5MB body
+- **Flow.** The client's final return goes to
+  `POST /api/portal/tax-recap/extract` (one request; Vercel's ~4.5MB body
   cap; `maxDuration = 300` because a long print is a minute-plus of model
-  time). Before either is sent, the browser prepares it
+  time). Before it is sent, the browser prepares it
   (`src/components/portal/tax-recap/pdf-prepare.ts`): pdfjs pulls the per-page
   text, `src/lib/tax-recap/pages.ts` picks the pages that carry the lines the
   recap reads, and pdf-lib builds a copy of just those. A PDF still over
@@ -174,6 +174,15 @@ the tab is the tax team.
   extract route takes the `uploadId` instead of the file. A scan has no text
   layer, so it reads fine but nothing can be cross-checked; the builder says
   so.
+- **Identity never leaves the browser.** The prepared copy is images only:
+  each kept page is rendered, the 1040 header band, Schedule C's business
+  name box, every run carrying a name/address token learned from them, and
+  every SSN/EIN/account/email/phone/date pattern are painted black, and the
+  JPEGs are assembled into a new PDF with no text layer. The page text sent
+  for the cross-check is scrubbed the same way. The client's name is read
+  locally off the 1040 to fill the client field. A scan can't be redacted
+  (nothing to find it by) and goes as printed, flagged on the review list.
+  Details in the field map's "What leaves the browser".
 - **Page trimming is where the cost and the clock go.** A client copy is
   25-45 pages and about a dozen carry anything the recap reads; the rest is
   cover letters, vouchers, W-2 copies, K-1s and worksheets, all billed and
@@ -196,6 +205,59 @@ the tab is the tax team.
   forms must satisfy (line 24 = 16 + SE tax, Schedule C, before/after gross
   receipts equal, …). The model never adds anything up. The line map it
   follows is `docs/TAX-RECAP-FIELD-MAP.md`.
+- **The before column is computed, not read.** `src/lib/tax-recap/derive.ts`
+  takes the return's numbers, sets every write-off to zero, and recalculates
+  against the year's tax tables. It first has to reproduce the return's own
+  tax from those tables to the dollar; if it can't (a credit it doesn't
+  model, itemizing, a state or year without a card) it refuses with the line
+  named, and the builder offers two ways through: type the before column, or
+  add a before print and have that read instead. Computed cells are tagged
+  "derived" in the grid, the notes go on the "Things to look at" list, and
+  the saved recap carries `derivedBefore` instead of a before extraction.
+- **S corporations (2026-09-25).** When the 1040 carries K-1 income, the
+  corporation's 1120-S goes in the same drop; the browser tells the two
+  apart by their pages (`detectReturnKind`), reads the 1120-S with its own
+  field list (`ENTITY_FIELDS`, `extractEntityReturn`, `kind=entity` on the
+  extract route) and shares the redaction tokens between the files. The
+  before zeros every deduction on the 1120-S — salary, retirement plan and
+  PTE election included — the way the CPA's prints do; the recap gains a
+  "State S-corp tax & PTET" row and an "S-corp (PTET)" filing line; the doc
+  stores `entityBefore` / `entityAfter` / `extraction.entity`. The engine
+  also splits the savings by strategy (`attributeStrategies`: a waterfall
+  from the before to the after, summing exactly) and estimates the SE tax
+  the S corporation avoided; both live on the doc as `analysis` and print
+  on the client page. Details and the verified numbers in the field map's
+  "S corporation clients".
+- **Tax Tables** (`/portal/tax-recap/tables`, the "Tax tables" button in the
+  Tax Recap page header) holds
+  everything the engine multiplies by, per tax year: the federal figures and
+  one card per state. A state card is data, not code — where its income
+  starts, add-backs, deduction, exemption as credit or deduction, brackets,
+  tax-table rounding, surtax, city tax, a nonresident form that prorates the
+  California way — interpreted by derive.ts, so a state is added on the
+  page, never deployed. Seeds ship in
+  `src/lib/tax-recap/tables.ts` (2025: federal, California 540, the
+  no-income-tax states); a saved year lives in Firestore `taxTables/<year>`
+  (`src/lib/tax-recap/tables-store.ts`) and replaces the seed; `loadTables()`
+  hands the merged set to the builder page. Validation blocks saving anything
+  the engine couldn't compute with, and the proof panel re-derives every
+  saved recap whose before was read from a real print, live as the draft is
+  edited, so a wrong number shows next to the client it would have got wrong.
+  `npm run recap:check` proves the seeds from a script. The federal card
+  also carries the Form 8995-A limits and phase-in range, the child tax
+  credit and the net investment income tax; a state card carries the
+  dependent exemption and, for S corporations, the entity's own rate, a
+  flat or receipts-tiered minimum, the elective tax's brackets and how the
+  owner gets it back (nonrefundable credit, refundable credit, or
+  exclusion). Every state is seeded for 2025
+  (`src/lib/tax-recap/seeds-2025-states.ts`): California and New Jersey
+  are proven on client returns; the rest carry their published figures,
+  `proven: false`, and a note on what to verify and what the model can't
+  express there (a "proven on a real return" switch on the page records
+  it once a client has gone through). Unproven is safe because the engine
+  refuses a card that doesn't reproduce the return's own tax. A
+  stored card that predates a field takes the seed's value for it
+  (`sanitizeYearCard(raw, seedFor(year))`).
 - **Store.** `taxRecaps` in Firestore via `src/lib/tax-recap/store.ts`: the
   reviewed numbers, strategies, next steps, and the raw extraction as an audit
   trail. **Never the PDFs** — they hold SSNs and bank details. `savings` is
@@ -204,6 +266,19 @@ the tab is the tax team.
   nav), `force-dynamic`, `noindex`, `no-store` (next.config). Token is 144
   random bits; a revoked recap 404s identically to a bad token. Print → the
   canvas layers drop out and cards don't split.
+- **The seal.** The page opens sealed (`components/recap/RecapHero`): a
+  scrambled "Maya, you saved $31,045" and a lock, and the client presses and
+  holds to decypher it — the ring fills, the headline decrypts in step
+  (`scrambleCells` in lib/decrypt), the cipher glyphs on screen are pulled
+  into the hand, and at 100% it bursts. The decyphered headline then stays
+  as the page's hero (the lock gives way to the before/after/savings tiles)
+  and the rest of the recap mounts below it in the home page's language:
+  full-bleed sections, a decrypting heading each (`SectionHeading`), frosted
+  panels. Letting go early winds it back. Nothing is remembered, so every
+  fresh load is sealed again (the footer's "replay" is just a reload).
+  `?open` renders it all open — use it from the portal to check numbers. The
+  handout is the PDF route; browser print of the scroll page isn't supported
+  (below-the-fold sections reveal on scroll).
 - **Env.** `ANTHROPIC_API_KEY`. Unset means "Read both returns" returns a
   clear 400; nothing else is affected. `AI_MODEL` (optional) picks the model,
   default `claude-opus-5`; the server log line `[tax-recap] read … with

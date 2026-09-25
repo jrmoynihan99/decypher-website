@@ -1,11 +1,11 @@
 /**
- * Every number on the recap page, derived from the two returns.
+ * Every number on the recap page, derived from the returns.
  *
  * Pure and isomorphic: the review grid previews with it in the browser and
  * the public page renders with it on the server, from the same stored
  * numbers. The LLM never does arithmetic — it reads lines; this adds them.
  *
- * Formulas follow docs/TAX-RECAP-FIELD-MAP.md. Three conventions, each
+ * Formulas follow docs/TAX-RECAP-FIELD-MAP.md. Four conventions, each
  * checked against a real recap:
  *  - Federal Taxes is total tax (line 24) net of refundable credits (line
  *    32): a credit lowers the client's tax, it isn't money they paid. What
@@ -14,13 +14,18 @@
  *    penalties or interest; Penalties get their own row. Some state totals
  *    bundle the penalty in (NJ-1040 "Total Tax Due"); extraction unbundles
  *    it, and validateNumbers flags it if a hand-typed figure still has it.
- *  - "This year's income" is gross receipts plus W-2 wages — what the client
- *    actually earned, before any write-off.
+ *  - An S corporation's own state tax (California's 1.5% and the elective
+ *    PTE tax the corporation pays) is its own row, "State S-corp tax &
+ *    PTET", on top of the shareholder's state tax — the Canva recaps carry
+ *    it that way. Business net income is the K-1 for such a client.
+ *  - "This year's income" is what the business took in: gross receipts,
+ *    plus W-2 wages for a sole proprietor (an S corporation's owner is paid
+ *    out of those receipts).
  * On the filing page, Owed = what's due now + what was already paid: the
  * whole year's bill including any penalty, which is how the recaps show it.
  */
 
-import type { RecapInput, ReturnNumbers } from "./schema";
+import type { EntityNumbers, RecapInput, ReturnNumbers } from "./schema";
 
 const n = (v: number | null | undefined) => (typeof v === "number" && isFinite(v) ? v : 0);
 const has = (v: number | null | undefined): v is number =>
@@ -33,18 +38,24 @@ export type RecapSide = {
   grossIncome: number;
   federalTaxes: number;
   stateTaxes: number;
+  /** The S corporation's own state tax plus its PTE elective tax; 0 for a sole proprietor. */
+  entityTaxes: number;
   penalties: number;
   totalTaxes: number;
 };
 
-export function sideSummary(r: ReturnNumbers): RecapSide {
+export function sideSummary(r: ReturnNumbers, e: EntityNumbers | null = null): RecapSide {
   const w2 = n(r.w2Income);
-  const biz = n(r.businessNetIncome);
+  const biz = n(r.businessNetIncome) + n(r.scorpIncome);
   // Total income falls back to the parts when line 9 wasn't read, so a
   // half-extracted return still previews instead of showing $0 everywhere.
   const gross = has(r.totalIncome) ? r.totalIncome : w2 + biz;
   const federal = n(r.federalTotalTax) - n(r.federalRefundableCredits);
-  const state = n(r.stateTotalTax);
+  // A refundable PTE credit (New Jersey's BAIT) sits with the payments, so
+  // the printed state tax is gross of it; the shareholder's real state bill
+  // is net, the same convention as the federal refundable credits.
+  const state = n(r.stateTotalTax) - n(r.statePteCreditRefundable);
+  const entity = e ? n(e.stateTax) + n(e.pteTax) : 0;
   const penalties = n(r.federalPenalty) + n(r.statePenalty);
   return {
     w2Income: w2,
@@ -53,9 +64,15 @@ export function sideSummary(r: ReturnNumbers): RecapSide {
     grossIncome: gross,
     federalTaxes: federal,
     stateTaxes: state,
+    entityTaxes: entity,
     penalties,
-    totalTaxes: federal + state + penalties,
+    totalTaxes: federal + state + entity + penalties,
   };
+}
+
+/** The recap's "total taxes owed" for one side — the figure the savings are the difference of. */
+export function totalTaxesOf(r: ReturnNumbers, e: EntityNumbers | null = null): number {
+  return sideSummary(r, e).totalTaxes;
 }
 
 export type FilingLine = {
@@ -90,25 +107,34 @@ export type RecapComputed = {
     seTaxSaved: number;
     incomeTaxSaved: number;
     stateSaved: number;
+    entitySaved: number;
     penaltiesSaved: number;
   };
   filing: {
     federal: FilingLine;
     state: FilingLine;
-    /** Sum of the two `due` figures — the "Total" box on the filing page. */
+    /** The S corporation's own state bill; null for a sole proprietor. */
+    entity: FilingLine | null;
+    /** Sum of the `due` figures — the "Total" box on the filing page. */
     total: number;
   };
   currentYearIncome: number;
   priorYearIncome: number | null;
+  /** True when the client's business is an S corporation. */
+  scorp: boolean;
 };
 
 export function computeRecap(
-  input: Pick<RecapInput, "before" | "after" | "priorYearIncome">,
+  input: Pick<RecapInput, "before" | "after" | "priorYearIncome"> &
+    Partial<Pick<RecapInput, "entityBefore" | "entityAfter">>,
 ): RecapComputed {
-  const before = sideSummary(input.before);
-  const after = sideSummary(input.after);
+  const eb = input.entityBefore ?? null;
+  const ea = input.entityAfter ?? null;
+  const before = sideSummary(input.before, eb);
+  const after = sideSummary(input.after, ea);
   const a = input.after;
   const b = input.before;
+  const scorp = n(a.scorpIncome) > 0 || n(b.scorpIncome) > 0 || !!ea;
 
   // Line 33 bundles refundable credits in with payments; only the payments
   // count as "paid" — the credit already lowered the tax figure above.
@@ -120,16 +146,35 @@ export function computeRecap(
     after.federalTaxes - fedPaid + n(a.federalPenalty),
   );
   // stateTotalDue is the figure the client actually pays (includes penalty),
-  // so it wins over the pre-penalty balance when both were read.
-  const statePaid = n(a.statePayments);
+  // so it wins over the pre-penalty balance when both were read. A
+  // refundable PTE credit is inside the payments line but isn't money the
+  // client sent in.
+  const statePaid = Math.max(0, n(a.statePayments) - n(a.statePteCreditRefundable));
   const state = filingLine(
     statePaid,
     a.stateRefund,
     has(a.stateTotalDue) ? a.stateTotalDue : a.stateAmountOwed,
     after.stateTaxes - statePaid + n(a.statePenalty),
   );
+  // The corporation pays its elective tax with the election, on its own
+  // vouchers, so it counts as paid alongside the return's own payments.
+  let entity: FilingLine | null = null;
+  if (ea) {
+    const paid = n(ea.statePayments) + n(ea.pteTax);
+    entity = filingLine(paid, ea.stateRefund, ea.stateAmountDue, after.entityTaxes - paid);
+  }
 
-  const income = has(a.grossReceipts) ? a.grossReceipts : has(b.grossReceipts) ? b.grossReceipts : before.businessNetIncome;
+  const receipts = scorp
+    ? has(ea?.grossReceipts)
+      ? (ea?.grossReceipts as number)
+      : has(eb?.grossReceipts)
+        ? (eb?.grossReceipts as number)
+        : before.businessNetIncome
+    : has(a.grossReceipts)
+      ? a.grossReceipts
+      : has(b.grossReceipts)
+        ? b.grossReceipts
+        : before.businessNetIncome;
 
   return {
     before,
@@ -140,17 +185,19 @@ export function computeRecap(
       seTaxSaved: n(b.seTax) - n(a.seTax),
       incomeTaxSaved: n(b.incomeTax) - n(a.incomeTax),
       stateSaved: before.stateTaxes - after.stateTaxes,
+      entitySaved: before.entityTaxes - after.entityTaxes,
       penaltiesSaved: before.penalties - after.penalties,
     },
-    filing: { federal, state, total: federal.due + state.due },
-    currentYearIncome: income + n(a.w2Income ?? b.w2Income),
+    filing: { federal, state, entity, total: federal.due + state.due + (entity?.due ?? 0) },
+    currentYearIncome: receipts + (scorp ? 0 : n(a.w2Income ?? b.w2Income)),
     priorYearIncome: input.priorYearIncome,
+    scorp,
   };
 }
 
 /* ─────────────────────────────── validation ─────────────────────────────── */
 
-export type Warning = { side: "before" | "after" | "both"; message: string };
+export type Warning = { side: "before" | "after" | "both" | "entity"; message: string };
 
 /** Rounding on the forms is to the dollar, so identities hold within $2. */
 const TOL = 2;
@@ -163,18 +210,21 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
   const add = (message: string) => w.push({ side, message });
 
   if (!has(r.federalTotalTax)) add("Federal total tax (1040 line 24) wasn't read");
-  if (!has(r.totalIncome) && !has(r.businessNetIncome) && !has(r.w2Income)) {
+  if (!has(r.totalIncome) && !has(r.businessNetIncome) && !has(r.scorpIncome) && !has(r.w2Income)) {
     add("No income lines were read");
   }
 
-  if (has(r.federalTotalTax) && has(r.incomeTax) && has(r.seTax)) {
-    const gap = r.federalTotalTax - (r.incomeTax + r.seTax);
+  if (has(r.federalTotalTax) && has(r.incomeTax)) {
+    // Line 24 = 16 + 17 − 19 − 20 + 23 (SE tax, additional Medicare, NIIT…).
+    // Not every piece of line 23 is read, so a gap is a glance, not an alarm.
+    const expected =
+      Math.max(0, r.incomeTax + n(r.additionalTaxes) - n(r.childTaxCredit) - n(r.nonrefundableCredits)) +
+      n(r.seTax) +
+      n(r.niit);
+    const gap = r.federalTotalTax - expected;
     if (Math.abs(gap) > TOL) {
-      // Not necessarily wrong: Schedule 2 carries other taxes (a premium tax
-      // credit repayment is the common one) and Schedule 3 credits, neither
-      // of which is read. Worth a glance, not an alarm.
       add(
-        `Federal total tax is ${fmt(Math.abs(gap))} ${gap > 0 ? "more" : "less"} than income tax + SE tax — usually other Schedule 2 taxes (e.g. premium tax credit repayment) or credits; check if unexpected`,
+        `Federal total tax is ${fmt(Math.abs(gap))} ${gap > 0 ? "more" : "less"} than income tax + additional taxes − credits + SE tax + NIIT — usually other Schedule 2 taxes (additional Medicare tax) or a credit that wasn't read; check if unexpected`,
       );
     }
   }
@@ -182,9 +232,13 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
     add("Taxable income is larger than AGI");
   }
   if (has(r.totalIncome)) {
-    const parts = n(r.w2Income) + n(r.businessNetIncome);
-    if (r.totalIncome + TOL < parts) {
-      add(`Total income ${fmt(r.totalIncome)} is less than W-2 + business income ${fmt(parts)}`);
+    const parts = n(r.w2Income) + n(r.businessNetIncome) + n(r.scorpIncome);
+    // A capital loss (capped at $3,000) is the usual reason total income
+    // runs under the parts; anything bigger is worth a look.
+    if (r.totalIncome + 3000 + TOL < parts) {
+      add(
+        `Total income ${fmt(r.totalIncome)} is ${fmt(parts - r.totalIncome)} less than W-2 + business income ${fmt(parts)} — a loss on Schedule D or E, or a misread line`,
+      );
     }
   }
   if (has(r.federalAmountOwed) && has(r.federalTotalTax)) {
@@ -233,6 +287,35 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
       );
     }
   }
+  if (has(r.statePteCredit) && has(r.statePteCreditAvailable) && r.statePteCredit > r.statePteCreditAvailable + TOL) {
+    add("The PTE elective tax credit claimed is more than the credit available");
+  }
+  return w;
+}
+
+/** The S corporation's own identities, and how it ties to the shareholder's 1040. */
+export function validateEntity(e: EntityNumbers, r: ReturnNumbers): Warning[] {
+  const w: Warning[] = [];
+  const add = (message: string) => w.push({ side: "entity", message });
+  if (has(e.totalIncome) && has(e.grossReceipts) && off(e.totalIncome, e.grossReceipts - n(e.cogs))) {
+    add(
+      `1120-S total income ${fmt(e.totalIncome)} ≠ gross receipts − cost of goods sold ${fmt(e.grossReceipts - n(e.cogs))} (returns, a 4797 gain or other income may explain it)`,
+    );
+  }
+  if (has(e.ordinaryIncome) && has(e.totalIncome) && has(e.totalDeductions) && off(e.ordinaryIncome, e.totalIncome - e.totalDeductions)) {
+    add(`1120-S ordinary income ${fmt(e.ordinaryIncome)} ≠ total income − total deductions ${fmt(e.totalIncome - e.totalDeductions)}`);
+  }
+  if (has(e.k1Ordinary) && has(r.scorpIncome) && off(e.k1Ordinary, r.scorpIncome)) {
+    add(`The K-1's ordinary income ${fmt(e.k1Ordinary)} isn't what the 1040 reports on Schedule E (${fmt(r.scorpIncome)})`);
+  }
+  if (has(e.officerComp) && has(r.w2Income) && r.w2Income > e.officerComp + TOL) {
+    add(`W-2 wages on the 1040 (${fmt(r.w2Income)}) exceed the officer compensation on the 1120-S (${fmt(e.officerComp)})`);
+  }
+  if (has(e.stateTotalTax) && has(e.stateTax) && n(e.pteTax) > 0 && !off(e.stateTotalTax, e.stateTax)) {
+    add(
+      `The state's total tax (${fmt(e.stateTotalTax)}) doesn't include the ${fmt(n(e.pteTax))} PTE elective tax — it's paid on its own vouchers, so the recap adds the two`,
+    );
+  }
   return w;
 }
 
@@ -241,7 +324,12 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
  * file with the income untouched, so anything income-side that differs is a
  * sign the wrong file was uploaded on one side.
  */
-export function crossValidate(before: ReturnNumbers, after: ReturnNumbers): Warning[] {
+export function crossValidate(
+  before: ReturnNumbers,
+  after: ReturnNumbers,
+  entityBefore: EntityNumbers | null = null,
+  entityAfter: EntityNumbers | null = null,
+): Warning[] {
   const w: Warning[] = [];
   const add = (message: string) => w.push({ side: "both", message });
 
@@ -250,18 +338,34 @@ export function crossValidate(before: ReturnNumbers, after: ReturnNumbers): Warn
       `Gross receipts differ: ${fmt(before.grossReceipts)} before vs ${fmt(after.grossReceipts)} after — the before return should carry the same income`,
     );
   }
-  if (has(before.w2Income) && has(after.w2Income) && off(before.w2Income, after.w2Income)) {
+  if (
+    has(entityBefore?.grossReceipts) &&
+    has(entityAfter?.grossReceipts) &&
+    off(entityBefore?.grossReceipts as number, entityAfter?.grossReceipts as number)
+  ) {
+    add(
+      `The corporation's gross receipts differ: ${fmt(entityBefore?.grossReceipts as number)} before vs ${fmt(entityAfter?.grossReceipts as number)} after`,
+    );
+  }
+  if (
+    has(before.w2Income) &&
+    has(after.w2Income) &&
+    off(before.w2Income, after.w2Income) &&
+    !(n(before.scorpIncome) > 0 || n(after.scorpIncome) > 0)
+  ) {
     add("W-2 wages differ between the two returns");
   }
   if (
     has(before.federalPayments) &&
     has(after.federalPayments) &&
-    off(before.federalPayments, after.federalPayments)
+    off(before.federalPayments, after.federalPayments) &&
+    // An S corporation owner's W-2 withholding leaves with the salary on the before.
+    !(n(after.scorpIncome) > 0 && !off(after.federalPayments - before.federalPayments, n(after.federalWithholding)))
   ) {
     add("Federal payments differ between the two returns");
   }
-  const b = sideSummary(before);
-  const a = sideSummary(after);
+  const b = sideSummary(before, entityBefore);
+  const a = sideSummary(after, entityAfter);
   if (a.totalTaxes > b.totalTaxes + TOL) {
     add(
       `The after return owes more (${fmt(a.totalTaxes)}) than the before (${fmt(b.totalTaxes)}) — are the files swapped?`,
@@ -270,10 +374,16 @@ export function crossValidate(before: ReturnNumbers, after: ReturnNumbers): Warn
   return w;
 }
 
-export function validateAll(before: ReturnNumbers, after: ReturnNumbers): Warning[] {
+export function validateAll(
+  before: ReturnNumbers,
+  after: ReturnNumbers,
+  entityBefore: EntityNumbers | null = null,
+  entityAfter: EntityNumbers | null = null,
+): Warning[] {
   return [
     ...validateNumbers(before, "before"),
     ...validateNumbers(after, "after"),
-    ...crossValidate(before, after),
+    ...(entityAfter ? validateEntity(entityAfter, after) : []),
+    ...crossValidate(before, after, entityBefore, entityAfter),
   ];
 }

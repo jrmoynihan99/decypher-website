@@ -301,6 +301,53 @@ export function decryptCells(
 }
 
 /**
+ * Progress-driven counterpart to `decryptCells`: the caller sets the lock
+ * point (0..1) frame by frame instead of a clock running it, for reveals tied
+ * to a gesture — the recap's hold-to-decypher, where letting go winds the text
+ * back. Same fixed-width slots, tail re-randomisation and blur-into-focus.
+ * Paints the fully scrambled state synchronously; `finish` flattens back to
+ * plain text. Under reduced motion (or ?off=decrypt) the real text shows
+ * throughout and both calls are no-ops.
+ */
+export function scrambleCells(
+  el: HTMLElement,
+  text: string,
+): { set: (p: number, t: number) => void; finish: () => void } {
+  if (prefersReducedMotion() || fxOff("decrypt")) {
+    el.textContent = text;
+    return { set() {}, finish() {} };
+  }
+  const cells = buildCells(el, text);
+  const n = cells.length;
+  let last = 0;
+  for (const c of cells) if (c.span) c.span.textContent = randChar();
+  el.style.filter = `blur(${REVEAL_BLUR}px)`;
+  return {
+    set(p, t) {
+      const lock = Math.floor(p * n);
+      const reRand = t - last > 45;
+      if (reRand) last = t;
+      for (let i = 0; i < n; i++) {
+        const c = cells[i];
+        if (!c.span) continue;
+        if (i < lock) {
+          if (c.span.textContent !== c.ch) c.span.textContent = c.ch;
+        } else if (reRand || c.span.textContent === c.ch) {
+          // a slot the lock has retreated past re-scrambles at once
+          c.span.textContent = randChar();
+        }
+      }
+      const b = REVEAL_BLUR * Math.max(0, 1 - p / 0.6);
+      el.style.filter = b > 0.05 ? `blur(${b.toFixed(2)}px)` : "";
+    },
+    finish() {
+      el.textContent = text;
+      el.style.filter = "";
+    },
+  };
+}
+
+/**
  * Decrypt several elements as ONE continuous reveal: the timeline spans the
  * concatenated text so the lock sweeps through segment 1, then segment 2, and
  * so on. Each element keeps its own color; the blur clears globally. Used for

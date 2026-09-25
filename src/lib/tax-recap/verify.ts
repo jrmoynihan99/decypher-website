@@ -1,4 +1,10 @@
-import { RETURN_FIELD_KEYS, type ExtractedValue, type ReturnExtract, type ReturnFieldKey } from "./schema";
+import {
+  ENTITY_FIELD_KEYS,
+  RETURN_FIELD_KEYS,
+  type EntityExtract,
+  type ExtractedValue,
+  type ReturnExtract,
+} from "./schema";
 
 /**
  * Cross-check an extraction against the PDF's own text layer.
@@ -7,6 +13,10 @@ import { RETURN_FIELD_KEYS, type ExtractedValue, type ReturnExtract, type Return
  * browser. The two are independent, which is what makes this a real check:
  * a number the model made up won't be on the page it cited. Kept apart from
  * extract.ts so it has no server-only imports and can be exercised directly.
+ *
+ * The checks are written over a plain record of fields so the 1040 and the
+ * 1120-S go through the same code; the typed wrappers at the bottom are
+ * what extract.ts calls.
  */
 
 /**
@@ -32,23 +42,24 @@ export function appearsOn(pageText: string | undefined, value: number): boolean 
  * found nowhere in the document is flagged, not dropped — the reviewer
  * decides.
  */
-export function verifyAgainstText(
-  extract: ReturnExtract,
+export function verifyFields<K extends string>(
+  fields: Record<K, ExtractedValue>,
+  keys: K[],
   pageTexts: string[] | null,
-): { extract: ReturnExtract; unverified: ReturnFieldKey[]; noText: boolean } {
+): { fields: Record<K, ExtractedValue>; unverified: K[]; noText: boolean } {
   // A scanned print has a page per image and no text layer at all — a few
   // stray characters at most. Checking against that would flag every number
   // and tell the reviewer nothing; say "scan" instead.
   const chars = pageTexts?.reduce((n, t) => n + t.trim().length, 0) ?? 0;
   if (!pageTexts || !pageTexts.length || chars < 200) {
-    return { extract, unverified: [], noText: true };
+    return { fields, unverified: [], noText: true };
   }
-  const unverified: ReturnFieldKey[] = [];
-  const fields = { ...extract.fields };
-  for (const key of RETURN_FIELD_KEYS) {
-    const f: ExtractedValue = fields[key];
+  const unverified: K[] = [];
+  const out = { ...fields };
+  for (const key of keys) {
+    const f: ExtractedValue = out[key];
     if (f.value === null) {
-      fields[key] = { ...f, verified: null };
+      out[key] = { ...f, verified: null };
       continue;
     }
     const value = f.value;
@@ -58,20 +69,36 @@ export function verifyAgainstText(
       : [];
     const hit = candidates.find((p) => appearsOn(pageTexts[p - 1], value));
     if (hit !== undefined) {
-      fields[key] = { value, page: hit, verified: true };
+      out[key] = { value, page: hit, verified: true };
       continue;
     }
     // Last resort: anywhere in the document. Still a pass for the number,
     // but the citation was wrong, so record the page it was actually on.
     const anywhere = pageTexts.findIndex((t) => appearsOn(t, value));
     if (anywhere !== -1) {
-      fields[key] = { value, page: anywhere + 1, verified: true };
+      out[key] = { value, page: anywhere + 1, verified: true };
     } else {
-      fields[key] = { ...f, verified: false };
+      out[key] = { ...f, verified: false };
       unverified.push(key);
     }
   }
-  return { extract: { ...extract, fields }, unverified, noText: false };
+  return { fields: out, unverified, noText: false };
+}
+
+export function verifyAgainstText(
+  extract: ReturnExtract,
+  pageTexts: string[] | null,
+): { extract: ReturnExtract; unverified: (typeof RETURN_FIELD_KEYS)[number][]; noText: boolean } {
+  const r = verifyFields(extract.fields, RETURN_FIELD_KEYS, pageTexts);
+  return { extract: { ...extract, fields: r.fields }, unverified: r.unverified, noText: r.noText };
+}
+
+export function verifyEntityAgainstText(
+  extract: EntityExtract,
+  pageTexts: string[] | null,
+): { extract: EntityExtract; unverified: (typeof ENTITY_FIELD_KEYS)[number][]; noText: boolean } {
+  const r = verifyFields(extract.fields, ENTITY_FIELD_KEYS, pageTexts);
+  return { extract: { ...extract, fields: r.fields }, unverified: r.unverified, noText: r.noText };
 }
 
 /**
@@ -82,16 +109,28 @@ export function verifyAgainstText(
  * real return, so "page 3" has to become the page it actually came from or
  * the citation is worse than useless.
  */
-export function remapPages(extract: ReturnExtract, pageMap: number[] | null): ReturnExtract {
-  if (!pageMap?.length) return extract;
-  const fields = { ...extract.fields };
-  for (const key of RETURN_FIELD_KEYS) {
-    const f = fields[key];
+export function remapFieldPages<K extends string>(
+  fields: Record<K, ExtractedValue>,
+  keys: K[],
+  pageMap: number[] | null,
+): Record<K, ExtractedValue> {
+  if (!pageMap?.length) return fields;
+  const out = { ...fields };
+  for (const key of keys) {
+    const f = out[key];
     if (f.page === null) continue;
     const original = pageMap[f.page - 1];
-    if (original) fields[key] = { ...f, page: original };
+    if (original) out[key] = { ...f, page: original };
   }
-  return { ...extract, fields };
+  return out;
+}
+
+export function remapPages(extract: ReturnExtract, pageMap: number[] | null): ReturnExtract {
+  return { ...extract, fields: remapFieldPages(extract.fields, RETURN_FIELD_KEYS, pageMap) };
+}
+
+export function remapEntityPages(extract: EntityExtract, pageMap: number[] | null): EntityExtract {
+  return { ...extract, fields: remapFieldPages(extract.fields, ENTITY_FIELD_KEYS, pageMap) };
 }
 
 /**

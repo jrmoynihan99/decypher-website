@@ -61,7 +61,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     href: "/portal/tax-recap",
     name: "Tax Recap",
     blurb:
-      "Upload the before and after returns, check the numbers, and share a recap page with the client.",
+      "Upload the client's return, check the numbers, and share a recap page with the client.",
     note: "Reads ProSeries PDFs with Claude",
     icon: "M4 4h11l5 5v11H4zM15 4v5h5M8 13h8M8 17h5",
     permission: "receipts",

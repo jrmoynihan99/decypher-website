@@ -3,6 +3,10 @@ import { gate } from "../_gate";
 import {
   RecapInputError,
   asMoney,
+  sanitizeAnalysis,
+  sanitizeDerivedBefore,
+  sanitizeEntityExtract,
+  sanitizeEntityNumbers,
   sanitizeExtract,
   sanitizeNextSteps,
   sanitizeNumbers,
@@ -10,6 +14,7 @@ import {
 } from "@/lib/tax-recap/schema";
 import {
   TaxRecapStoreError,
+  deleteRecap,
   updateRecap,
   type RecapEdits,
 } from "@/lib/tax-recap/store";
@@ -63,6 +68,8 @@ export async function PATCH(
     }
     if ("before" in r) edits.before = sanitizeNumbers(r.before);
     if ("after" in r) edits.after = sanitizeNumbers(r.after);
+    if ("entityBefore" in r) edits.entityBefore = sanitizeEntityNumbers(r.entityBefore);
+    if ("entityAfter" in r) edits.entityAfter = sanitizeEntityNumbers(r.entityAfter);
     if ("strategies" in r) edits.strategies = sanitizeStrategies(r.strategies);
     if ("nextSteps" in r) edits.nextSteps = sanitizeNextSteps(r.nextSteps);
     if ("extraction" in r && r.extraction && typeof r.extraction === "object") {
@@ -70,8 +77,11 @@ export async function PATCH(
       edits.extraction = {
         before: sanitizeExtract(ex.before),
         after: sanitizeExtract(ex.after),
+        entity: sanitizeEntityExtract(ex.entity),
       };
     }
+    if ("derivedBefore" in r) edits.derivedBefore = sanitizeDerivedBefore(r.derivedBefore);
+    if ("analysis" in r) edits.analysis = sanitizeAnalysis(r.analysis);
     if ("revoked" in r) edits.revoked = Boolean(r.revoked);
   } catch (e) {
     if (e instanceof RecapInputError) {
@@ -96,5 +106,30 @@ export async function PATCH(
     }
     console.error("[tax-recap] update failed:", e);
     return NextResponse.json({ ok: false, message: "Couldn't save" }, { status: 500 });
+  }
+}
+
+/** Delete a recap permanently. The client link and PDF stop working at once. */
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await gate();
+  if (session instanceof NextResponse) return session;
+
+  const { id } = await params;
+  if (!id || id.length > 200 || id.includes("/")) {
+    return NextResponse.json({ ok: false, message: "Bad recap id" }, { status: 400 });
+  }
+  try {
+    await deleteRecap(id);
+    console.log(`[tax-recap] ${session.email} deleted recap ${id}`);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (e instanceof TaxRecapStoreError) {
+      return NextResponse.json({ ok: false, message: e.message }, { status: 404 });
+    }
+    console.error("[tax-recap] delete failed:", e);
+    return NextResponse.json({ ok: false, message: "Couldn't delete" }, { status: 500 });
   }
 }
