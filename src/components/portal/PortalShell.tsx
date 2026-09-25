@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import type { StaffSession } from "@/lib/firebase/session";
 import SignOutButton from "@/components/portal/SignOutButton";
 import SidebarUser from "@/components/portal/SidebarUser";
-import { SidebarRail, SidebarStrip } from "@/components/portal/PortalSidebar";
+import { RailFrame, SidebarRail, SidebarStrip } from "@/components/portal/PortalSidebar";
 import { PortalThemeToggle } from "@/components/portal/PortalTheme";
+import { RAIL_COOKIE } from "@/components/portal/rail";
 
 /**
  * Where portal users report a problem. Deliberately a real, monitored mailbox
@@ -20,7 +22,7 @@ const SUPPORT_EMAIL = "otavio@wedecypher.co";
  * hidden on phones, so they're mirrored into the header there — otherwise a
  * phone user would have no way to sign out at all.
  */
-export default function PortalShell({
+export default async function PortalShell({
   session,
   children,
 }: {
@@ -28,6 +30,7 @@ export default function PortalShell({
   children: React.ReactNode;
 }) {
   const isAdmin = session.role === "admin";
+  const railPinned = (await cookies()).get(RAIL_COOKIE)?.value === "pinned";
 
   return (
     <div className="min-h-svh">
@@ -64,20 +67,9 @@ export default function PortalShell({
       </header>
 
       <div className="flex">
-        {/* Offset and height are 4rem + 1px, not 4rem: the header is a 4rem bar
-            plus its own bottom border, and its height is auto so that border
-            adds to it. Subtracting only 4rem makes the rail a pixel taller than
-            the space beneath the header — enough to give every portal page a
-            permanent 1px of scroll. */}
-        <aside className="sticky top-[calc(4rem+1px)] hidden h-[calc(100svh-4rem-1px)] w-[228px] flex-none flex-col border-r border-edge-soft md:flex">
-          {/* nav scrolls if it outgrows the rail; the user block never does */}
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <SidebarRail isAdmin={isAdmin} permissions={session.permissions} />
-          </div>
-          <div className="flex-none border-t border-edge-soft">
-            <SidebarUser session={session} />
-          </div>
-        </aside>
+        <RailFrame initialPinned={railPinned} footer={<SidebarUser session={session} />}>
+          <SidebarRail isAdmin={isAdmin} permissions={session.permissions} />
+        </RailFrame>
 
         <main className="min-w-0 flex-1 px-5 py-9 sm:px-8">
           {children}

@@ -3,9 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-/** Sits in two places: the sidebar footer on desktop, the header on phones —
- *  hence the className escape hatch rather than two components. */
-export default function SignOutButton({ className = "" }: { className?: string }) {
+/** Shared by this button (phone header) and the rail's Sign out row. */
+export function useSignOut() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
@@ -15,6 +14,14 @@ export default function SignOutButton({ className = "" }: { className?: string }
     router.replace("/portal/login");
     router.refresh();
   };
+
+  return { busy, signOut };
+}
+
+/** The phone header's way out. On desktop it's a row at the foot of the rail
+ *  (RailSignOut), which has to fit the collapsed icon column. */
+export default function SignOutButton({ className = "" }: { className?: string }) {
+  const { busy, signOut } = useSignOut();
 
   return (
     <button

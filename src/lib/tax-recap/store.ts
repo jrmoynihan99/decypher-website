@@ -2,6 +2,10 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import {
+  sanitizeAnalysis,
+  sanitizeDerivedBefore,
+  sanitizeEntityExtract,
+  sanitizeEntityNumbers,
   sanitizeExtract,
   sanitizeNextSteps,
   sanitizeNumbers,
@@ -10,6 +14,7 @@ import {
   type RecapInput,
 } from "./schema";
 import { computeRecap } from "./compute";
+import type { ProofPairing } from "./derive";
 
 /**
  * Tax recaps, in Firestore.
@@ -58,12 +63,17 @@ function toDoc(id: string, d: FirebaseFirestore.DocumentData): RecapDoc {
     stateCode: typeof d.stateCode === "string" ? d.stateCode : null,
     before: sanitizeNumbers(d.before),
     after: sanitizeNumbers(d.after),
+    entityBefore: sanitizeEntityNumbers(d.entityBefore),
+    entityAfter: sanitizeEntityNumbers(d.entityAfter),
     strategies: sanitizeStrategies(d.strategies),
     nextSteps: sanitizeNextSteps(d.nextSteps),
     extraction: {
       before: sanitizeExtract(extraction.before),
       after: sanitizeExtract(extraction.after),
+      entity: sanitizeEntityExtract(extraction.entity),
     },
+    derivedBefore: sanitizeDerivedBefore(d.derivedBefore),
+    analysis: sanitizeAnalysis(d.analysis),
     createdAt: iso(d.createdAt),
     createdBy: typeof d.createdBy === "string" ? d.createdBy : "",
     updatedAt: iso(d.updatedAt),
@@ -116,9 +126,14 @@ export async function updateRecap(
     stateCode: edits.stateCode !== undefined ? edits.stateCode : current.stateCode,
     before: edits.before ?? current.before,
     after: edits.after ?? current.after,
+    entityBefore: edits.entityBefore !== undefined ? edits.entityBefore : current.entityBefore,
+    entityAfter: edits.entityAfter !== undefined ? edits.entityAfter : current.entityAfter,
     strategies: edits.strategies ?? current.strategies,
     nextSteps: edits.nextSteps ?? current.nextSteps,
     extraction: edits.extraction ?? current.extraction,
+    derivedBefore:
+      edits.derivedBefore !== undefined ? edits.derivedBefore : current.derivedBefore,
+    analysis: edits.analysis !== undefined ? edits.analysis : current.analysis,
   };
   await r.update({
     ...merged,
@@ -137,6 +152,19 @@ export async function getRecap(id: string): Promise<RecapDoc | null> {
   return snap.exists ? toDoc(id, snap.data() ?? {}) : null;
 }
 
+/**
+ * Remove a recap for good: the numbers, the extraction, and the client link
+ * with it (the token lives on the document, so the page and the PDF 404 the
+ * moment it's gone). There is no undo; the list asks first.
+ */
+export async function deleteRecap(id: string): Promise<void> {
+  if (!isConfigured()) throw new TaxRecapStoreError("Firebase is not configured");
+  const r = ref(id);
+  const snap = await r.get();
+  if (!snap.exists) throw new TaxRecapStoreError("Recap not found");
+  await r.delete();
+}
+
 /** The public page's lookup. Returns revoked recaps too — the page decides. */
 export async function getRecapByToken(token: string): Promise<RecapDoc | null> {
   if (!isConfigured()) return null;
@@ -145,6 +173,38 @@ export async function getRecapByToken(token: string): Promise<RecapDoc | null> {
   if (snap.empty) return null;
   const d = snap.docs[0];
   return toDoc(d.id, d.data());
+}
+
+/**
+ * The recaps whose before column was read from a real print — the engine's
+ * test cases. Each one is a pairing the Tax Tables page proves a card on: run
+ * the after through the engine, compare to the before as printed. A recap
+ * whose before was derived is left out; it would prove nothing.
+ */
+export async function listProofPairings(): Promise<ProofPairing[]> {
+  if (!isConfigured()) return [];
+  const snap = await adminDb().collection(COLLECTION).orderBy("createdAt", "desc").limit(200).get();
+  const out: ProofPairing[] = [];
+  for (const d of snap.docs) {
+    const doc = toDoc(d.id, d.data());
+    const a = doc.extraction.after;
+    if (doc.derivedBefore || !doc.extraction.before || !a) continue;
+    out.push({
+      id: doc.id,
+      clientName: doc.clientName,
+      taxYear: doc.taxYear,
+      meta: {
+        taxYear: doc.taxYear,
+        filingStatus: a.filingStatus,
+        stateCode: doc.stateCode ?? a.stateCode,
+        stateForm: a.stateForm,
+      },
+      before: doc.before,
+      after: doc.after,
+      entity: doc.entityAfter,
+    });
+  }
+  return out;
 }
 
 /** What the portal's list shows — no extraction blob, no per-line numbers. */

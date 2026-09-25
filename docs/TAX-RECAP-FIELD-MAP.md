@@ -46,6 +46,7 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | State refund | 540NR line 125 | — | — |
 | State interest + penalties | 540NR lines 122 + 123 | 38 | — |
 | State total due | 540NR line 124 (= FTB 8879 line 2) | 886 | 336 |
+| State-source income | Nonresident returns only: Schedule CA (540NR) line 10, column E | 16,334 | 16,334 |
 
 Notes on sources:
 
@@ -155,6 +156,88 @@ Three conventions came out of Mahony's recap and are now in code:
 - **The "70% Bookkeeping" column.** Two of the three recaps carry a middle column whose income side is exactly 70% of the deductions found. **Deliberately not in the tool** — Jason confirmed (2026-09-11) the recap is before and after only.
 
 Reads took 15–65s per return on Sonnet at roughly 75–115k input tokens for a text-based print (a scan is cheaper on input, ~45k, but can't be cross-checked). A scanned print is 15–20MB and goes up in pieces (docs/PORTAL.md → Tax Recap).
+
+## Deriving the before from the after
+
+Added 2026-09-25. The builder takes one PDF, the client's final return; `src/lib/tax-recap/derive.ts` computes the before column from it. A "ZERO WRITEOFFS" print is the same ProSeries file with every Schedule C expense and the home office deleted and recalculated — same income, payments and filing status — so for a plain sole-prop return it is a function of the return's own lines plus the year's tax tables.
+
+**Tables and rules are both data.** The Tax Tables page (`/portal/tax-recap/tables`) holds a card per year: the federal figures (brackets, standard deduction, tax-table rounding, SE rates, wage base, additional Medicare and QBI thresholds) and a card per state describing its rules as choices the engine interprets — starting point (federal AGI or taxable income), add-backs (SE deduction, QBI), deduction (own standard / federal / none), exemption (none / credit / deduction, with an optional AGI phase-out), brackets, tax-table rounding, surtax, city tax. Seeds ship in `src/lib/tax-recap/tables.ts`; a saved year lives in Firestore and overrides the seed. A new year is a copy of the last with the published figures typed in; a new state is a card filled in on the page. Nothing state-specific is in code. The 2025 seed covers federal, California Form 540 and the nine no-income-tax states; every other state is added on the page and proven there.
+
+**The engine refuses unless it can prove itself.** Before deriving anything it re-runs the return from its own inputs and compares to the lines Claude read — SE tax, adjustments, deduction, QBI, taxable income, income tax, the child tax credit, net investment income tax, federal total, state total, and for an S corporation the entity's tax — each within $2. Any miss names the line and the likely cause, and the builder offers to take the before column typed or from a before print. Refused outright: refundable credits on line 32, Schedule C with COGS/returns/other income, anything but the plain standard deduction, a sole proprietor's before-income over the QBI threshold, any state or year without a card. Since 2026-09-25 the engine also models Form 8995-A above the threshold (when its lines were read), the nonrefundable child tax credit (the number of children is the smallest count that reproduces line 19), the child-care credit as read (gated on earned income), Form 8960 on "other income", and the S corporation shape (next section). The same proof runs on the Tax Tables page against every saved recap whose before was read from a real print, live as a card is edited: a wrong number shows as "off" next to the client, with both figures.
+
+**Nonresident and part-year returns (added 2026-09-25).** A state card can name its nonresident form (California: 540NR); the engine then follows the 540NR line by line: tax as if resident on all income (line 31), state AGI = state-source income less the adjustments' share (32), state taxable income less the standard deduction's share (35), the resident rate to four decimals (36), the prorated tax (37), the exemption credit prorated by the taxable-income share (38–39). State-source income is read from Schedule CA (540NR) line 10 column E and is a fixed dollar amount — Chiu's is $16,334 on both prints — so it doesn't move when the write-offs come off. `pages.ts` keeps the Schedule CA (540NR) sides and 540NR side 2 on their own wording, since they carry no closing total. Proven on Chiu's pairing: before $848, after $336, every federal line too.
+
+**Ordinary adjustments carry across.** Schedule 1 deductions other than the SE tax deduction (student loan interest, health insurance, an HSA, a SEP) stay on the before at the after's amount, with a note, because the CPA's before prints keep them (Mahony's before keeps his $857 health insurance and a $751 adjustment). Only the SE deduction is recomputed.
+
+**What it cannot derive.** Underpayment penalties (Form 2210 needs prior-year tax and payment dates). The after return's penalty is carried across as a floor; the note says so. Chiu's before print carries a $38 California penalty the after doesn't, so his derived recap reads $19,070 against the Canva's $19,108.
+
+**Mahony is a Premium Tax Credit case, not a credit-table case.** His $966 on line 32 is a net premium tax credit (Form 8962: marketplace coverage six months, family size 1, 401% of the poverty line on the before, so the before *repays* $948 of advance credit while the after *receives* $966), computed iteratively against the self-employed health insurance deduction (Form 7206, $857). New Jersey adds a property-tax deduction from rent ($1,464), a shared-responsibility payment for the uninsured months ($749 = 2.5% of income over $10,000 × 6/12) and its own tax table. Every input is on the return, but modeling it means Form 8962's applicable-figure table and repayment limits, the 7206 iteration, and three NJ rules. Left for its own build; the engine refuses on the refundable credit and says so.
+
+**Conventions that had to be exact.** QBI is net profit less the SE deduction (§1.199A-3), which is what the after print does; the before print (a later ProSeries revision) didn't subtract it, invisible here because the income limit binds, but a W-2 + Schedule C client could show a small difference (noted on the recap). IRS tax table under $100k: $50 rows priced at the midpoint. FTB tax table under $100k: $100 rows centred on the hundreds (51–150, 151–250 …), priced at that hundred — a plain midpoint was $4 off on Inha's after return.
+
+**Verified** (`scripts/tax-recap-derive-check.mjs`, and through the real portal on 2026-09-25): Voloshchakevych's after return alone reproduces every line of the CPA's before print and the recap's $32,179 — federal 41,287, CA 9,667, owed 31,687 / 8,929. Chiu's after alone is refused with "CA Form 540NR isn't supported". The stored recap records `derivedBefore` (engine version + notes) in place of a before extraction.
+
+## S corporation clients (added 2026-09-25)
+
+Reverse-engineered from the LaLaNation89 Inc. / Wilson pairing: a head-of-household California filer whose business is an S corporation. Four prints: the final 1120-S (52 pages: Form 1120-S, California Form 100S, a Georgia 600S with no tax), the final 1040 (44 pages: Form 1040, Schedule E page 2, Form 8995-A, Form 2441, Form 8960, Form 8962, Form 7206, California 540, FTB 3804-CR), and a zero-write-off print of each. Samples in `Downloads\FOR JASON PART2`.
+
+**Two after returns go in one drop.** The browser tells them apart by their own pages (`detectReturnKind` in `pages.ts`: "U.S. Income Tax Return for an S Corporation" vs "U.S. Individual Income Tax Return"), reads each with its own instructions (`extractReturn` / `extractEntityReturn` in `extract.ts`), and paints the words learned from either out of both — the corporation's name off the 1120-S is painted out of the 1040's Schedule E, the owner's name off the 1040 out of the K-1.
+
+**What "before" means for an S corporation.** The CPA's zero-write-off prints zero *everything* on the 1120-S: cost of goods sold, the owner's salary, the other wages, the Solo 401(k), the health insurance, the state taxes. The K-1 becomes the gross receipts. On the 1040 the W-2 disappears (and with it the withholding), the QBI deduction goes to zero (over the threshold with no W-2 wages), the self-employed health insurance deduction goes (no wages to run the premiums through), the child-care credit goes (no earned income). There is no PTE election on the before, so the shareholder pays the state tax on the 540 and the corporation owes only the franchise tax. Neither side has SE tax, which is why the "S-corp savings" is a separate figure (below).
+
+Per-entity extract (`ENTITY_FIELDS` in `schema.ts`):
+
+| Field | Source | After | Before (print) |
+|---|---|---|---|
+| Gross receipts | 1120-S line 1a | 836,958 | 836,958 |
+| Cost of goods sold | line 2 | 46,141 | — |
+| Total income | line 6 | 790,817 | 836,958 |
+| Compensation of officers | line 7 | 76,971 | — |
+| Salaries and wages | line 8 | 46,026 | — |
+| Taxes and licenses | line 12 | 21,423 | — |
+| Pension plans | line 17 | 17,500 | — |
+| Other deductions | line 20 | 155,835 | — |
+| Total deductions | line 21 | 319,193 | — |
+| Ordinary business income | line 22 | 471,624 | 836,958 |
+| Shareholder's ordinary income | K-1 box 1 | 471,624 | 836,958 |
+| Ownership % | K-1 item G | 100 | 100 |
+| Distributions | K-1 box 16 D | 123,886 | — |
+| State net income | 100S line 20 | 511,924 | 836,958 |
+| State taxes added back | 100S line 2 | 40,300 | — |
+| State S corporation tax | 100S line 21 (1.5%, $800 minimum) | 7,679 | 12,554 |
+| PTE elective tax | 100S line 29 / Form 3804 (not on this print; taken from the 1040's FTB 3804-CR line 3) | 47,609 | — |
+
+New 1040 lines for the shape: S corporation income (Schedule 1 line 5 = Schedule E page 2 line 41: 471,624 / 836,958), Form 8995-A lines 2 and 4 (386,732 of QBI against 63,116 of W-2 wages → 50% limit = the printed 31,558; the before print scales the QBI with the K-1 to 686,306 and the wages are 0), Medicare wages from the S corporation (Form 7206 line 11: 70,000 — the officer's 76,971 is that plus 6,971 of health insurance; box 1 is 76,971 less the 23,500 deferral = 53,471), the child-care credit (Schedule 3 line 2: 600), the dependents count (1), the 540's exemption credits after phase-out (line 32: 145 = the $153 personal credit gone and the $475 dependent credit down to 145, each on its own), and the PTE credit (FTB 3804-CR: 47,609 available, 41,111 claimed, 6,498 carried forward). Withholding (1040 line 25d: 3,376; 540 line 71: 368) is read so it can leave with the W-2.
+
+**Recap rows.** Business net income is the K-1. A new row, "State S-corp tax & PTET", carries the corporation's own state tax (1.5% + the elective tax): 55,288 after, 12,554 before. State taxes stays the shareholder's own 540 tax: 0 after (the PTE credit covers it), 76,243 before. The Canva recap folded the two into one row and reads 88,602 before where the prints give 88,797; the tool follows the prints. The filing page gains an "S-corp (PTET)" line: 55,288 owed, paid with the election, 0 due.
+
+**Verified** (`npm run recap:check`): from the two after returns alone the engine reproduces both before prints to the dollar — federal 258,625 (tax 255,105 + the 3,520 advance credit repaid), California 76,243, payments 0 and 800, the corporation's 12,554 — and the before's Form 8995-A line 2 (686,306). Savings 160,426 against the Canva's 160,231 (the $195 above).
+
+**Savings by strategy.** `attributeStrategies` in `derive.ts` walks from the before to the after switching one strategy on at a time and re-running everything — the 1120-S, the K-1, the 1040, the 540, the 100S — so the steps sum to the headline exactly. Order: business write-offs (cost of goods sold and every 1120-S deduction other than the owner's pay, the retirement plan and the state taxes deducted), the owner's salary (the W-2, the health insurance deduction, the W-2 wages that unlock the QBI deduction, the child-care credit), the Solo 401(k) (the deferral out of the W-2 and the employer contribution), the PTE election (the federal deduction for the state tax, the entity's elective tax, the shareholder's credit). Wilson: 113,744 / 15,959 / 18,884 / 11,839. For a sole proprietor: write-offs, then the home office. The order is printed on the recap because it matters: the first step gets the top bracket.
+
+**S-corp savings.** The Canva's "S-CORP TAX SAVINGS: $35,140" is described as "estimated self-employment tax avoided through the S-Corp structure" and matches no formula on the returns (Schedule SE on the K-1 is 34,467; with the additional Medicare tax 36,587; on the K-1 plus the salary, less the FICA paid, 28,578; the returns carry no Schedule SE at all). The engine reports **36,587**: Schedule SE on the K-1 ordinary income as if it were Schedule C profit, with the whole wage base (a sole proprietor has no W-2), plus the 0.9% additional Medicare tax over the threshold. Gross of the payroll tax the corporation paid on the salary, since as a sole proprietor that pay would have carried SE tax too. It sits outside the before/after — both are S corporation returns — and is added on top, as the Canva does: "Bookkeeping + strategies" + "S-corp" = "Total tax savings". Josiel to confirm the convention.
+
+**Not modeled (refused with the line named):** a second business or K-1, a loss year, more than one shareholder where the K-1 doesn't reconcile to item G, capital gains or qualified dividends in the tax, the QBI phase-in range on the before for a specified service business, a state without an S corporation card, a W-2 from another employer.
+
+**The state's S corporation card** (`entity` on a state card; Tax Tables page → "Rules · S corporations"): a rate on the corporation's net income, a minimum tax that is flat or tiered by gross receipts, and the elective pass-through entity tax as brackets on the entity's income plus how it comes back to the owner — a nonrefundable credit inside the state's total (California), a refundable credit claimed with the payments (New Jersey, New York), or the income left off the owner's return (Georgia). A refundable credit is read into its own field, `statePteCreditRefundable` (NJ-1040 line 63), and the recap nets it out of State Taxes and out of the payments the way it does the federal refundable credits; the printed total (NJ-1040 line 54) stays gross. The shareholder's credit is their ownership share of the entity's tax.
+
+Seeded for 2025: **California** (1.5%, $800, 9.3% nonrefundable — proven on LaLaNation89) and **New Jersey** (no income rate; minimum $375 / $562.50 / $750 / $1,125 / $1,500 by gross receipts under $100k / $250k / $500k / $1M / over, per the Division of Taxation's CBT overview; BAIT at 5.675% to $250,000, 6.52% to $1,000,000, 10.9% over, refundable, per the Division's BAIT page — the 9.12% tier was dropped for 2022 on). The New Jersey figures are statutory and **not yet proven on a real NJ S corporation pairing**; the engine refuses if a return's own CBT-100S tax or BAIT doesn't reproduce, and the shareholder's line 22 (net pro rata share of S corporation income) is read into `stateBusinessIncome` for the NJ gross-income base. `npm run recap:check` exercises both cards' arithmetic.
+
+## Every state is seeded (added 2026-09-25, later)
+
+Jason's call: an unproven card is strictly better than none, because without a card the engine refuses outright and with one it still refuses unless it reproduces the client's own printed tax first — so a wrong figure surfaces as a refusal naming the line, never as a wrong recap. `src/lib/tax-recap/seeds-2025-states.ts` holds the 2025 cards for the 39 income-tax states and DC that the samples didn't cover (California and New Jersey stay in `tables.ts`, the nine no-tax states are generated). Each card carries `proven: false` and a `note` saying where its figures came from, which to verify first, and what the engine's state model can't express there — the states where the first client will most likely get a refusal and a typed before:
+
+- **A deduction for federal income tax paid**: Alabama (in full), Missouri (capped), Oregon (the federal tax subtraction). Also Idaho's grocery credit and Utah's taxpayer tax credit.
+- **A local tax on every return** the card can't hold because it varies by county: Indiana, Maryland (the state's own schedule is seeded; the county rate is added as a city tax for a given client). New York City and Michigan cities the same way.
+- **Income-based deductions the model doesn't shape**: Wisconsin's sliding standard deduction, Maryland's 15%-of-AGI deduction, Ohio's business income deduction (the first $250,000 of business income deducted, the rest at 3% — every Ohio business owner), North Carolina's child deduction, Connecticut's exemption phase-out and recapture, Massachusetts's FICA deduction.
+- **Credits the state gives at a different share**: Connecticut's PE tax credit is 93.01% and Massachusetts's PTE credit is 90%; the engine gives 100%, so those lines mismatch.
+- **Entity rules that don't fit rate-plus-minimum**: DC taxes S corporations as C corporations; New Hampshire's business profits tax and Tennessee's excise tax hit S corporations in states with no personal income tax (not modeled — those cards say "no income tax" and the entity is skipped).
+
+The Tax Tables page shows "Seeded, not yet proven on a client" on such a card, with a switch to flip once a client of that state has gone through cleanly, and the review list's derived notes say when an unproven card was used. `npm run recap:check` validates every seeded card the way the editor does (bracket order, percentages, minimum tiers) and counts them, so a typo can't block the year from saving.
+
+## What leaves the browser
+
+Added 2026-09-25. `pdf-prepare.ts` renders only the kept pages, paints out the identity, and sends an images-only PDF (no text layer), so the model reads pages with no name, SSN, address, business name, bank numbers, email, phone or date of birth on them. Two passes: the 1040's header band (between "Your first name" and "Foreign country name") and Schedule C's "Business name" box are painted whole and their values become tokens painted out wherever else they appear (the 8879, Form 8995, every state page, the 540's four-letter name code); then patterns — SSNs in the three ways ProSeries prints them, EINs, 9+ digit runs, emails, phones, dates. The page text sent for the cross-check is scrubbed with the same tokens. The client's name is read locally off the 1040 and fills the client field; the model never sees it. A scan has no text to find any of this in and goes as printed, with a warning on the review list. Checked on Inha's and Chiu's prints page by page (43 and 40 boxes; every number intact; both read and derived correctly afterwards).
 
 ## Open questions for Josiel
 

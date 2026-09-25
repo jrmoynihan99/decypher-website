@@ -45,6 +45,11 @@
   --animate-scan: scan-move 1.7s linear infinite;
   --animate-node-float: node-float 6s ease-in-out infinite;
   --animate-rise: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  /* the recap seal (RecapGate): lock rings, the burst at the hold point, the resting hint */
+  --animate-shock: shock-ring 0.9s ease-out both;
+  --animate-flash: flash-out 0.6s ease-out forwards;
+  --animate-shockwave: shockwave 1s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  --animate-pulse-soft: pulse-soft 2.2s ease-in-out infinite;
 
   @keyframes glow-drift {
     0% {
@@ -129,6 +134,45 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+  @keyframes shock-ring {
+    from {
+      transform: scale(1);
+      opacity: 0.95;
+    }
+    to {
+      transform: scale(5.5);
+      opacity: 0;
+    }
+  }
+  @keyframes flash-out {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(110);
+    }
+  }
+  @keyframes shockwave {
+    from {
+      opacity: 0.95;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(45);
+    }
+  }
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
     }
   }
 }
@@ -733,4 +777,35 @@ html[data-portal-theme="light"] .hover\:border-white\/20:hover {
    light theme light-scheme pickers instead. */
 html[data-portal-theme="light"] .\[color-scheme\:dark\] {
   color-scheme: light;
+}
+
+/* ── Portal rail ──────────────────────────────────────────────────────────
+   The desktop rail (RailFrame in PortalSidebar.tsx) sits collapsed to its
+   icons and opens when it's pinned, hovered, or holding keyboard focus.
+   rail-open: styles anything inside it for that open state; rail-float: only
+   while it's open *over* the page (unpinned), for the drop shadow.
+
+   Keyboard focus is :focus-visible, not :focus-within — a clicked link keeps
+   focus after the navigation, and focus-within would hold the rail open
+   until you clicked somewhere else. Hover is gated to real pointers so a tap
+   on an iPad doesn't leave the rail stuck open over the page. */
+@custom-variant rail-open {
+  &:where(.portal-rail[data-pinned] *, .portal-rail:has(:focus-visible) *) {
+    @slot;
+  }
+  @media (hover: hover) {
+    &:where(.portal-rail:hover *) {
+      @slot;
+    }
+  }
+}
+@custom-variant rail-float {
+  &:where(.portal-rail:not([data-pinned]):has(:focus-visible) *) {
+    @slot;
+  }
+  @media (hover: hover) {
+    &:where(.portal-rail:not([data-pinned]):hover *) {
+      @slot;
+    }
+  }
 }
