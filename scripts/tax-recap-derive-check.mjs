@@ -361,10 +361,18 @@ const REFUSALS = [
     expect: /PR isn't on the 2025 tax tables/,
   },
   {
-    name: "year without tables",
-    meta: { ...inha.meta, taxYear: 2024 },
+    // 2023–2026 are seeded now; a year outside them has no card.
+    name: "year without tables (2019)",
+    meta: { ...inha.meta, taxYear: 2019 },
     after: inha.after,
     expect: /No tax tables/,
+  },
+  {
+    // A 2025 return run against the 2024 card: the brackets don't reproduce its tax.
+    name: "a return run against the wrong year's tables",
+    meta: { ...inha.meta, taxYear: 2024 },
+    after: inha.after,
+    expect: /the 2024 tables give/,
   },
   {
     name: "income tax that doesn't match the brackets (capital gains)",
@@ -492,22 +500,52 @@ for (const p of PAIRINGS) {
    order, percentages, minimum-tax tiers); a typo here would block the whole
    year's tables from saving.                                               */
 {
-  console.log("\nSeeded state cards");
-  const y = cardFor(2025);
-  const problems = validateYearCard(y);
-  if (problems.length) {
-    failed++;
-    console.log("  INVALID:\n   - " + problems.join("\n   - "));
+  console.log("\nSeeded cards by year");
+  for (const year of [2023, 2024, 2025, 2026]) {
+    const y = cardFor(year);
+    if (!y) {
+      failed++;
+      console.log(`  ${year}: MISSING`);
+      continue;
+    }
+    const problems = validateYearCard(y);
+    if (problems.length) {
+      failed++;
+      console.log(`  ${year} INVALID:\n   - ` + problems.join("\n   - "));
+    }
+    const codes = Object.keys(y.states).sort();
+    const taxed = codes.filter((c) => y.states[c].incomeTax);
+    const withEntity = taxed.filter((c) => y.states[c].entity);
+    const withPte = withEntity.filter((c) => y.states[c].entity?.pte);
+    const proven = taxed.filter((c) => y.states[c].proven);
+    const carried = taxed.filter((c) => /^CARRIED FROM/.test(y.states[c].note));
+    console.log(
+      `  ${year}: ${problems.length ? "INVALID" : "valid"} — ${codes.length} jurisdictions, ${taxed.length} with an income tax, ${withEntity.length} with S corporation rules, ${withPte.length} with a PTE election; proven: ${proven.length ? proven.join(", ") : "none"}; carried from 2025: ${carried.length}`,
+    );
+    if (codes.length !== 51) {
+      failed++;
+      console.log(`  WRONG: expected 51 jurisdictions, found ${codes.length}`);
+    }
   }
-  const codes = Object.keys(y.states).sort();
-  const taxed = codes.filter((c) => y.states[c].incomeTax);
-  const withEntity = taxed.filter((c) => y.states[c].entity);
-  const withPte = withEntity.filter((c) => y.states[c].entity?.pte);
-  const proven = taxed.filter((c) => y.states[c].proven);
-  console.log(`  ${problems.length ? "" : "valid: "}${codes.length} jurisdictions seeded (50 states + DC); ${taxed.length} with an income tax, ${withEntity.length} with S corporation rules, ${withPte.length} with a PTE election; proven on a client: ${proven.join(", ")}`);
-  if (codes.length !== 51) {
-    failed++;
-    console.log(`  WRONG: expected 51 jurisdictions, found ${codes.length}`);
+
+  // The federal schedules, by hand: tax on $50,000 of taxable income, single.
+  const tax = (rows, income) => {
+    let t = 0, floor = 0;
+    for (const { upTo, rate } of rows) {
+      if (income <= floor) break;
+      const cap = upTo ?? Infinity;
+      t += (Math.min(income, cap) - floor) * rate;
+      floor = cap;
+    }
+    return Math.round(t);
+  };
+  // 2025: 10% × 11,925 + 12% × 36,550 + 22% × 1,525 = 5,914.
+  const want = { 2023: 6308, 2024: 6053, 2025: 5914, 2026: 5752 };
+  for (const [year, expected] of Object.entries(want)) {
+    const got = tax(cardFor(Number(year)).federal.brackets.single, 50000);
+    const ok = got === expected;
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok   " : "WRONG"} federal ${year}, single, $50,000 taxable → ${money(got)} (want ${money(expected)})`);
   }
 }
 

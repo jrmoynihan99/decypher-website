@@ -24,6 +24,7 @@
  */
 
 import { STATES_2025 } from "./seeds-2025-states";
+import { CALIFORNIA_YEARS, CARRIED_NOTE, NEW_JERSEY_YEARS, STATE_YEARS } from "./seeds-state-years";
 
 export type FilingStatus = "single" | "mfj" | "mfs" | "hoh" | "qss";
 
@@ -499,9 +500,131 @@ const NEW_JERSEY_2025: StateCard = {
   note: "NJ-1040 proven on a sole proprietor with marketplace coverage. The S corporation side (CBT-100S minimum tax tiers, BAIT schedule, refundable credit on line 63) is the Division of Taxation's published figures and not yet proven on a client. Not modeled: the property-tax deduction, senior/blind/veteran exemptions, the bronze-plan cap on the shared responsibility payment.",
 };
 
+/* ─────────────────────────────── the other years ─────────────────────────────── */
+
+/**
+ * Federal 2024: Rev. Proc. 2023-34 brackets, the pre-2025-Act standard
+ * deduction ($14,600 / $29,200 / $21,900), SSA wage base $168,600, the
+ * $2,000 child tax credit, the enhanced premium tax credit table with the
+ * 2024 repayment caps.
+ */
+const FEDERAL_2024: FederalCard = {
+  ...FEDERAL_2025,
+  brackets: {
+    single: b([[11600, 0.10], [47150, 0.12], [100525, 0.22], [191950, 0.24], [243725, 0.32], [609350, 0.35], [null, 0.37]]),
+    mfj: b([[23200, 0.10], [94300, 0.12], [201050, 0.22], [383900, 0.24], [487450, 0.32], [731200, 0.35], [null, 0.37]]),
+    qss: b([[23200, 0.10], [94300, 0.12], [201050, 0.22], [383900, 0.24], [487450, 0.32], [731200, 0.35], [null, 0.37]]),
+    mfs: b([[11600, 0.10], [47150, 0.12], [100525, 0.22], [191950, 0.24], [243725, 0.32], [365600, 0.35], [null, 0.37]]),
+    hoh: b([[16550, 0.10], [63100, 0.12], [100500, 0.22], [191950, 0.24], [243700, 0.32], [609350, 0.35], [null, 0.37]]),
+  },
+  standardDeduction: { single: 14600, mfj: 29200, qss: 29200, mfs: 14600, hoh: 21900 },
+  selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 168600 },
+  qbi: { ...FEDERAL_2025.qbi, threshold: { single: 191950, mfs: 191950, hoh: 191950, mfj: 383900, qss: 383900 } },
+  childTaxCredit: { ...FEDERAL_2025.childTaxCredit, perChild: 2000 },
+  ptc: {
+    ...FEDERAL_2025.ptc,
+    repaymentLimit: [
+      { below: 200, single: 375, other: 750 },
+      { below: 300, single: 975, other: 1950 },
+      { below: 400, single: 1625, other: 3250 },
+    ],
+  },
+};
+
+/** Federal 2023: Rev. Proc. 2022-38; wage base $160,200; 2023 repayment caps. */
+const FEDERAL_2023: FederalCard = {
+  ...FEDERAL_2024,
+  brackets: {
+    single: b([[11000, 0.10], [44725, 0.12], [95375, 0.22], [182100, 0.24], [231250, 0.32], [578125, 0.35], [null, 0.37]]),
+    mfj: b([[22000, 0.10], [89450, 0.12], [190750, 0.22], [364200, 0.24], [462500, 0.32], [693750, 0.35], [null, 0.37]]),
+    qss: b([[22000, 0.10], [89450, 0.12], [190750, 0.22], [364200, 0.24], [462500, 0.32], [693750, 0.35], [null, 0.37]]),
+    mfs: b([[11000, 0.10], [44725, 0.12], [95375, 0.22], [182100, 0.24], [231250, 0.32], [346875, 0.35], [null, 0.37]]),
+    hoh: b([[15700, 0.10], [59850, 0.12], [95350, 0.22], [182100, 0.24], [231250, 0.32], [578100, 0.35], [null, 0.37]]),
+  },
+  standardDeduction: { single: 13850, mfj: 27700, qss: 27700, mfs: 13850, hoh: 20800 },
+  selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 160200 },
+  qbi: { ...FEDERAL_2025.qbi, threshold: { single: 182100, mfs: 182100, hoh: 182100, mfj: 364200, qss: 364200 } },
+  ptc: {
+    ...FEDERAL_2025.ptc,
+    repaymentLimit: [
+      { below: 200, single: 350, other: 700 },
+      { below: 300, single: 900, other: 1800 },
+      { below: 400, single: 1500, other: 3000 },
+    ],
+  },
+};
+
+/**
+ * Federal 2026: Rev. Proc. 2025-32 brackets and the 2025 Act's indexed
+ * standard deduction ($16,100 / $32,200 / $24,150); SSA wage base
+ * $184,500; the QBI phase-in range widened to $75,000 / $150,000; the
+ * $2,200 child tax credit. The enhanced premium tax credit expired after
+ * 2025, so Form 8962 goes back to the older table: a 2.1%–9.96% applicable
+ * figure and NO credit at or above 400% of the poverty line (the cap
+ * figure of 100% below makes the credit zero there). If Congress restores
+ * the enhanced credit for 2026, copy the 2025 card's PTC block over this.
+ */
+const FEDERAL_2026: FederalCard = {
+  ...FEDERAL_2025,
+  brackets: {
+    single: b([[12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [null, 0.37]]),
+    mfj: b([[24800, 0.10], [100800, 0.12], [211400, 0.22], [403550, 0.24], [512450, 0.32], [768700, 0.35], [null, 0.37]]),
+    qss: b([[24800, 0.10], [100800, 0.12], [211400, 0.22], [403550, 0.24], [512450, 0.32], [768700, 0.35], [null, 0.37]]),
+    mfs: b([[12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [384350, 0.35], [null, 0.37]]),
+    hoh: b([[17700, 0.10], [67450, 0.12], [105700, 0.22], [201775, 0.24], [256200, 0.32], [640600, 0.35], [null, 0.37]]),
+  },
+  standardDeduction: { single: 16100, mfj: 32200, qss: 32200, mfs: 16100, hoh: 24150 },
+  selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 184500 },
+  qbi: {
+    ...FEDERAL_2025.qbi,
+    threshold: { single: 201775, mfs: 201775, hoh: 201775, mfj: 403550, qss: 403550 },
+    phaseInRange: { single: 75000, mfs: 75000, hoh: 75000, mfj: 150000, qss: 150000 },
+  },
+  ptc: {
+    applicableFigure: [
+      { from: 100, to: 133, start: 0.021, end: 0.021 },
+      { from: 133, to: 150, start: 0.0314, end: 0.0419 },
+      { from: 150, to: 200, start: 0.0419, end: 0.066 },
+      { from: 200, to: 250, start: 0.066, end: 0.0844 },
+      { from: 250, to: 300, start: 0.0844, end: 0.0996 },
+      { from: 300, to: 400, start: 0.0996, end: 0.0996 },
+    ],
+    capAt: 400,
+    capFigure: 1,
+    repaymentLimit: [
+      { below: 200, single: 375, other: 750 },
+      { below: 300, single: 975, other: 1950 },
+      { below: 400, single: 1650, other: 3300 },
+    ],
+  },
+};
+
+/**
+ * A year's state cards: the 2025 cards with that year's overrides laid on.
+ * A state with no override for the year is carried across, marked unproven,
+ * with its note saying so. California and New Jersey have their own
+ * per-year notes/figures in seeds-state-years.ts.
+ */
+function statesForYear(year: number): Record<string, StateCard> {
+  const overrides = STATE_YEARS[year] ?? {};
+  const out: Record<string, StateCard> = {};
+  for (const [code, base] of Object.entries(STATES_2025)) {
+    const o = overrides[code];
+    out[code] = o
+      ? { ...base, ...o, proven: false, note: o.note ?? `${CARRIED_NOTE(year)}${base.note}` }
+      : { ...base, proven: false, note: `${CARRIED_NOTE(year)}${base.note}` };
+  }
+  out.CA = { ...CALIFORNIA_2025, ...(CALIFORNIA_YEARS[year] ?? {}), proven: false };
+  out.NJ = { ...NEW_JERSEY_2025, ...(NEW_JERSEY_YEARS[year] ?? {}), proven: false };
+  for (const code of NO_INCOME_TAX) out[code] = noIncomeTaxCard(code);
+  return out;
+}
+
 /* ─────────────────────────────────── seeds ─────────────────────────────────── */
 
 const SEEDS: Record<number, YearCard> = {
+  2023: { federal: FEDERAL_2023, states: statesForYear(2023) },
+  2024: { federal: FEDERAL_2024, states: statesForYear(2024) },
   2025: {
     federal: FEDERAL_2025,
     states: {
@@ -513,6 +636,7 @@ const SEEDS: Record<number, YearCard> = {
       ...Object.fromEntries(NO_INCOME_TAX.map((code) => [code, noIncomeTaxCard(code)])),
     },
   },
+  2026: { federal: FEDERAL_2026, states: statesForYear(2026) },
 };
 
 export const SEED_YEARS = Object.keys(SEEDS).map(Number).sort();
@@ -842,7 +966,8 @@ export function validateYearCard(card: YearCard): string[] {
     prevTo = fin(row.to) ? row.to : prevTo;
   });
   if (!fin(f.ptc.capAt) || f.ptc.capAt <= 0) out.push("Premium tax credit: the cap percentage needs a number");
-  if (!fin(f.ptc.capFigure) || f.ptc.capFigure < 0 || f.ptc.capFigure >= 1) out.push("Premium tax credit: the cap figure must be a percentage");
+  // 100% is allowed: it's how a year with no credit above the cap (2026) is written.
+  if (!fin(f.ptc.capFigure) || f.ptc.capFigure < 0 || f.ptc.capFigure > 1) out.push("Premium tax credit: the cap figure must be a percentage (100% means no credit above the cap)");
   let prevBelow = 0;
   f.ptc.repaymentLimit.forEach((row, i) => {
     const w = `Premium tax credit repayment cap, row ${i + 1}`;
