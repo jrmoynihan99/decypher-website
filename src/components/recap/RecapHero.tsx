@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createRevealSound, type RevealSound } from "@/components/recap/reveal-sound";
 import GlowOrb from "@/components/ui/GlowOrb";
 import { prefersReducedMotion, randChar, scrambleCells } from "@/lib/decrypt";
 import { COARSE_FRAME_MS, isCoarsePointer } from "@/lib/perf";
@@ -26,14 +27,29 @@ import { money } from "@/lib/widget-format";
  * its compression, the shudder near the end). The cipher rain and the neural
  * mesh behind it belong to RecapView, so the background is continuous down
  * the page — and the mesh's own click-and-hold pull joins in for free.
+ *
+ * It has a sound (reveal-sound.ts), on by default where there's a mouse and
+ * off on touch devices — a phone is more often somewhere quiet, and iOS's
+ * silent switch mutes it anyway. The speaker toggle remembers a choice.
  */
 
 const HOLD_MS = 1800; // a full hold
 const DECAY_MS = 800; // how fast it winds back when let go
 const RING_C = 2 * Math.PI * 54;
 const PALETTE = ["255,45,120", "139,43,232", "255,92,46"];
+const SOUND_KEY = "dcy-recap-sound";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+
+/** The remembered toggle, or null for the device default. */
+function readSoundPref(): boolean | null {
+  try {
+    const v = localStorage.getItem(SOUND_KEY);
+    return v === "on" ? true : v === "off" ? false : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function RecapHero({
   firstName,
@@ -73,9 +89,28 @@ export default function RecapHero({
   const [held, setHeld] = useState(false);
   const [done, setDone] = useState(initiallyOpen);
   const [open, setOpen] = useState(initiallyOpen);
+  // null until the device default / remembered choice is read on the client
+  const [sound, setSound] = useState<boolean | null>(null);
+  const soundRef = useRef<RevealSound | null>(null);
 
   const line1 = `${firstName}, you saved`;
   const line2 = money(savings);
+
+  const toggleSound = () => {
+    const next = !sound;
+    setSound(next);
+    const s = soundRef.current;
+    if (s) {
+      // the click is a gesture, so the context can be created here too
+      s.setEnabled(next);
+      if (next) s.blip();
+    }
+    try {
+      localStorage.setItem(SOUND_KEY, next ? "on" : "off");
+    } catch {
+      /* private mode — the choice just won't persist */
+    }
+  };
 
   useEffect(() => {
     if (initiallyOpen) return;
@@ -116,6 +151,13 @@ export default function RecapHero({
     let lastPct = -1;
     let raf = 0;
     const timers: number[] = [];
+
+    // sound: on by default with a mouse, off on touch, unless they've chosen.
+    // The state update is deferred out of the effect body (see StatsGrid).
+    const soundOn = readSoundPref() ?? !coarse;
+    const sound = createRevealSound(soundOn);
+    soundRef.current = sound;
+    timers.push(window.setTimeout(() => setSound(soundOn)));
     // where the pull is centred: the pointer while it's down, the lock for a keyboard hold
     const pt = { x: stage.clientWidth / 2, y: stage.clientHeight * 0.6 };
     const setPt = (e: PointerEvent) => {
@@ -162,6 +204,8 @@ export default function RecapHero({
       chipText(1);
       setHeld(false);
       setDone(true);
+      // the whole latch → swell → burst phrase is scheduled on the audio clock here
+      sound.unlock(!!field);
       field?.implode();
       timers.push(window.setTimeout(() => field?.burst(pt), 170));
       // the lock gives way to the numbers, and the rest of the recap mounts below
@@ -178,8 +222,12 @@ export default function RecapHero({
 
     const down = (e: PointerEvent | null) => {
       if (isDone) return;
+      // the speaker toggle is a control, not part of the hold
+      if (e && (e.target as Element).closest("[data-sound-toggle]")) return;
       if (e) setPt(e);
       else lockPt();
+      // this is the gesture the browser needs before it will make a sound
+      sound.prime();
       // no motion to hold for: a press opens it
       if (reduce) {
         complete();
@@ -224,6 +272,7 @@ export default function RecapHero({
         s2.set(clamp((g - n1) / n2, 0, 1), t);
         pull(p);
         chipText(p);
+        sound.progress(p);
       }
       field?.frame(p, dt, isHeld, pt, isDone);
       if (!isDone && p >= 1) complete();
@@ -235,6 +284,8 @@ export default function RecapHero({
       cancelAnimationFrame(raf);
       timers.forEach(clearTimeout);
       field?.destroy();
+      sound.destroy();
+      soundRef.current = null;
       stage.removeEventListener("pointerdown", down);
       stage.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -411,6 +462,33 @@ export default function RecapHero({
         </span>
         <span className="animate-blink font-mono text-[11px] text-magenta [animation-duration:1.1s]">▮</span>
       </div>
+
+      {/* the sound toggle — the one control that isn't part of the hold */}
+      {!initiallyOpen ? (
+        <button
+          type="button"
+          data-sound-toggle
+          onClick={toggleSound}
+          aria-pressed={sound === true}
+          aria-label={sound ? "Turn sound off" : "Turn sound on"}
+          className={`absolute bottom-[18px] right-[18px] z-[5] flex cursor-pointer items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 font-mono text-[11px] tracking-[0.14em] backdrop-blur-[8px] transition-[opacity,color] duration-300 hover:text-fog print:hidden ${
+            sound === null ? "opacity-0" : sound ? "text-[#9A93AB]" : "text-dusk"
+          }`}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden className="h-[13px] w-[13px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 5 6 9H3v6h3l5 4z" />
+            {sound ? (
+              <>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+              </>
+            ) : (
+              <path d="m16 9 5 6m0-6-5 6" />
+            )}
+          </svg>
+          {sound ? "SOUND ON" : "SOUND OFF"}
+        </button>
+      ) : null}
     </section>
   );
 }

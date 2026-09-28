@@ -470,29 +470,29 @@ export const STATES_2025: Record<string, StateCard> = {
   VT: card("Vermont", {
     form: "IN-111",
     brackets: brackets(
-      [[47900, 0.0335], [116000, 0.066], [242000, 0.076], [null, 0.0875]],
-      [[79950, 0.0335], [193300, 0.066], [294600, 0.076], [null, 0.0875]],
-      [[64200, 0.0335], [165800, 0.066], [268500, 0.076], [null, 0.0875]],
-      [[39975, 0.0335], [96650, 0.066], [147300, 0.076], [null, 0.0875]],
+      [[49250, 0.0335], [119300, 0.066], [248850, 0.076], [null, 0.0875]],
+      [[82200, 0.0335], [198700, 0.066], [302850, 0.076], [null, 0.0875]],
+      [[66000, 0.0335], [170450, 0.066], [276050, 0.076], [null, 0.0875]],
+      [[41100, 0.0335], [99350, 0.066], [151425, 0.076], [null, 0.0875]],
     ),
-    deduction: { kind: "standard", amount: by(7400, 14850, 11100, 7400, 14850) },
-    exemption: { kind: "deduction", amount: 5100, count: ONE, dependentAmount: 5100, phaseOut: null },
+    deduction: { kind: "standard", amount: by(7600, 15250, 11400, 7600, 15250) },
+    exemption: { kind: "deduction", amount: 5250, count: ONE, dependentAmount: 5250, phaseOut: null },
     entity: entity("BI-471", 250, null),
-    note: "IN-111, 2025 (verify the indexed brackets, standard deduction and $5,100 exemption). S corporation minimum $250. PTE election not seeded (verify Vermont's 2025 rules and add the rate here if it applies).",
+    note: "IN-111, 2025: the 2024 schedule indexed by about 2.8% — VERIFY every threshold, the standard deduction and the exemption against the 2025 rate schedule (the 2024 figures are on the 2024 card). S corporation minimum $250. PTE election not seeded (verify Vermont's 2025 rules and add the rate here if it applies).",
   }),
 
   WI: card("Wisconsin", {
     form: "1",
     brackets: brackets(
-      [[14680, 0.035], [29370, 0.044], [323290, 0.053], [null, 0.0765]],
-      [[19580, 0.035], [39150, 0.044], [431060, 0.053], [null, 0.0765]],
-      [[14680, 0.035], [29370, 0.044], [323290, 0.053], [null, 0.0765]],
-      [[9790, 0.035], [19580, 0.044], [215530, 0.053], [null, 0.0765]],
+      [[14680, 0.035], [50480, 0.044], [323290, 0.053], [null, 0.0765]],
+      [[19580, 0.035], [67300, 0.044], [431060, 0.053], [null, 0.0765]],
+      [[14680, 0.035], [50480, 0.044], [323290, 0.053], [null, 0.0765]],
+      [[9790, 0.035], [33650, 0.044], [215530, 0.053], [null, 0.0765]],
     ),
     deduction: { kind: "standard", amount: by(13930, 25890, 17990, 12300, 25890) },
     exemption: { kind: "deduction", amount: 700, count: ONE, dependentAmount: 700, phaseOut: null },
     entity: entity("5S", 0, pte(0.0765, "exclusion")),
-    note: "Form 1, 2025 (verify the indexed brackets). NOT MODELED: the sliding standard deduction — seeded at its maximum, but it shrinks with income and is gone by about $138,000 single, so most returns will refuse on Wisconsin tax; type the deduction's actual amount for a client, or the before. $700 exemptions. Electing S corporations pay 7.65% and the shareholder excludes the income.",
+    note: "Form 1, 2025: the 2025–27 budget (Act 15) widened the 4.4% bracket to $50,480 single / $67,300 joint from 2025 (verify the other indexed edges). NOT MODELED: the sliding standard deduction — seeded at its maximum, but it shrinks with income and is gone by about $138,000 single, so most returns will refuse on Wisconsin tax; type the deduction's actual amount for a client, or the before. $700 exemptions. Electing S corporations pay 7.65% and the shareholder excludes the income.",
   }),
 
   WV: card("West Virginia", {

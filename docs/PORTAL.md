@@ -249,15 +249,19 @@ the tab is the tax team.
   dependent exemption and, for S corporations, the entity's own rate, a
   flat or receipts-tiered minimum, the elective tax's brackets and how the
   owner gets it back (nonrefundable credit, refundable credit, or
-  exclusion). Every state is seeded for 2025
-  (`src/lib/tax-recap/seeds-2025-states.ts`): California and New Jersey
-  are proven on client returns; the rest carry their published figures,
-  `proven: false`, and a note on what to verify and what the model can't
-  express there (a "proven on a real return" switch on the page records
-  it once a client has gone through). Unproven is safe because the engine
-  refuses a card that doesn't reproduce the return's own tax. A
-  stored card that predates a field takes the seed's value for it
-  (`sanitizeYearCard(raw, seedFor(year))`).
+  exclusion). Every state is seeded for 2023, 2024, 2025 and 2026
+  (`src/lib/tax-recap/seeds-2025-states.ts` plus the per-year overrides in
+  `seeds-state-years.ts`; federal cards for all four years in tables.ts):
+  2025's California and New Jersey are proven on client returns; the rest
+  carry their published figures, `proven: false`, and a note on what to
+  verify and what the model can't express there (a "proven on a real
+  return" switch on the page records it once a client has gone through).
+  A state whose figures for a year weren't at hand — every indexed state
+  for 2026 — is carried from 2025 with a "CARRIED FROM 2025" note.
+  Unproven or carried is safe because the engine refuses a card that
+  doesn't reproduce the return's own tax. A stored card that predates a
+  field takes the seed's value for it (`sanitizeYearCard(raw,
+  seedFor(year))`).
 - **Store.** `taxRecaps` in Firestore via `src/lib/tax-recap/store.ts`: the
   reviewed numbers, strategies, next steps, and the raw extraction as an audit
   trail. **Never the PDFs** — they hold SSNs and bank details. `savings` is
@@ -274,8 +278,12 @@ the tab is the tax team.
   as the page's hero (the lock gives way to the before/after/savings tiles)
   and the rest of the recap mounts below it in the home page's language:
   full-bleed sections, a decrypting heading each (`SectionHeading`), frosted
-  panels. Letting go early winds it back. Nothing is remembered, so every
-  fresh load is sealed again (the footer's "replay" is just a reload).
+  panels. Letting go early winds it back. It has a sound (`reveal-sound.ts`,
+  synthesised — a charge that climbs with the hold, a latch, the burst): on
+  by default with a mouse, off on touch devices, and the speaker toggle in
+  the hero remembers a choice in `localStorage` (`dcy-recap-sound`). Nothing
+  else is remembered, so every fresh load is sealed again (the footer's
+  "replay" is just a reload).
   `?open` renders it all open — use it from the portal to check numbers. The
   handout is the PDF route; browser print of the scroll page isn't supported
   (below-the-fold sections reveal on scroll).
