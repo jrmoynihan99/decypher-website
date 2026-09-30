@@ -105,8 +105,13 @@ export const EVENT_TYPES = {
    * Deliberately outside the income-band routing: a partner's VIP has already
    * paid for the full consultation, so banding them would demote someone under
    * $50k to the short ☎️ call. Being unbanded is the point, not an oversight.
+   *
+   * Keyed `referral`, not `affiliate`: these keys ARE the pipeline's CallType
+   * (see CALL_TYPES in lib/sales/options.ts). Under `affiliate` the webhook filed
+   * rows with a type the portal doesn't know and never flagged them as referrals.
+   * The page-facing name is BOOKABLE_BY_KEY's, below.
    */
-  affiliate: `${API}/event_types/58960ea7-46ed-467c-adca-2be5059234e3`,
+  referral: `${API}/event_types/58960ea7-46ed-467c-adca-2be5059234e3`,
 };
 
 /**
@@ -117,7 +122,7 @@ export const EVENT_TYPES = {
  * only names in here resolve.
  */
 const BOOKABLE_BY_KEY: Record<string, string> = {
-  affiliate: EVENT_TYPES.affiliate,
+  affiliate: EVENT_TYPES.referral,
 };
 
 /** The event type for an allowlisted key, or null if it isn't one. */
