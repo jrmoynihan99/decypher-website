@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   CalendlyError,
+  callTypeForEventType,
   createBooking,
   eventTypeForBand,
   eventTypeForKey,
   getAvailableTimes,
   getEventType,
 } from "@/lib/calendly";
+import { upsertFromCalendly } from "@/lib/sales/store";
 
 /**
  * The booking flow's server side. Everything Calendly happens here — the API
@@ -132,6 +134,18 @@ export async function POST(req: NextRequest) {
       textReminderNumber,
     });
 
+    await recordInPipeline({
+      inviteeId: booking.inviteeId,
+      eventTypeUri: uri,
+      callName: eventType.name,
+      name,
+      email,
+      timezone,
+      startTime,
+      phone: textReminderNumber,
+      answers: Array.isArray(answers) ? answers : [],
+    });
+
     return NextResponse.json({
       booking,
       eventType: { name: eventType.name, duration: eventType.duration },
@@ -139,6 +153,66 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return errorResponse(e, "Couldn't complete your booking.");
   }
+}
+
+/**
+ * Files the booking in the sales pipeline with the phone number the form
+ * collected, without waiting for the webhook.
+ *
+ * The webhook alone can't carry the phone: the affiliate event type has no
+ * phone question, and Calendly drops the text_reminder_number we send it (see
+ * createBooking). This request is the only place that number exists, so it is
+ * written here or lost. The webhook still arrives and refreshes everything else;
+ * upsertFromCalendly won't let its missing phone erase this one.
+ *
+ * Never fails the request — the booking is already on the calendar, and telling
+ * the visitor otherwise would have them book twice.
+ */
+async function recordInPipeline(b: {
+  inviteeId: string;
+  eventTypeUri: string;
+  callName: string;
+  name: string;
+  email: string;
+  timezone: string;
+  startTime: string;
+  phone: string | undefined;
+  answers: { question: string; answer: string; position: number }[];
+}) {
+  const callType = callTypeForEventType(b.eventTypeUri);
+  if (!callType) return;
+
+  try {
+    await upsertFromCalendly({
+      inviteeId: b.inviteeId,
+      callType,
+      callName: b.callName,
+      name: b.name,
+      email: b.email,
+      timezone: b.timezone,
+      textReminderNumber: formatPhone(b.phone),
+      bookedAt: new Date().toISOString(),
+      scheduledAt: b.startTime,
+      status: "active",
+      rescheduled: false,
+      answers: b.answers,
+    });
+  } catch (e) {
+    console.error(
+      `[booking] booked but not recorded in pipeline — ${b.email} ${b.phone ?? ""}:`,
+      e,
+    );
+  }
+}
+
+/**
+ * "+15551234567" → "+1 555-123-4567", Calendly's own display format, so these
+ * rows read the same as ones whose phone came from a Calendly question.
+ */
+function formatPhone(raw: string | undefined): string | null {
+  const d = (raw ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  if (d.length !== 10) return null;
+  return `+1 ${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
 /**
