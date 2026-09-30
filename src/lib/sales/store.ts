@@ -336,7 +336,6 @@ export async function upsertFromCalendly(booking: CalendlyBooking): Promise<"cre
   if (!isConfigured()) throw new SalesStoreError("Firebase is not configured");
 
   const doc = adminDb().collection(CALLS).doc(booking.inviteeId);
-  const existing = await doc.get();
 
   const leadSourceRaw = leadSourceAnswer(booking.answers);
   const payload: Record<string, unknown> = {
@@ -362,19 +361,32 @@ export async function upsertFromCalendly(booking: CalendlyBooking): Promise<"cre
     syncedAt: new Date(),
   };
 
-  if (!existing.exists) {
-    await doc.set({
-      ...BLANK_EDITS,
-      isSales: true,
-      isReferral: booking.callType === "referral",
-      ...payload,
-      createdAt: new Date(),
-    });
-    return "created";
-  }
+  // A transaction because two writers race on a fresh booking: /api/booking
+  // records it the moment Calendly confirms, and the webhook lands seconds
+  // later. Without one, both can see "no document" and the second full set()
+  // throws away whatever the first knew — the phone, in practice.
+  return adminDb().runTransaction(async (tx) => {
+    const existing = await tx.get(doc);
 
-  await doc.set(payload, { merge: true });
-  return "updated";
+    if (!existing.exists) {
+      tx.set(doc, {
+        ...BLANK_EDITS,
+        isSales: true,
+        isReferral: booking.callType === "referral",
+        ...payload,
+        createdAt: new Date(),
+      });
+      return "created" as const;
+    }
+
+    // A phone is learned, never unlearned. Our booking form collects one that
+    // Calendly doesn't keep (the affiliate event has no phone question and
+    // drops text_reminder_number), so every later sync reads back null for it.
+    if (payload.phone === null) delete payload.phone;
+
+    tx.set(doc, payload, { merge: true });
+    return "updated" as const;
+  });
 }
 
 /* ─────────────────────────── manual rows ─────────────────────────── */

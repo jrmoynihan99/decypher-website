@@ -150,6 +150,9 @@ do {
       const ref = firestore.collection("salesCalls").doc(id);
       const existing = await ref.get();
       if (existing.exists) {
+        // Same rule as upsertFromCalendly: never erase a phone /api/booking
+        // recorded that Calendly itself didn't keep.
+        if (payload.phone === null) delete payload.phone;
         await ref.set(payload, { merge: true });
         updated += 1;
       } else {

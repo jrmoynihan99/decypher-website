@@ -47,6 +47,8 @@ export interface Slot {
 }
 
 export interface BookingResult {
+  /** Invitee UUID — the same id the sales pipeline keys its rows on. */
+  inviteeId: string;
   eventUri: string;
   startTime: string;
   cancelUrl: string;
@@ -70,6 +72,7 @@ interface SlotResource {
 }
 
 interface InviteeResource {
+  uri: string;
   event: string;
   cancel_url: string;
   reschedule_url: string;
@@ -458,9 +461,11 @@ export interface CreateBookingInput {
  * validation error path suggests) and its `kind` must match the kind configured
  * on the event type or Calendly rejects with invalid_location_choice.
  *
- * `textReminderNumber` is passed on a read-shape hunch — invitees expose the
- * field, but it wasn't confirmed to persist on write. If SMS reminders matter,
- * verify it lands before relying on it.
+ * `textReminderNumber` does NOT persist: sent top-level like this, Calendly
+ * ignores it (every affiliate booking reads back null). Their docs put it under
+ * `invitee`, and only for event types with SMS reminders configured — untested
+ * here, and a rejected field would fail the booking. The pipeline no longer
+ * depends on it: /api/booking records the phone itself.
  */
 export async function createBooking(
   input: CreateBookingInput,
@@ -486,6 +491,7 @@ export async function createBooking(
     },
   );
   return {
+    inviteeId: resource.uri.split("?")[0].split("/").pop()!,
     eventUri: resource.event,
     startTime: input.startTime,
     cancelUrl: resource.cancel_url,
