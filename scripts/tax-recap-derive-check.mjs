@@ -57,6 +57,7 @@ const PAIRINGS = [
       taxableIncome: 107070,
       incomeTax: 18544,
       seTax: 22743,
+      otherTaxes: 22743,
       federalTotalTax: 41287,
       federalPayments: 9600,
       federalAmountOwed: 31687,
@@ -105,6 +106,7 @@ const PAIRINGS = [
       taxableIncome: 78876,
       incomeTax: 12267,
       seTax: 17385,
+      otherTaxes: 17385,
       federalTotalTax: 29652,
       federalPayments: 1600,
       federalAmountOwed: 28052,
@@ -172,6 +174,7 @@ const PAIRINGS = [
       taxableIncome: 38054,
       incomeTax: 4331,
       seTax: 9871,
+      otherTaxes: 9871,
       additionalTaxes: 948,
       federalTotalTax: 15150,
       federalPayments: 0,
@@ -324,11 +327,241 @@ const PAIRINGS = [
     savings: 160426,
     scorpSavings: 36587,
   },
+
+  /* ── Singh & Saini / YouTwoTV LLC 2025, married filing jointly, CA 540 + CA 568 ──
+     A two-member LLC taxed as a partnership, both spouses partners at 50%.
+     AFTER: "Harjit Singh & Jasleen Saini - 2025 1040 INDIVIDUAL TAX RETURN(Final
+     output)" + "YouTwoTV LLC - 2025 1065 PARTNERSHIP TAX RETURN(final output)".
+     BEFORE: "singh_harjit_jasleen(ZERO WRITEOFFS)" + "1065_youtwotv(ZERO WRITEOFFS)".
+     The 1065 deducts $20,494 of interest and $57,631 of other expenses, plus
+     $8,290 of guaranteed payments that are the partners' health premiums
+     (K-1 box 13 code M), deducted again on the 1040 as self-employed health
+     insurance. Each spouse has their own Schedule SE and Form 7206. The 1040
+     also carries two Schedule Cs that net to $0 — 1099 income issued under
+     the owners' SSNs and picked up on the 1065 — which the engine leaves out.
+     California: the return itemizes on the 540 ($21,973: the property tax
+     and mortgage interest without the federal cap, less the state income
+     tax) while taking the federal standard deduction; the LLC owes the $800
+     annual tax and no fee ($241,298 of total income is under $250,000).
+     The CPA's before print zeroes the guaranteed payments too, so the before
+     has no health insurance deduction (the Canva recap for this client kept
+     it and reads $59,481 before; the prints give $70,037).                */
+  {
+    name: "Singh & Saini 2025 (married filing jointly, CA 540, two-member LLC on CA 568)",
+    meta: { taxYear: 2025, filingStatus: "Married filing jointly", stateCode: "CA", stateForm: "540", entityForm: "1065" },
+    after: numbers({
+      partnershipIncome: 163173,
+      totalIncome: 163203,
+      agi: 143385,
+      qbiDeduction: 22377,
+      taxableIncome: 89508,
+      incomeTax: 10266,
+      seTax: 23056,
+      otherTaxes: 23056,
+      federalTotalTax: 33322,
+      federalAmountOwed: 33322,
+      // the two pass-through Schedule Cs: 5,095 + 9,856 of receipts, the same in other expenses
+      grossReceipts: 14951,
+      totalExpenses: 14951,
+      businessNetIncome: 0,
+      sehiDeduction: 8290,
+      sehiPaid: 8290,
+      itemizedDeductions: 23598,
+      saltPaid: 9421,
+      saltDeducted: 9421,
+      medicalExpenses: 0,
+      stateTotalTax: 4175,
+      stateAmountOwed: 4175,
+      stateTotalDue: 4175,
+      stateTaxOnIncome: 4481,
+      stateExemptionCredits: 306,
+      stateDeduction: 21973,
+    }),
+    entity: entityNumbers({
+      grossReceipts: 241298,
+      totalIncome: 241298,
+      guaranteedPayments: 8290,
+      otherDeductions: 57631,
+      totalDeductions: 86415,
+      ordinaryIncome: 154883,
+      k1Ordinary: 77441,
+      k1Guaranteed: 4145,
+      ownershipPct: 50,
+      k1Ordinary2: 77442,
+      k1Guaranteed2: 4145,
+      ownershipPct2: 50,
+      distributions: 95222,
+      stateGrossIncome: 241298,
+      stateTax: 800,
+      stateTotalTax: 800,
+      statePayments: 800,
+      stateAmountDue: 0,
+    }),
+    before: numbers({
+      partnershipIncome: 241298,
+      totalIncome: 241328,
+      agi: 224280,
+      qbiDeduction: 38556,
+      taxableIncome: 154224,
+      incomeTax: 23757,
+      seTax: 34094,
+      otherTaxes: 34094,
+      federalTotalTax: 57851,
+      federalPayments: 0,
+      federalAmountOwed: 57851,
+      businessNetIncome: null,
+      sehiDeduction: null,
+      sehiPaid: null,
+      itemizedDeductions: 23598,
+      saltPaid: 9421,
+      saltDeducted: 9421,
+      medicalExpenses: 0,
+      stateTotalTax: 11386,
+      stateAmountOwed: 11386,
+      stateTotalDue: 11386,
+      stateTaxOnIncome: 11692,
+      stateExemptionCredits: 306,
+      stateDeduction: 21973,
+    }),
+    entityBefore: entityNumbers({
+      grossReceipts: 241298,
+      totalIncome: 241298,
+      guaranteedPayments: null,
+      totalDeductions: 0,
+      ordinaryIncome: 241298,
+      k1Ordinary: 120649,
+      k1Guaranteed: null,
+      ownershipPct: 50,
+      k1Ordinary2: 120649,
+      k1Guaranteed2: null,
+      ownershipPct2: 50,
+      distributions: 95222,
+      stateGrossIncome: 241298,
+      stateTax: 800,
+      stateTotalTax: 800,
+      statePayments: 800,
+      stateAmountDue: 0,
+    }),
+    // before 57,851 + 11,386 + 800 = 70,037; after 33,322 + 4,175 + 800 = 38,297
+    savings: 31740,
+  },
 ];
 
 /* ── Returns the engine must refuse, and the word its reason has to carry ── */
 const inha = PAIRINGS[0];
+const singh = PAIRINGS[4];
 const REFUSALS = [
+  {
+    name: "a partner's return without the 1065",
+    meta: singh.meta,
+    after: singh.after,
+    expect: /add the partnership's 1065/,
+  },
+  {
+    // New York's card is seeded with no partnership rules, so the LLC's own
+    // tax can't be figured there.
+    name: "a partnership in a state with no partnership rules (NY)",
+    meta: { ...singh.meta, stateCode: "NY", stateForm: "IT-201" },
+    after: singh.after,
+    entity: singh.entity,
+    expect: /no partnership rules/,
+  },
+  {
+    // The reader put the Schedule E total on the S corporation line; the
+    // entity's form says it's a partnership, so the engine moves it over.
+    name: "partnership income read as S corporation income (reconciled by the 1065, derives)",
+    meta: singh.meta,
+    after: { ...singh.after, scorpIncome: singh.after.partnershipIncome, partnershipIncome: null },
+    entity: singh.entity,
+    expect: null,
+  },
+  {
+    // A fast read's two misreads on Inha (2026-10-01): Form 8995's QBI put
+    // on the 8995-A line, and the estimated payments put on line 31 with
+    // line 32 blank. Both are set aside; the before must not move.
+    name: "Inha with Form 8995's QBI and the estimated payments misread (derives, unchanged)",
+    meta: inha.meta,
+    after: { ...inha.after, qbiIncome: 72396, otherPayments: 9600 },
+    expect: null,
+    federal: 41287,
+  },
+  {
+    // A fast read of Chiu (2026-10-01): "state adjustments" worked out from
+    // the nonresident column (−36,602, printed nowhere), the standard
+    // deduction read as itemized, AGI read as 8995-A QBI. All three set
+    // aside; the before must not move.
+    name: "Chiu with three misreads (derives, unchanged)",
+    meta: { ...PAIRINGS[1].meta, unverified: ["stateAdjustments"] },
+    after: { ...PAIRINGS[1].after, stateAdjustments: -36602, itemizedDeductions: 15750, qbiIncome: 51782 },
+    expect: null,
+    federal: 29652,
+    state: 848,
+  },
+  {
+    // Sonnet 5.5 at low effort (2026-10-01): the 540NR's line 31 (tax on
+    // all income, 1,301) read for line 37 (the California share, 381).
+    // Either proves the card.
+    name: "Chiu with line 31's tax on all income read for line 37 (derives, unchanged)",
+    meta: PAIRINGS[1].meta,
+    after: { ...PAIRINGS[1].after, stateTaxOnIncome: 1301 },
+    expect: null,
+    federal: 29652,
+    state: 848,
+  },
+  {
+    // A tax on income that is neither line still refuses.
+    name: "Chiu with a state tax on income that's neither line (refuses)",
+    meta: PAIRINGS[1].meta,
+    after: { ...PAIRINGS[1].after, stateTaxOnIncome: 900 },
+    expect: /tax on income/,
+  },
+  {
+    // The same bad state line, but found on the page: not set aside, refused.
+    name: "Chiu with a bad state adjustment the page does carry (refuses)",
+    meta: PAIRINGS[1].meta,
+    after: { ...PAIRINGS[1].after, stateAdjustments: -36602 },
+    expect: /California/,
+  },
+  {
+    // A fast read of Singh (2026-10-01): one partner's Schedule E row read
+    // as S corporation income, the other's as partnership income.
+    name: "partnership rows split across the S corporation and partnership lines (derives, unchanged)",
+    meta: singh.meta,
+    after: { ...singh.after, scorpIncome: 81586, partnershipIncome: 81587 },
+    entity: singh.entity,
+    expect: null,
+    federal: 57851,
+  },
+  {
+    // The next fast read of Singh: Schedule E's total (line 41) put on the
+    // rental line as well. Set aside; no rental note on the recap.
+    name: "the K-1 income repeated on the rental line (derives, unchanged, no rental note)",
+    meta: singh.meta,
+    after: { ...singh.after, rentalIncome: 163173 },
+    entity: singh.entity,
+    expect: null,
+    federal: 57851,
+    state: 11386,
+    noNote: /Rental losses/,
+  },
+  {
+    // A second K-1 the 1065 doesn't account for still refuses.
+    name: "a partner's return with income beyond the 1065's K-1s (refuses)",
+    meta: singh.meta,
+    after: { ...singh.after, scorpIncome: 20000 },
+    entity: singh.entity,
+    expect: /doesn't match the K-1s/,
+  },
+  {
+    // Schedule E page 2 never reached the reader (the page filter once
+    // dropped it): the refusal must name the K-1 line, not ask for the
+    // Schedule C a partner's return doesn't have.
+    name: "a partner's return with the K-1 income unread",
+    meta: singh.meta,
+    after: { ...singh.after, partnershipIncome: null },
+    entity: singh.entity,
+    expect: /weren't read from the after return: Partnership income/,
+  },
   {
     name: "a state form the card doesn't list",
     meta: { ...inha.meta, stateForm: "540X" },
@@ -381,13 +614,16 @@ const REFUSALS = [
     expect: /Income tax .* reads \$4,800/,
   },
   {
-    name: "before income over the QBI threshold",
+    // With wages on the Schedule C the W-2 limit is a real figure the engine
+    // doesn't have; with none (see Weinstein above) the limit is zero and it derives.
+    name: "before income over the QBI threshold, with wages on the Schedule C",
     meta: inha.meta,
     after: {
       ...inha.after,
       grossReceipts: 300000,
       totalExpenses: 201880,
       homeOffice: 20220,
+      schCWages: 24000,
     },
     expect: /over the 2025 single threshold/,
   },
@@ -416,7 +652,7 @@ for (const p of PAIRINGS) {
     );
   }
   if (p.entityBefore) {
-    console.log("  1120-S before:");
+    console.log(`  ${p.meta.entityForm ?? "1120-S"} before:`);
     for (const key of Object.keys(p.entityBefore)) {
       const want = p.entityBefore[key];
       const got = r.entityBefore?.[key] ?? null;
@@ -471,6 +707,234 @@ for (const p of PAIRINGS) {
   const ok = r.ok && r.before.agi === 139588 && r.derived.notes.some((s) => /carried over unchanged/.test(s));
   if (!ok) failed++;
   console.log(`  ${ok ? "ok" : "WRONG"}  $10,000 SEP carried: before AGI ${r.ok ? money(r.before.agi) : "refused: " + r.reasons.join(" | ")}`);
+}
+
+/* ── Weinstein 2024: W-2 plus a Schedule C written down to $0, CA 540 ──────
+   AFTER only ("2024 Tax Return Alexander Weinstein", a 52-page ProSeries
+   print whose Schedule C and FTB pages carry a garbled text layer). No
+   before print exists; the figures below are the engine's, checked by hand:
+   Schedule SE with no Social Security portion (W-2 wages over the 2024 wage
+   base) and Medicare on the profit, the 0.9% additional Medicare tax over
+   $200,000, the qualified dividends at 15% by the worksheet, the QBI
+   deduction capped at zero over the threshold (no wages, no depreciation),
+   NIIT on the dividends, line 31's extension payment and excess Social
+   Security kept as payments, and the HSA add-back carried on the
+   California side with the exemption credit phased down on FEDERAL AGI
+   (Form 540 line 13: $281,070 is 15 steps of $2,500 over $244,857, so
+   $90 off the $149 credit).                                             */
+{
+  console.log("\nWeinstein 2024 (single, W-2 + Schedule C at $0, CA 540)");
+  const meta = { taxYear: 2024, filingStatus: "Single", stateCode: "CA", stateForm: "540" };
+  const after = numbers({
+    w2Income: 185261,
+    qualifiedDividends: 1317,
+    businessNetIncome: 0,
+    totalIncome: 187328,
+    agi: 187328,
+    qbiDeduction: 0,
+    qbiLossCarryforward: 21039,
+    taxableIncome: 172728,
+    incomeTax: 34379,
+    otherTaxes: 0,
+    federalTotalTax: 34379,
+    federalPayments: 37727,
+    federalWithholding: 28612,
+    federalRefundableCredits: 9115,
+    otherPayments: 9115,
+    federalRefund: 0,
+    federalPenalty: 61,
+    grossReceipts: 95015,
+    cogs: 19763,
+    totalExpenses: 60172,
+    homeOffice: 15080,
+    stateTotalTax: 13686,
+    statePayments: 12675,
+    stateWithholding: 11675,
+    stateAmountOwed: 1011,
+    statePenalty: 36,
+    stateTotalDue: 1047,
+    stateTaxOnIncome: 13835,
+    stateExemptionCredits: 149,
+    stateAdjustments: 4150,
+  });
+  const want = {
+    businessNetIncome: 95015,
+    totalIncome: 282343,
+    agi: 281070,
+    qbiDeduction: null,
+    taxableIncome: 266470,
+    incomeTax: 63376,
+    seTax: 2545,
+    otherTaxes: 3281,
+    niit: 79,
+    federalTotalTax: 66657,
+    federalPayments: 37727,
+    federalRefundableCredits: 9115,
+    otherPayments: 9115,
+    federalAmountOwed: 28991,
+    grossReceipts: 95015,
+    cogs: null,
+    totalExpenses: null,
+    homeOffice: null,
+    stateAdjustments: 4150,
+    stateTaxOnIncome: 22553,
+    stateExemptionCredits: 59,
+    stateTotalTax: 22494,
+    stateAmountOwed: 9819,
+    stateTotalDue: 9855,
+  };
+  const r = deriveBefore(after, meta);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    console.log("  " + "line".padEnd(26) + "derived".padStart(10) + "by hand".padStart(11));
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(10) + money(w).padStart(11) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    // before 66,657 + 22,494 + 97 of penalties = 89,248; after 34,379 + 13,686 + 97 = 48,162
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null }).savings;
+    const ok = savings === 41086;
+    if (!ok) failed++;
+    console.log(`  savings ${money(savings)} vs by hand $41,086 ${ok ? "ok" : "MISMATCH"}`);
+    console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
+    const analysis = attributeStrategies(after, meta);
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    const sumOk = sum === savings;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"}):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
+  }
+
+  // The same return as the extraction saw it before this fix — no Schedule
+  // C lines at all — has to refuse on those lines, not on anything else.
+  const blind = { ...after, grossReceipts: null, cogs: null, totalExpenses: null, homeOffice: null, businessNetIncome: null };
+  const rb = deriveBefore(blind, meta);
+  const blindOk = !rb.ok && rb.reasons.length === 1 && /weren't read from the after return: Gross receipts, Business net income$/.test(rb.reasons[0]);
+  if (!blindOk) failed++;
+  console.log(`  ${blindOk ? "ok" : "WRONG"}  without the Schedule C: ${rb.ok ? "derived" : rb.reasons.join(" | ")}`);
+}
+
+/* ── Carpenter 2025: married filing jointly, Texas (no state return), a Schedule C,
+   four rental properties and real estate professional status ─────────────────
+   AFTER only ("Alyssa & Jackson Carpenter - 2025 1040 INDIVIDUAL TAX RETURN(real
+   estate client)"). No before print exists; the figures below are the engine's,
+   checked by hand. The W-2 ($129,731) is the spouse's, so the Schedule C filer's
+   whole Social Security wage base is used (the printed SE tax, $32,877, only
+   reproduces that way). The four rentals lose $79,519 this year and are
+   nonpassive under REPS; $9,847 of earlier passive losses stay suspended. The
+   return itemizes ($45,683: $19,963 of taxes, $25,720 of mortgage interest)
+   and treats the rentals as QBI (Form 8995 lists them). The before — Schedule C
+   write-offs at zero, REPS off — has: SE tax on $491,948 with the full wage
+   base (35,011), 3,006 of additional Medicare tax, modified AGI far over
+   $150,000 so no rental loss allowed, the SALT cap phased down to $11,207 at
+   $595,978 of AGI (itemized total 36,927, still over the standard deduction),
+   taxable income before QBI over the phase-in range so no QBI deduction (the
+   Schedule C pays no wages; its $313 of depreciation is noted), the child
+   tax credit phased out entirely, $8 of NIIT on the $213 of dividends and
+   gains, and 134,731 of tax by the worksheet ($156 preferential).            */
+{
+  console.log("\nCarpenter 2025 (married filing jointly, no state, Schedule C + rentals under REPS)");
+  const meta = { taxYear: 2025, filingStatus: "Married filing jointly", stateCode: null, stateForm: null };
+  const after = numbers({
+    w2Income: 129731,
+    qualifiedDividends: 137,
+    capitalGain: 46,
+    capitalGainLongTerm: 19,
+    businessNetIncome: 412259,
+    rentalIncome: -79519,
+    rentalLosses: 79519,
+    passivePriorUnallowed: 9847,
+    rentalReps: -79519,
+    totalIncome: 462684,
+    agi: 437837,
+    dependentCount: 2,
+    qbiDeduction: 62079,
+    sepDeduction: 3000,
+    itemizedDeductions: 45683,
+    saltPaid: 19963,
+    saltDeducted: 19963,
+    medicalExpenses: 0,
+    taxableIncome: 330075,
+    incomeTax: 64898,
+    seTax: 32877,
+    otherTaxes: 35221,
+    childTaxCredit: 2500,
+    childCareCredit: 1200,
+    nonrefundableCredits: 1200,
+    federalTotalTax: 96419,
+    federalPayments: 95156,
+    federalWithholding: 19656,
+    federalAmountOwed: 1263,
+    grossReceipts: 491948,
+    totalExpenses: 70821,
+    homeOffice: 8868,
+    schCDepreciation: 313,
+    sehiDeduction: 2908,
+    sehiPaid: 2908,
+  });
+  const want = {
+    w2Income: 129731,
+    businessNetIncome: 491948,
+    rentalIncome: 0,
+    rentalReps: null,
+    totalIncome: 621892,
+    agi: 595978,
+    qbiDeduction: null,
+    sepDeduction: 3000,
+    itemizedDeductions: 36927,
+    saltDeducted: 11207,
+    taxableIncome: 559051,
+    incomeTax: 134731,
+    seTax: 35011,
+    otherTaxes: 38025,
+    childTaxCredit: null,
+    childCareCredit: 1200,
+    niit: 8,
+    federalTotalTax: 171556,
+    federalPayments: 95156,
+    federalAmountOwed: 76400,
+    sehiDeduction: 2908,
+  };
+  const r = deriveBefore(after, meta);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    console.log("  " + "line".padEnd(26) + "derived".padStart(10) + "by hand".padStart(11));
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(10) + money(w).padStart(11) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    // before 171,556; after 96,419
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null }).savings;
+    const ok = savings === 75137;
+    if (!ok) failed++;
+    console.log(`  savings ${money(savings)} vs by hand $75,137 ${ok ? "ok" : "MISMATCH"}`);
+    console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
+    const analysis = attributeStrategies(after, meta);
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    const sumOk = sum === savings;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"}):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}  ${a.note}`);
+    // The question the return was sent in with: what the year would have
+    // cost without real estate professional status, everything else as
+    // filed. By hand: rentals suspended, AGI 517,356, itemized 45,683 (the
+    // SALT cap is still 34,793 there), QBI phased down to 17,879 inside the
+    // range, tax 99,313 on 453,794, no child tax credit, $8 of NIIT:
+    // 98,113 + 32,877 + 2,344 + 8 = 133,342.
+    const reps = analysis?.attribution.find((a) => /real estate professional/i.test(a.label));
+    const withoutReps = reps ? 96419 + reps.savings : null;
+    const repsOk = withoutReps === 133342;
+    if (!repsOk) failed++;
+    console.log(`  without REPS the federal total would be ${money(withoutReps)} vs by hand $133,342 ${repsOk ? "ok" : "MISMATCH"}`);
+  }
 }
 
 /* ── The S corporation cards on their own: the corporation's tax and elective tax ──
@@ -551,12 +1015,20 @@ for (const p of PAIRINGS) {
 
 console.log("\nRefusals");
 for (const c of REFUSALS) {
-  const r = deriveBefore(c.after, c.meta);
-  const ok = !r.ok && r.reasons.some((s) => c.expect.test(s));
+  const r = deriveBefore(c.after, c.meta, undefined, c.entity ?? null);
+  // `expect: null` is the opposite case: a return that has to derive.
+  const ok =
+    c.expect === null
+      ? r.ok &&
+        (c.federal === undefined || r.before.federalTotalTax === c.federal) &&
+        (c.state === undefined || r.before.stateTotalTax === c.state) &&
+        (c.noNote === undefined || !r.derived.notes.some((s) => c.noNote.test(s)))
+      : !r.ok && r.reasons.some((s) => c.expect.test(s));
   if (!ok) failed++;
   console.log(`  ${ok ? "ok" : "WRONG"}  ${c.name}`);
   if (!r.ok) for (const s of r.reasons) console.log(`         → ${s}`);
-  else console.log("         → derived when it should have refused");
+  else if (c.expect !== null) console.log("         → derived when it should have refused");
+  else console.log(`         → derived; federal before ${money(r.before.federalTotalTax)}`);
 }
 
 console.log(failed ? `\n${failed} problem(s)` : "\nAll good");

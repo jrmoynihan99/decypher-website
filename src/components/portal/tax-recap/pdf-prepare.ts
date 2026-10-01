@@ -1,5 +1,7 @@
 import {
+  detectEntityForm,
   detectReturnKind,
+  isGarbledText,
   selectPages,
   selectionSummary,
   type PageSelection,
@@ -44,6 +46,14 @@ import {
  * cross-check is scrubbed with the same tokens. A scanned print has no text
  * to find any of this in, so it goes as it is and the builder says so.
  *
+ * A garbled page (pages.ts `isGarbledText`: the labels' font has a broken
+ * character map, the values' font doesn't) gets a third pass, because its
+ * business-name box can't be found by its label and no wording on it can be
+ * trusted: every word set in a data font — the fonts the SSN and the
+ * client's name were found in anywhere in the print — is painted out. The
+ * labels are in the broken font and stay, the numbers stay, and nothing
+ * alphabetic leaves the browser.
+ *
  * Nothing here is allowed to fail the read. Every error path falls back to
  * sending the original file whole, because a return that costs more to read
  * beats a return that can't be read.
@@ -66,6 +76,8 @@ export type PreparedPdf = {
   fallback: PageSelection["fallback"] | "slice-failed";
   /** Which return this is, from its own pages; null when it couldn't be told. */
   kind: ReturnKind | null;
+  /** Original page numbers of the sent pages whose text layer is garbled (every word on them painted out). */
+  garbledPages: number[];
   /** What the redaction found and did. */
   identity: {
     /** The client's name as printed on the 1040, read locally; never sent. */
@@ -75,13 +87,15 @@ export type PreparedPdf = {
     /** True when the outgoing pages had identity fields painted over. */
     redacted: boolean;
     boxes: number;
+    /** True when a data font was identified, so garbled pages could have their words painted out. */
+    dataFontFound: boolean;
   };
   /** A small JPEG data URL of the first outgoing page, so staff can see what leaves. */
   preview: string | null;
 };
 
-/** One text run with its box in PDF user space (origin bottom-left, points). */
-type Run = { str: string; x: number; y: number; w: number; h: number };
+/** One text run with its box in PDF user space (origin bottom-left, points) and the font it is set in. */
+type Run = { str: string; x: number; y: number; w: number; h: number; font: string };
 type PageInfo = { text: string; runs: Run[]; width: number; height: number };
 
 /**
@@ -95,10 +109,18 @@ export type PdfAnalysis = {
   pages: PageInfo[] | null;
   texts: string[];
   kind: ReturnKind | null;
+  /** For an entity return: which federal form it is, when its pages say. */
+  entityForm: "1120-S" | "1065" | null;
   name: string | null;
   entityName: string | null;
   tokens: string[];
   bands: Map<number, Box[]>;
+  /** Per page: whether its text layer is garbled (pages.ts `isGarbledText`). */
+  garbled: boolean[];
+  /** The fonts the identity was printed in anywhere in the print — ProSeries' data fonts. */
+  valueFonts: string[];
+  /** Per page: how many filled-in amounts it carries in those fonts (identity numbers don't count). */
+  valueCounts: number[];
 };
 
 /** Render scale: a letter page at 1.8 is ~1100×1430px, which the model reads well. */
@@ -133,7 +155,7 @@ async function readPages(bytes: ArrayBuffer): Promise<PageInfo[] | null> {
         if (!("str" in item) || !item.str.trim()) continue;
         const t = item.transform;
         const h = Math.hypot(t[2], t[3]) || item.height || 8;
-        runs.push({ str: item.str, x: t[4], y: t[5], w: item.width, h });
+        runs.push({ str: item.str, x: t[4], y: t[5], w: item.width, h, font: item.fontName });
       }
       pages.push({
         text: runs.map((r) => r.str).join(" "),
@@ -218,20 +240,24 @@ function entityHeaderBand(page: PageInfo): { band: Box; values: Run[] } | null {
 }
 
 /**
- * Schedule K-1 (1120-S): the corporation's block under item B and the
- * shareholder's under F1. Values are printed on the lines below each label.
+ * Schedule K-1: the entity's block under item B and the owner's under F —
+ * the corporation's and shareholder's on an 1120-S K-1, the partnership's
+ * and partner's on a 1065 K-1. Values are printed on the lines below each
+ * label. `entity` marks the entity's block, whose top row is its name.
  */
-function k1Bands(page: PageInfo): { band: Box; values: Run[] }[] {
-  const out: { band: Box; values: Run[] }[] = [];
-  const labels = [
-    page.runs.find((r) => starts(r, "Corporation’s name, address") || starts(r, "Corporation's name, address")),
-    page.runs.find((r) => starts(r, "Shareholder’s name, address") || starts(r, "Shareholder's name, address")),
+function k1Bands(page: PageInfo): { band: Box; values: Run[]; entity: boolean }[] {
+  const out: { band: Box; values: Run[]; entity: boolean }[] = [];
+  const labels: [Run | undefined, boolean][] = [
+    [page.runs.find((r) => starts(r, "Corporation’s name, address") || starts(r, "Corporation's name, address")), true],
+    [page.runs.find((r) => starts(r, "Partnership’s name, address") || starts(r, "Partnership's name, address")), true],
+    [page.runs.find((r) => starts(r, "Shareholder’s name, address") || starts(r, "Shareholder's name, address")), false],
+    [page.runs.find((r) => starts(r, "Name, address, city, state, and ZIP code for partner")), false],
   ];
-  for (const label of labels) {
+  for (const [label, entity] of labels) {
     if (!label) continue;
     const band: Box = { x: label.x - 6, y: label.y - label.h * 5.4, w: Math.max(label.w * 1.6, 220), h: label.h * 5.2 };
     const values = page.runs.filter((r) => inBox(r, band) && !isLabel(r.str));
-    out.push({ band, values });
+    out.push({ band, values, entity });
   }
   return out;
 }
@@ -277,21 +303,53 @@ function matchesPattern(s: string): boolean {
   return PATTERNS.some((re) => re.test(s));
 }
 
+/** The SSN and EIN patterns alone: what marks a run's font as a data font. */
+const IDENTITY_NUMBERS = PATTERNS.slice(0, 2);
+
+/**
+ * A filled-in amount: digits with at most commas, a period and parentheses,
+ * four digits or more. Three digits or fewer is the FTB's form code ("175")
+ * or a line number; an SSN, EIN, phone or bank number is identity, not an
+ * amount, and is excluded by the patterns.
+ */
+function isAmount(s: string): boolean {
+  const t = s.trim();
+  return /^\(?-?\$?\d[\d,]*\.?\)?$/.test(t) && t.replace(/\D/g, "").length >= 4 && !matchesPattern(t);
+}
+
 function matchesToken(s: string, tokens: string[]): boolean {
   if (!tokens.length) return false;
   const words = s.toUpperCase().split(/[^A-Z0-9']+/).map((w) => w.replace(/'/g, ""));
   return words.some((w) => w.length >= 4 && tokens.includes(w));
 }
 
-/** Everything to paint on one page, given the tokens learned from the whole document. */
-function boxesFor(page: PageInfo, tokens: string[], bands: Box[]): Box[] {
+/**
+ * Everything to paint on one page, and the page text to send for the
+ * cross-check with the same things taken out. On an ordinary page that is
+ * the identity bands plus any run matching a pattern or a token. On a
+ * garbled page every word set in a data font goes too: the labels are in
+ * the broken font and can't be read, so nothing alphabetic on the page can
+ * be told safe, while the numbers — all the model needs — stay.
+ */
+function redactPage(
+  page: PageInfo,
+  tokens: string[],
+  bands: Box[],
+  garbled: boolean,
+  valueFonts: Set<string>,
+): { boxes: Box[]; text: string } {
   const boxes: Box[] = [...bands];
+  const kept: string[] = [];
   for (const r of page.runs) {
-    if (matchesPattern(r.str) || matchesToken(r.str, tokens)) {
+    const identity = matchesPattern(r.str) || matchesToken(r.str, tokens);
+    const word = garbled && valueFonts.has(r.font) && /[A-Za-z].*[A-Za-z]/.test(r.str);
+    if (identity || word) {
       boxes.push({ x: r.x - 2, y: r.y - r.h * 0.3, w: r.w + 4, h: r.h * 1.4 });
+    } else {
+      kept.push(r.str);
     }
   }
-  return boxes;
+  return { boxes, text: scrubText(garbled ? kept.join(" ") : page.text, tokens) };
 }
 
 function scrubText(text: string, tokens: string[]): string {
@@ -449,13 +507,53 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
     for (const k1 of k1Bands(page)) {
       addBand(i + 1, k1.band);
       for (const t of tokensOf(k1.values)) tokens.add(t);
+      // A 1065's page 1 often has an unreadable text layer, so the entity's
+      // name is taken off its K-1 when the header band couldn't give it.
+      if (k1.entity && entityName === null && k1.values.length) {
+        const rowY = Math.max(...k1.values.map((v) => v.y));
+        const row = k1.values
+          .filter((v) => Math.abs(v.y - rowY) < 3 && /[A-Z]/.test(v.str))
+          .sort((a, b) => a.x - b.x)
+          .map((v) => v.str.trim());
+        if (row.length) entityName = row.join(" ");
+      }
     }
   }
+  const entityForm = kind === "entity" ? detectEntityForm(texts) : null;
   // The 540's header prints the first four letters of the surname as a code.
   const last = name?.split(" ").pop();
   if (last && last.length >= 4) tokens.add(last.slice(0, 4).toUpperCase());
 
-  return { file, bytes, pages, texts, kind, name, entityName, tokens: [...tokens], bands };
+  // The fonts the SSN or the client's name are set in, anywhere in the
+  // print, are the data fonts: what ProSeries prints every filled-in value
+  // with. On a garbled page that is what tells a value from a label.
+  const tokenList = [...tokens];
+  const valueFonts = new Set<string>();
+  for (const page of pages ?? []) {
+    for (const r of page.runs) {
+      if (IDENTITY_NUMBERS.some((re) => re.test(r.str)) || matchesToken(r.str, tokenList)) valueFonts.add(r.font);
+    }
+  }
+  const garbled = texts.map(isGarbledText);
+  const valueCounts = (pages ?? []).map((page) =>
+    page.runs.reduce((count, r) => count + (valueFonts.has(r.font) && isAmount(r.str) ? 1 : 0), 0),
+  );
+
+  return {
+    file,
+    bytes,
+    pages,
+    texts,
+    kind,
+    entityForm,
+    name,
+    entityName,
+    tokens: tokenList,
+    bands,
+    garbled,
+    valueFonts: [...valueFonts],
+    valueCounts,
+  };
 }
 
 /**
@@ -471,7 +569,8 @@ export async function preparePdf(
   const a = input instanceof File ? await analyzePdf(input) : input;
   const file = a.file;
   const kind = opts.kind ?? a.kind;
-  const noIdentity = { name: a.name, entityName: a.entityName, redacted: false, boxes: 0 };
+  const dataFontFound = a.valueFonts.length > 0;
+  const noIdentity = { name: a.name, entityName: a.entityName, redacted: false, boxes: 0, dataFontFound };
   const whole = (fallback: PreparedPdf["fallback"], pageTexts: string[]): PreparedPdf => ({
     data: file,
     pageTexts,
@@ -483,6 +582,7 @@ export async function preparePdf(
     trimmed: null,
     fallback,
     kind,
+    garbledPages: [],
     identity: noIdentity,
     preview: null,
   });
@@ -490,17 +590,22 @@ export async function preparePdf(
   if (!a.pages) return whole("no-text-layer", []);
   const texts = a.texts;
 
-  const selection = selectPages(texts, kind ?? "individual");
+  // The amount counts only mean something once a data font is known; with
+  // none, every garbled page is sent.
+  const selection = selectPages(texts, kind ?? "individual", a.valueFonts.length ? a.valueCounts : null);
   if (selection.fallback) return whole(selection.fallback, texts);
 
   const tokenList = [...new Set([...a.tokens, ...(opts.extraTokens ?? [])])];
+  const valueFonts = new Set(a.valueFonts);
 
   const boxesByPage = new Map<number, Box[]>();
+  const textByPage = new Map<number, string>();
   let boxes = 0;
   for (const p of selection.pages) {
-    const list = boxesFor(a.pages[p - 1], tokenList, a.bands.get(p) ?? []);
-    boxesByPage.set(p, list);
-    boxes += list.length;
+    const r = redactPage(a.pages[p - 1], tokenList, a.bands.get(p) ?? [], a.garbled[p - 1], valueFonts);
+    boxesByPage.set(p, r.boxes);
+    textByPage.set(p, r.text);
+    boxes += r.boxes.length;
   }
 
   const rendered = await renderRedacted(a.bytes, selection.pages, boxesByPage);
@@ -512,16 +617,17 @@ export async function preparePdf(
     originalBytes: file.size,
     trimmed: { pctPagesDropped: Math.round((1 - summary.kept / summary.total) * 100) },
     kind,
+    garbledPages: selection.pages.filter((p) => a.garbled[p - 1]),
   };
 
   if (rendered) {
     return {
       ...base,
       data: rendered.data,
-      pageTexts: selection.pages.map((p) => scrubText(texts[p - 1] ?? "", tokenList)),
+      pageTexts: selection.pages.map((p) => textByPage.get(p) ?? ""),
       sentBytes: rendered.data.size,
       fallback: null,
-      identity: { name: a.name, entityName: a.entityName, redacted: true, boxes },
+      identity: { name: a.name, entityName: a.entityName, redacted: true, boxes, dataFontFound },
       preview: rendered.preview,
     };
   }
@@ -536,7 +642,7 @@ export async function preparePdf(
     pageTexts: selection.pages.map((p) => texts[p - 1] ?? ""),
     sentBytes: data.size,
     fallback: null,
-    identity: { name: a.name, entityName: a.entityName, redacted: false, boxes: 0 },
+    identity: { name: a.name, entityName: a.entityName, redacted: false, boxes: 0, dataFontFound },
     preview: null,
   };
 }

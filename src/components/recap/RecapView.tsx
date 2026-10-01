@@ -10,7 +10,7 @@ import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { useSpotlight } from "@/hooks/useSpotlight";
 import { prefersReducedMotion } from "@/lib/decrypt";
-import { computeRecap, type RecapSide } from "@/lib/tax-recap/compute";
+import { computeRecap, type EntityKind, type RecapSide } from "@/lib/tax-recap/compute";
 import type { RecapDoc } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
 
@@ -58,14 +58,14 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
             <Panel>
               <Eyebrow>Before DeCypher</Eyebrow>
               <PanelTitle sub="No write-offs, no strategies">Income only</PanelTitle>
-              <Ledger side={c.before} stateLabel={stateLabel} scorp={c.scorp} totalTone="neg" totalLabel="Total taxes owed" />
+              <Ledger side={c.before} stateLabel={stateLabel} entityKind={c.entityKind} totalTone="neg" totalLabel="Total taxes owed" />
             </Panel>
           </Reveal>
           <Reveal delay={0.12}>
             <Panel className="border-teal/30">
               <Eyebrow>After DeCypher</Eyebrow>
               <PanelTitle sub={c.scorp ? "Your final returns" : "Your final return"}>Bookkeeping + strategies</PanelTitle>
-              <Ledger side={c.after} stateLabel={stateLabel} scorp={c.scorp} totalTone="pos" totalLabel="New total taxes owed" />
+              <Ledger side={c.after} stateLabel={stateLabel} entityKind={c.entityKind} totalTone="pos" totalLabel="New total taxes owed" />
               <div className="mt-3 flex items-baseline justify-between gap-4 border-t border-white/10 pt-3 text-[13px]">
                 <span className="text-muted">Before DeCypher</span>
                 <span className="font-mono tabular-nums text-danger">{money(c.before.totalTaxes)}</span>
@@ -98,7 +98,7 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
           ) : null}
           <Reveal delay={0.15} className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-4 ${scorpSavings > 0 ? "mt-4" : "mt-12"}`}>
             <StatTile label="Deductions found" value={signed(c.breakdown.deductionsFound)} />
-            {c.scorp ? (
+            {c.entityKind === "scorp" ? (
               <StatTile label="S-corp state tax & PTET saved" value={signed(c.breakdown.entitySaved)} />
             ) : (
               <StatTile label="Self-employment tax saved" value={signed(c.breakdown.seTaxSaved)} />
@@ -159,7 +159,7 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
             <div className="space-y-2">
               <FilingRow label="Federal" line={c.filing.federal} />
               <FilingRow label={stateLabel} line={c.filing.state} />
-              {c.filing.entity ? <FilingRow label="S-corp (PTET)" line={c.filing.entity} /> : null}
+              {c.filing.entity ? <FilingRow label={c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"} line={c.filing.entity} /> : null}
             </div>
             <div className="mt-4 flex items-center justify-between gap-4 border-t-2 border-white/15 pt-4">
               <span className="font-display text-[15px] font-semibold text-mist">Total</span>
@@ -460,13 +460,13 @@ function Row({
 function Ledger({
   side,
   stateLabel,
-  scorp,
+  entityKind,
   totalTone,
   totalLabel,
 }: {
   side: RecapSide;
   stateLabel: string;
-  scorp: boolean;
+  entityKind: EntityKind;
   totalTone: "neg" | "pos";
   totalLabel: string;
 }) {
@@ -474,13 +474,14 @@ function Ledger({
   return (
     <div className="mt-5">
       <Row label="W-2 income" value={dash(side.w2Income)} />
-      <Row label={scorp ? "Business net income (K-1)" : "Business net income"} value={money(side.businessNetIncome)} tone="brand" />
+      <Row label={entityKind ? "Business net income (K-1)" : "Business net income"} value={money(side.businessNetIncome)} tone="brand" />
       <Row label="Other income (loss)" value={dash(side.otherIncome)} />
       <Row label="Gross income" value={money(side.grossIncome)} total />
       <div className="mt-4">
         <Row label="Federal taxes" value={money(side.federalTaxes)} />
         <Row label={`${stateLabel} taxes`} value={dash(side.stateTaxes)} />
-        {scorp ? <Row label={`${stateLabel} S-corp tax & PTET`} value={dash(side.entityTaxes)} /> : null}
+        {entityKind === "scorp" ? <Row label={`${stateLabel} S-corp tax & PTET`} value={dash(side.entityTaxes)} /> : null}
+        {entityKind === "partnership" ? <Row label={`${stateLabel} LLC tax & fee`} value={dash(side.entityTaxes)} /> : null}
         <Row label="Penalties" value={dash(side.penalties)} />
         <Row label={totalLabel} value={money(side.totalTaxes)} total tone={totalTone} />
       </div>

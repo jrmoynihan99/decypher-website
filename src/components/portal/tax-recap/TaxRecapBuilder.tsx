@@ -39,6 +39,7 @@ import {
   type DerivedBefore,
   type EntityExtract,
   type EntityFieldGroup,
+  type EntityForm,
   type EntityFieldKey,
   type EntityNumbers,
   type FieldGroup,
@@ -137,11 +138,15 @@ type Picked = {
   status: "checking" | "ready" | "unreadable";
 };
 
-const metaOf = (extract: ReturnExtract): DeriveMeta => ({
+const metaOf = (extract: ReturnExtract, entityForm: EntityForm | null = null): DeriveMeta => ({
   taxYear: extract.taxYear,
   filingStatus: extract.filingStatus,
   stateCode: extract.stateCode,
   stateForm: extract.stateForm,
+  entityForm,
+  // Lines the page-text cross-check couldn't find: the engine may set them
+  // aside when the after return only reproduces without them.
+  unverified: RETURN_FIELD_KEYS.filter((k) => extract.fields[k]?.verified === false),
 });
 
 const toRaw = (n: ReturnNumbers): RawNumbers =>
@@ -188,8 +193,8 @@ const GROUPS: { id: FieldGroup; title: string }[] = [
 const ENTITY_GROUPS: { id: EntityFieldGroup; title: string }[] = [
   { id: "income", title: "Income" },
   { id: "deductions", title: "Deductions" },
-  { id: "shareholder", title: "Shareholder (K-1)" },
-  { id: "state", title: "State (the corporation's return)" },
+  { id: "shareholder", title: "Owner (K-1)" },
+  { id: "state", title: "State (the entity's return)" },
 ];
 
 const btn =
@@ -218,9 +223,9 @@ const PER_REQUEST = 4;
 const FILE_MAX = 6 * 1024 * 1024;
 const FILE_MAX_LABEL = "6 MB";
 
-const kindLabel = (k: ReturnKind | null) =>
+const kindLabel = (k: ReturnKind | null, form: EntityForm | null = null) =>
   k === "entity"
-    ? "Form 1120-S"
+    ? `Form ${form ?? "1120-S / 1065"}`
     : k === "individual"
       ? "Form 1040"
       : "Not recognised";
@@ -420,7 +425,7 @@ export default function TaxRecapBuilder({
       },
     }));
 
-    const what = kind === "entity" ? "the 1120-S" : "the return";
+    const what = kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : "the return";
     const readingMsg = prepared.trimmed
       ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
       : prepared.fallback === "no-text-layer"
@@ -484,6 +489,16 @@ export default function TaxRecapBuilder({
       throw new Error(data.message ?? `Couldn't read ${what}`);
     }
     const warnings = [...(data.warnings ?? [])];
+    if (prepared.garbledPages.length) {
+      const g = prepared.garbledPages;
+      warnings.push(
+        `${g.length} page${g.length > 1 ? "s" : ""} (${g.join(", ")}) had an unreadable text layer — a ProSeries font quirk; the pages render fine — and ${
+          prepared.identity.redacted && prepared.identity.dataFontFound
+            ? "went with every word in the data font painted out, numbers only; the printed labels are untouched"
+            : "went as printed, since no data font could be told apart to paint the words out of"
+        }`,
+      );
+    }
     if (!prepared.identity.redacted) {
       warnings.push(
         prepared.fallback === "no-text-layer"
@@ -524,7 +539,7 @@ export default function TaxRecapBuilder({
     }
     if (entities.length > 1) {
       setPickError(
-        "Two S corporation returns were dropped — keep the one for this client's business.",
+        "Two entity returns (1120-S or 1065) were dropped — keep the one for this client's business.",
       );
       return null;
     }
@@ -535,7 +550,7 @@ export default function TaxRecapBuilder({
     if (!after) {
       setPickError(
         entities.length
-          ? "Only the 1120-S was dropped — add the shareholder's final 1040; the recap is built from both."
+          ? "Only the entity's return was dropped — add the owner's final 1040; the recap is built from both."
           : "None of these files looks like a ProSeries return.",
       );
       return null;
@@ -675,6 +690,7 @@ export default function TaxRecapBuilder({
 
     const aNum = numbersFromExtract(a);
     let eNum: EntityNumbers | null = ent ? numbersFromEntityExtract(ent) : null;
+    const entityForm = ent?.returnForm ?? sorted.entity?.analysis?.entityForm ?? null;
     if (
       eNum &&
       eNum.pteTax === null &&
@@ -689,7 +705,7 @@ export default function TaxRecapBuilder({
           ...s.entity,
           warnings: [
             ...s.entity.warnings,
-            `PTE elective tax (${money(aNum.statePteCreditAvailable ?? 0)}) taken from the 1040's FTB 3804-CR — the 100S print doesn't carry it on line 29`,
+            `PTE elective tax (${money(aNum.statePteCreditAvailable ?? 0)}) taken from the 1040's FTB 3804-CR — the state print doesn't carry it on its own line`,
           ],
         },
       }));
@@ -705,14 +721,14 @@ export default function TaxRecapBuilder({
       // A before print for the 1040 only; the corporation's before column
       // is typed, if it's wanted, from its own zero-write-off print.
       setEntityDerived(null);
-      setAnalysis(attributeStrategies(aNum, metaOf(a), tables, eNum));
+      setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm), tables, eNum));
       setStage("review");
       return;
     }
 
     // No before PDF: derive it. A refusal keeps the reads and stays here
     // with the reasons and the two ways through.
-    const result = deriveBefore(aNum, metaOf(a), tables, eNum);
+    const result = deriveBefore(aNum, metaOf(a, entityForm), tables, eNum);
     if (!result.ok) {
       setSides((s) => ({
         ...s,
@@ -740,7 +756,7 @@ export default function TaxRecapBuilder({
       before: toRawEntity(result.entityBefore),
     }));
     setEntityDerived(result.entityBefore);
-    setAnalysis(attributeStrategies(aNum, metaOf(a), tables, eNum));
+    setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm), tables, eNum));
     setStage("review");
   };
 
@@ -779,7 +795,7 @@ export default function TaxRecapBuilder({
     const a = sides.after.extract;
     if (!a) return;
     const meta: DeriveMeta = {
-      ...metaOf(a),
+      ...metaOf(a, sides.entity.entity?.returnForm ?? null),
       taxYear: /^\d{4}$/.test(taxYear.trim()) ? Number(taxYear) : a.taxYear,
       stateCode: stateCode.trim() || a.stateCode,
     };
@@ -874,6 +890,18 @@ export default function TaxRecapBuilder({
   );
   const hasEntity =
     !!sides.entity.entity || !!parsed.entityAfter || !!parsed.entityBefore;
+  // Which entity return this is, for the labels: what the reader said, the
+  // dropped file's own pages, or the numbers (guaranteed payments mean a
+  // partnership).
+  const entityForm: EntityForm | null =
+    sides.entity.entity?.returnForm ??
+    picked.find((p) => p.analysis?.kind === "entity")?.analysis?.entityForm ??
+    (hasEntity && (parsed.entityAfter?.guaranteedPayments ?? parsed.entityBefore?.guaranteedPayments ?? 0) > 0
+      ? "1065"
+      : hasEntity
+        ? "1120-S"
+        : null);
+  const formLabel = entityForm ?? "1120-S";
   const scorpSavings = analysis?.scorpSavings?.amount ?? 0;
 
   const setCell = (
@@ -998,6 +1026,23 @@ export default function TaxRecapBuilder({
   const refusal =
     stage === "upload" && sides.before.status === "error"
       ? sides.before.problems
+      : [];
+  // What the reader said about the after return and how much of it was
+  // sent: the two things that tell a return with no Schedule C from a
+  // Schedule C the model never saw.
+  const refusalContext =
+    stage === "upload" && sides.before.status === "error"
+      ? [
+          ...(sides.after.pages
+            ? [
+                sides.after.sentPages && sides.after.sentPages < sides.after.pages
+                  ? `Read ${sides.after.sentPages} of the return's ${sides.after.pages} pages`
+                  : `Read all ${sides.after.pages} pages of the return`,
+              ]
+            : []),
+          ...sides.after.warnings.map((w) => `After return: ${w}`),
+          ...sides.entity.warnings.map((w) => `${formLabel}: ${w}`),
+        ]
       : [];
   const canSave =
     clientName.trim().length > 0 && /^\d{4}$/.test(taxYear.trim()) && !saving;
@@ -1124,7 +1169,7 @@ export default function TaxRecapBuilder({
                     </button>
                     <span className="max-w-md text-[12px] leading-snug text-dusk">
                       {deriving
-                        ? "The return is read by Claude — the 1120-S too, for an S corporation — the before column is computed from it with every write-off at zero, the savings are split by strategy, and you check every number before anything is saved."
+                        ? "The return is read by Claude — the 1120-S or 1065 too, for an S corporation or a partnership — the before column is computed from it with every write-off at zero, the savings are split by strategy, and you check every number before anything is saved."
                         : "The before print is read by Claude instead of computing the before column. Nothing is stored until you save."}
                     </span>
                   </>
@@ -1154,6 +1199,16 @@ export default function TaxRecapBuilder({
                     </li>
                   ))}
                 </ul>
+                {refusalContext.length ? (
+                  <ul className="mt-2 space-y-1 text-[12px] leading-snug text-dusk">
+                    {refusalContext.map((w, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="flex-none">·</span>
+                        <span>{w}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
@@ -1210,7 +1265,7 @@ export default function TaxRecapBuilder({
                   ).length;
                   return (
                     <Chip key={k} tone={unverified ? "warn" : "pos"}>
-                      1120-S read: {n} lines
+                      {formLabel} read: {n} lines
                       {s.pages
                         ? s.sentPages && s.sentPages < s.pages
                           ? ` from ${s.sentPages} of ${s.pages} pages`
@@ -1334,7 +1389,9 @@ export default function TaxRecapBuilder({
               <span className="text-fog">Before</span> is computed from it with
               the write-offs at zero
               {hasEntity
-                ? " — every deduction on the 1120-S, the owner's pay and the PTE election included"
+                ? entityForm === "1065"
+                  ? " — every deduction on the 1065, the partners' guaranteed payments included"
+                  : " — every deduction on the 1120-S, the owner's pay and the PTE election included"
                 : ""}
               . Fix anything that&rsquo;s wrong and the recap below updates.
             </p>
@@ -1387,7 +1444,7 @@ export default function TaxRecapBuilder({
               <>
                 <div className="grid grid-cols-2 items-end gap-3 border-b border-t-2 border-edge border-t-white/10 bg-white/[0.02] px-4 py-2.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
                   <Mono className="col-span-2 font-bold text-magenta sm:col-span-1">
-                    S corporation · Form 1120-S
+                    {entityForm === "1065" ? "Partnership · Form 1065" : "S corporation · Form 1120-S"}
                   </Mono>
                   <Mono className="text-dusk">Before · computed</Mono>
                   <Mono className="text-dusk">After · the return</Mono>
@@ -1424,7 +1481,7 @@ export default function TaxRecapBuilder({
                                 }
                                 derived={!!derivedFrom}
                                 onChange={(v) => setEntityCell(k, f.key, v)}
-                                label={`${f.label} (1120-S, ${k})`}
+                                label={`${f.label} (${formLabel}, ${k})`}
                                 prefix={f.key === "ownershipPct" ? "%" : "$"}
                               />
                             );
@@ -1486,14 +1543,14 @@ export default function TaxRecapBuilder({
                 ))}
                 {sides.entity.warnings.map((w, i) => (
                   <li key={`e${i}`} className="flex gap-2">
-                    <Mono className="mt-0.5 flex-none text-ember">1120-S</Mono>
+                    <Mono className="mt-0.5 flex-none text-ember">{formLabel}</Mono>
                     <span>{w}</span>
                   </li>
                 ))}
                 {warnings.map((w, i) => (
                   <li key={`v${i}`} className="flex gap-2">
                     <Mono className="mt-0.5 flex-none text-ember">
-                      {w.side === "entity" ? "1120-S" : w.side}
+                      {w.side === "entity" ? formLabel : w.side}
                     </Mono>
                     <span>{w.message}</span>
                   </li>
@@ -1554,7 +1611,7 @@ export default function TaxRecapBuilder({
                     value={money(computed.breakdown.deductionsFound)}
                     size="sm"
                   />
-                  {computed.scorp ? (
+                  {computed.entityKind === "scorp" ? (
                     <LineRow
                       label="S-corp state tax & PTET saved"
                       value={money(computed.breakdown.entitySaved)}
@@ -1608,7 +1665,7 @@ export default function TaxRecapBuilder({
                   />
                   {computed.filing.entity ? (
                     <LineRow
-                      label={`S-corp (PTET): ${money(computed.filing.entity.owed)} owed − ${money(computed.filing.entity.paid)} paid`}
+                      label={`${computed.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"}: ${money(computed.filing.entity.owed)} owed − ${money(computed.filing.entity.paid)} paid`}
                       value={dueLabel(computed.filing.entity.due)}
                       size="sm"
                       tone={computed.filing.entity.due > 0 ? "neg" : "pos"}
@@ -2091,7 +2148,7 @@ function HeroDrop({
                   className="mt-1.5 min-h-[20px] text-[13.5px] text-teal"
                 >
                   {sides[k].status === "done"
-                    ? `${k === "entity" ? "1120-S" : "1040"} read ✓`
+                    ? `${k === "entity" ? (picked.find((p) => p.analysis?.kind === "entity")?.analysis?.entityForm ?? "1120-S / 1065") : "1040"} read ✓`
                     : sides[k].message}
                 </div>
               ) : null,
@@ -2160,7 +2217,7 @@ function HeroDrop({
                               p.analysis?.kind ? "text-mist" : "text-ember"
                             }
                           >
-                            {kindLabel(p.analysis?.kind ?? null)}
+                            {kindLabel(p.analysis?.kind ?? null, p.analysis?.entityForm ?? null)}
                           </span>
                           {p.analysis?.texts.length
                             ? ` · ${p.analysis.texts.length} pages`
@@ -2219,7 +2276,7 @@ function HeroDrop({
                 className={btnGhost}
               >
                 {hasIndividual && !hasEntity
-                  ? "+ Add the 1120-S (S corporation)"
+                  ? "+ Add the 1120-S or 1065"
                   : hasEntity && !hasIndividual
                     ? "+ Add the 1040"
                     : "+ Add a file"}
@@ -2227,7 +2284,7 @@ function HeroDrop({
             ) : null}
             <span className="text-[12px] text-dusk">
               {hasIndividual && !hasEntity
-                ? "A sole proprietor needs only the 1040. For an S corporation, drop the 1120-S too."
+                ? "A sole proprietor needs only the 1040. For an S corporation or a partnership, drop its 1120-S or 1065 too."
                 : hasIndividual && hasEntity
                   ? "Both returns are here — the recap is built from the two together."
                   : ""}
@@ -2257,8 +2314,8 @@ function HeroDrop({
             Drop the client&rsquo;s return here
           </div>
           <div className="mt-1.5 text-[13.5px] text-muted">
-            The final 1040 exported from ProSeries — and the 1120-S with it when
-            the business is an S corporation
+            The final 1040 exported from ProSeries — and the 1120-S or 1065 with
+            it when the business is an S corporation or a partnership
           </div>
           <span className={`${btnPrimary} mt-6 !px-7 !py-3 !text-[15px]`}>
             Choose from computer

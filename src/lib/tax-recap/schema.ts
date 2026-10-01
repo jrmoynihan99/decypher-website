@@ -37,11 +37,74 @@ export const RETURN_FIELDS = [
   {
     key: "scorpIncome",
     label: "S corporation income (K-1)",
-    source: "Schedule E page 2 line 32 (= Schedule 1 line 5)",
+    source: "Schedule E page 2, the S corporation rows (= Schedule 1 line 5 when that is all of it)",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "partnershipIncome",
+    label: "Partnership income (K-1)",
+    source: "Schedule E page 2, the partnership rows: nonpassive income from Schedule K-1 (Form 1065) — ordinary income plus guaranteed payments",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "rentalIncome",
+    label: "Rental real estate income or (loss)",
+    source: "Schedule E line 26, as deducted after Form 8582",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "rentalProfits",
+    label: "Rental properties with a profit",
+    source: "Schedule E line 21: the properties with a profit, added up",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "rentalLosses",
+    label: "Rental properties with a loss (this year)",
+    source: "Schedule E line 21: the properties with a loss, added up, as a positive number — before any limitation",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "passivePriorUnallowed",
+    label: "Prior years' unallowed passive losses",
+    source: "Form 8582 line 1c plus line 2c, as a positive number",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "rentalReps",
+    label: "Real estate professional rentals (Sch E line 43)",
+    source: "Schedule E line 43: the net income or (loss) from the rentals a real estate professional materially participated in",
     group: "income",
     optional: true,
   },
   { key: "totalIncome", label: "Total income", source: "Form 1040 line 9", group: "income" },
+  {
+    key: "qualifiedDividends",
+    label: "Qualified dividends",
+    source: "Form 1040 line 3a",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "capitalGain",
+    label: "Capital gain or (loss)",
+    source: "Form 1040 line 7",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "capitalGainLongTerm",
+    label: "Net long-term capital gain",
+    source: "Schedule D line 15, when the return has a Schedule D (line 7 is taken whole as long-term without one)",
+    group: "income",
+    optional: true,
+  },
   { key: "agi", label: "Adjusted gross income", source: "Form 1040 line 11a", group: "income" },
   {
     key: "dependentCount",
@@ -72,6 +135,48 @@ export const RETURN_FIELDS = [
     group: "federal",
     optional: true,
   },
+  {
+    key: "qbiLossCarryforward",
+    label: "QBI loss carryforward (prior year)",
+    source: "Form 8995 line 3, as a positive number",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "sepDeduction",
+    label: "SEP, SIMPLE and qualified plans",
+    source: "Schedule 1 line 16",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "itemizedDeductions",
+    label: "Itemized deductions (Schedule A)",
+    source: "Schedule A line 17, when the return has a Schedule A",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "saltPaid",
+    label: "State and local taxes paid (Sch A)",
+    source: "Schedule A line 5d, before the cap",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "saltDeducted",
+    label: "State and local taxes deducted (Sch A)",
+    source: "Schedule A line 5e, after the cap",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "medicalExpenses",
+    label: "Medical and dental expenses (Sch A)",
+    source: "Schedule A line 1, before the 7.5% floor",
+    group: "federal",
+    optional: true,
+  },
   { key: "taxableIncome", label: "Taxable income", source: "Form 1040 line 15", group: "federal" },
   { key: "incomeTax", label: "Income tax", source: "Form 1040 line 16", group: "federal" },
   {
@@ -79,6 +184,13 @@ export const RETURN_FIELDS = [
     label: "Self-employment tax",
     source: "Schedule 2 line 4 (= Schedule SE line 12)",
     group: "federal",
+  },
+  {
+    key: "otherTaxes",
+    label: "Other taxes (line 23)",
+    source: "Form 1040 line 23 (= Schedule 2 line 21): SE tax and the other Schedule 2 taxes",
+    group: "federal",
+    optional: true,
   },
   {
     key: "federalTotalTax",
@@ -101,9 +213,16 @@ export const RETURN_FIELDS = [
   },
   {
     key: "federalRefundableCredits",
-    label: "Refundable credits",
-    source: "Form 1040 line 32 (net PTC, ACTC, EIC…)",
+    label: "Refundable credits + other payments (line 32)",
+    source: "Form 1040 line 32 (net PTC, ACTC, EIC… plus line 31)",
     group: "federal",
+  },
+  {
+    key: "otherPayments",
+    label: "Other payments (line 31)",
+    source: "Form 1040 line 31 (= Schedule 3 line 15): paid with an extension, excess Social Security withheld",
+    group: "federal",
+    optional: true,
   },
   { key: "federalRefund", label: "Federal refund", source: "Form 1040 line 35a", group: "federal" },
   {
@@ -151,6 +270,27 @@ export const RETURN_FIELDS = [
   { key: "totalExpenses", label: "Total expenses", source: "Schedule C line 28", group: "business" },
   { key: "homeOffice", label: "Home office", source: "Schedule C line 30", group: "business" },
   {
+    key: "cogs",
+    label: "Cost of goods sold (Sch C)",
+    source: "Schedule C line 4 (= line 42)",
+    group: "business",
+    optional: true,
+  },
+  {
+    key: "schCWages",
+    label: "Wages paid (Sch C)",
+    source: "Schedule C line 26",
+    group: "business",
+    optional: true,
+  },
+  {
+    key: "schCDepreciation",
+    label: "Depreciation (Sch C)",
+    source: "Schedule C line 13",
+    group: "business",
+    optional: true,
+  },
+  {
     key: "stateTotalTax",
     label: "State total tax",
     source: "State return total tax after credits (CA 540NR line 74)",
@@ -192,6 +332,20 @@ export const RETURN_FIELDS = [
     key: "stateSourceIncome",
     label: "State-source income",
     source: "Nonresident returns only: Schedule CA (540NR) line 10, column E",
+    group: "state",
+    optional: true,
+  },
+  {
+    key: "stateAdjustments",
+    label: "State adjustments to federal AGI",
+    source: "Additions less subtractions: CA 540 line 16 − line 14 (Schedule CA line 27, column C − column B)",
+    group: "state",
+    optional: true,
+  },
+  {
+    key: "stateDeduction",
+    label: "State deduction taken",
+    source: "The state's standard or itemized deduction as taken (CA 540 line 18 = Schedule CA (540) Part II line 30)",
     group: "state",
     optional: true,
   },
@@ -381,36 +535,55 @@ export type EntityField = {
 };
 
 /**
- * The entity return (Form 1120-S and the state's S corporation return),
- * read when the client's business is an S corporation. The 1040 carries
- * the K-1 income; this return carries what the K-1 was computed from — the
- * gross receipts and each deduction the before print zeros — and the
- * entity-level state tax the recap reports on its own row.
+ * The entity return — Form 1120-S or Form 1065 with the state's own return
+ * for it — read when the client's business is an S corporation or a
+ * partnership. The 1040 carries the K-1 income; this return carries what
+ * the K-1 was computed from — the gross receipts and each deduction the
+ * before print zeros — and the entity-level state tax the recap reports on
+ * its own row. The same field list serves both forms; the 1065 lines are
+ * named where they differ.
  */
 export const ENTITY_FIELDS = [
-  { key: "grossReceipts", label: "Gross receipts", source: "Form 1120-S line 1a", group: "income" },
-  { key: "cogs", label: "Cost of goods sold", source: "Form 1120-S line 2", group: "income", optional: true },
-  { key: "totalIncome", label: "Total income", source: "Form 1120-S line 6", group: "income" },
+  { key: "grossReceipts", label: "Gross receipts", source: "Form 1120-S line 1a / Form 1065 line 1a", group: "income" },
+  { key: "cogs", label: "Cost of goods sold", source: "Form 1120-S line 2 / Form 1065 line 2", group: "income", optional: true },
+  { key: "totalIncome", label: "Total income", source: "Form 1120-S line 6 / Form 1065 line 8", group: "income" },
   { key: "officerComp", label: "Compensation of officers", source: "Form 1120-S line 7", group: "deductions", optional: true },
-  { key: "wages", label: "Salaries and wages", source: "Form 1120-S line 8", group: "deductions", optional: true },
-  { key: "taxesLicenses", label: "Taxes and licenses", source: "Form 1120-S line 12", group: "deductions", optional: true },
-  { key: "pension", label: "Pension, profit-sharing plans", source: "Form 1120-S line 17", group: "deductions", optional: true },
-  { key: "employeeBenefits", label: "Employee benefit programs", source: "Form 1120-S line 18", group: "deductions", optional: true },
-  { key: "otherDeductions", label: "Other deductions", source: "Form 1120-S line 20", group: "deductions", optional: true },
-  { key: "totalDeductions", label: "Total deductions", source: "Form 1120-S line 21", group: "deductions" },
-  { key: "ordinaryIncome", label: "Ordinary business income", source: "Form 1120-S line 22", group: "income" },
-  { key: "k1Ordinary", label: "Shareholder's ordinary income (K-1)", source: "Schedule K-1 (1120-S) box 1", group: "shareholder" },
-  { key: "ownershipPct", label: "Shareholder's ownership %", source: "Schedule K-1 (1120-S) item G", group: "shareholder", optional: true },
-  { key: "distributions", label: "Distributions", source: "Schedule K-1 (1120-S) box 16 code D", group: "shareholder", optional: true },
+  { key: "wages", label: "Salaries and wages", source: "Form 1120-S line 8 / Form 1065 line 9", group: "deductions", optional: true },
+  { key: "guaranteedPayments", label: "Guaranteed payments to partners", source: "Form 1065 line 10 (partnerships only)", group: "deductions", optional: true },
+  { key: "taxesLicenses", label: "Taxes and licenses", source: "Form 1120-S line 12 / Form 1065 line 14", group: "deductions", optional: true },
+  { key: "pension", label: "Pension, profit-sharing plans", source: "Form 1120-S line 17 / Form 1065 line 18", group: "deductions", optional: true },
+  { key: "employeeBenefits", label: "Employee benefit programs", source: "Form 1120-S line 18 / Form 1065 line 19", group: "deductions", optional: true },
+  { key: "otherDeductions", label: "Other deductions", source: "Form 1120-S line 20 / Form 1065 line 21", group: "deductions", optional: true },
+  { key: "totalDeductions", label: "Total deductions", source: "Form 1120-S line 21 / Form 1065 line 22", group: "deductions" },
+  { key: "ordinaryIncome", label: "Ordinary business income", source: "Form 1120-S line 22 / Form 1065 line 23", group: "income" },
+  { key: "k1Ordinary", label: "Owner's ordinary income (K-1)", source: "Schedule K-1 box 1 (1120-S or 1065) for the owner on this 1040", group: "shareholder" },
+  { key: "k1Guaranteed", label: "Owner's guaranteed payments (K-1)", source: "Schedule K-1 (Form 1065) box 4c for that partner", group: "shareholder", optional: true },
+  { key: "ownershipPct", label: "Owner's ownership %", source: "Schedule K-1 item G (1120-S) or item J, profit (1065)", group: "shareholder", optional: true },
+  { key: "k1Ordinary2", label: "Spouse's ordinary income (K-1)", source: "Schedule K-1 box 1 for the spouse, when both spouses are partners on the same 1040", group: "shareholder", optional: true },
+  { key: "k1Guaranteed2", label: "Spouse's guaranteed payments (K-1)", source: "Schedule K-1 (Form 1065) box 4c for the spouse", group: "shareholder", optional: true },
+  { key: "ownershipPct2", label: "Spouse's ownership %", source: "Schedule K-1 item G (1120-S) or item J, profit (1065) for the spouse", group: "shareholder", optional: true },
+  { key: "distributions", label: "Distributions", source: "Schedule K-1 box 16 code D (1120-S) / box 19 code A (1065), all owners on this 1040", group: "shareholder", optional: true },
   { key: "stateNetIncome", label: "State net income", source: "The state's S corporation net income for tax (CA 100S line 20)", group: "state", optional: true },
+  { key: "stateGrossIncome", label: "State total income (LLC fee base)", source: "California Form 568 line 1 (total income from Schedule IW)", group: "state", optional: true },
   { key: "stateAddBack", label: "State taxes added back", source: "Taxes based on income deducted federally (CA 100S line 2)", group: "state", optional: true },
-  { key: "stateTax", label: "State S corporation tax", source: "Tax before credits, at least the minimum (CA 100S line 21)", group: "state", optional: true },
-  { key: "pteTax", label: "PTE elective tax", source: "CA 100S line 29, or Form 3804 line 3", group: "state", optional: true },
-  { key: "stateTotalTax", label: "State total tax (entity)", source: "CA 100S line 30", group: "state", optional: true },
-  { key: "statePayments", label: "State payments (entity)", source: "CA 100S line 36", group: "state", optional: true },
-  { key: "stateAmountDue", label: "State amount due (entity)", source: "CA 100S line 45", group: "state", optional: true },
-  { key: "stateRefund", label: "State refund (entity)", source: "CA 100S line 43", group: "state", optional: true },
+  { key: "stateTax", label: "State entity tax", source: "Tax before credits, at least the minimum (CA 100S line 21; Form 568 lines 2 + 3, the LLC fee and annual tax)", group: "state", optional: true },
+  { key: "pteTax", label: "PTE elective tax", source: "CA 100S line 29 / Form 568 line 4, or Form 3804 line 3", group: "state", optional: true },
+  { key: "stateTotalTax", label: "State total tax (entity)", source: "CA 100S line 30 / Form 568 line 7", group: "state", optional: true },
+  { key: "statePayments", label: "State payments (entity)", source: "CA 100S line 36 / Form 568 line 12", group: "state", optional: true },
+  { key: "stateAmountDue", label: "State amount due (entity)", source: "CA 100S line 45 / Form 568 line 21", group: "state", optional: true },
+  { key: "stateRefund", label: "State refund (entity)", source: "CA 100S line 43 / Form 568 line 19", group: "state", optional: true },
 ] as const satisfies readonly EntityField[];
+
+/** Which federal return the entity filed. */
+export type EntityForm = "1120-S" | "1065";
+
+export function parseEntityForm(v: unknown): EntityForm | null {
+  if (typeof v !== "string") return null;
+  const t = v.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (t.includes("1120S")) return "1120-S";
+  if (t.includes("1065")) return "1065";
+  return null;
+}
 
 export type EntityFieldKey = (typeof ENTITY_FIELDS)[number]["key"];
 
@@ -421,6 +594,8 @@ export type EntityNumbers = Record<EntityFieldKey, number | null>;
 export type EntityExtract = {
   entityName: string | null;
   taxYear: number | null;
+  /** "1120-S" or "1065" — which return the entity filed. */
+  returnForm: EntityForm | null;
   stateCode: string | null;
   stateForm: string | null;
   notes: string | null;
@@ -666,6 +841,7 @@ export function sanitizeEntityExtract(raw: unknown): EntityExtract | null {
   return {
     entityName: text(r.entityName, 120),
     taxYear: Number.isInteger(year) && year >= 2000 && year <= 2100 ? year : null,
+    returnForm: parseEntityForm(r.returnForm),
     stateCode: stateCode && /^[A-Z]{2}$/.test(stateCode) ? stateCode : null,
     stateForm: text(r.stateForm, 40),
     notes: text(r.notes, 2000),

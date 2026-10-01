@@ -1,5 +1,5 @@
 import { PDFDocument, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFRef } from "pdf-lib";
-import { computeRecap, type RecapSide } from "./compute";
+import { computeRecap, type EntityKind, type RecapSide } from "./compute";
 import type { RecapDoc } from "./schema";
 import { US_STATES } from "./tables";
 
@@ -178,7 +178,8 @@ function stat(ctx: Ctx, page: PDFPage, x: number, y: number, w: number, h: numbe
 }
 
 /** A ledger column: label left, value right, totals with a rule above. */
-function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, side: RecapSide, stateLabel: string, totalLabel: string, totalColor: ReturnType<typeof rgb>, scorp = false): number {
+function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, side: RecapSide, stateLabel: string, totalLabel: string, totalColor: ReturnType<typeof rgb>, entityKind: EntityKind = null): number {
+  const scorp = entityKind !== null;
   let y = top;
   const row = (label: string, value: string, opts: { total?: boolean; color?: ReturnType<typeof rgb>; gap?: boolean } = {}) => {
     if (opts.gap) y -= 8;
@@ -196,8 +197,9 @@ function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, side
   row("Gross income", money(side.grossIncome), { total: true });
   row("Federal taxes", money(side.federalTaxes), { gap: true });
   row(`${stateLabel} taxes`, dash(side.stateTaxes));
-  // The corporation's own state tax and elective tax: its own row for an S corporation.
-  if (scorp) row(`${stateLabel} S-corp tax & PTET`, dash(side.entityTaxes));
+  // The entity's own state tax: its own row for an S corporation (tax plus the elective tax) or an LLC (annual tax plus fee).
+  if (entityKind === "scorp") row(`${stateLabel} S-corp tax & PTET`, dash(side.entityTaxes));
+  if (entityKind === "partnership") row(`${stateLabel} LLC tax & fee`, dash(side.entityTaxes));
   row("Penalties", dash(side.penalties));
   row(totalLabel, money(side.totalTaxes), { total: true, color: totalColor });
   return y;
@@ -284,14 +286,14 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     eyebrow(ctx, page, "Before DeCypher", M + 18, y - 22);
     page.drawText("Income only", { x: M + 18, y: y - 42, size: 14, font: ctx.bold, color: C.fog });
     page.drawText("No write-offs, no strategies", { x: M + 18, y: y - 56, size: 9, font: ctx.reg, color: C.muted });
-    ledger(ctx, page, M + 18, y - 84, colW - 36, c.before, stateLabel, "Total taxes owed", C.danger, c.scorp);
+    ledger(ctx, page, M + 18, y - 84, colW - 36, c.before, stateLabel, "Total taxes owed", C.danger, c.entityKind);
     // after
     const ax = M + colW + 16;
     card(page, ax, y - cardH, colW, cardH, C.teal);
     eyebrow(ctx, page, "After DeCypher", ax + 18, y - 22, C.teal);
     page.drawText("Bookkeeping + strategies", { x: ax + 18, y: y - 42, size: 14, font: ctx.bold, color: C.fog });
     page.drawText(c.scorp ? "Your final returns" : "Your final return", { x: ax + 18, y: y - 56, size: 9, font: ctx.reg, color: C.muted });
-    ledger(ctx, page, ax + 18, y - 84, colW - 36, c.after, stateLabel, "New total taxes owed", C.teal, c.scorp);
+    ledger(ctx, page, ax + 18, y - 84, colW - 36, c.after, stateLabel, "New total taxes owed", C.teal, c.entityKind);
     y -= cardH + 20;
 
     // savings callout
@@ -325,7 +327,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     }
     const tiles: [string, number][] = [
       ["Deductions found", c.breakdown.deductionsFound],
-      c.scorp ? ["S-corp state tax & PTET saved", c.breakdown.entitySaved] : ["SE tax saved", c.breakdown.seTaxSaved],
+      c.entityKind === "scorp" ? ["S-corp state tax & PTET saved", c.breakdown.entitySaved] : ["SE tax saved", c.breakdown.seTaxSaved],
       ["Income tax saved", c.breakdown.incomeTaxSaved],
       [`${stateLabel} tax saved`, c.breakdown.stateSaved + c.breakdown.penaltiesSaved],
     ];
@@ -344,7 +346,9 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     const rows: [string, { owed: number; paid: number; due: number }][] = [
       ["Federal", c.filing.federal],
       [stateLabel, c.filing.state],
-      ...(c.filing.entity ? ([["S-corp (PTET)", c.filing.entity]] as [string, { owed: number; paid: number; due: number }][]) : []),
+      ...(c.filing.entity
+        ? ([[c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)", c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
+        : []),
     ];
     for (const [label, line] of rows) {
       page.drawRectangle({ x: M, y: y - 40, width: W, height: 40, color: C.panel, borderColor: C.edge, borderWidth: 0.6 });

@@ -2,7 +2,7 @@
 
 Reverse-engineered from one sole-prop pairing: tax year 2025, single filer, no W-2, Texas resident with a California part-year return (Form 540NR). "Before" is the income-only ProSeries print (`ZERO WRITEOFFS`), "After" is the final return. The sample values are included so every row can be checked against the forms line by line. Then checked against two more pairings (a CA Form 540 filer and a New Jersey filer) — see "What three pairings showed" at the end.
 
-**Implementation:** this table is `RETURN_FIELDS` in `src/lib/tax-recap/schema.ts`; the formulas are `src/lib/tax-recap/compute.ts`; the extraction prompt in `src/lib/tax-recap/extract.ts` is written from the "Per-return extract" section. Change the map here and there together. The two open questions marked *decided* below were resolved in code as described and are one-line changes if Josiel wants the other reading.
+**Implementation:** this table is `RETURN_FIELDS` in `src/lib/tax-recap/schema.ts`; the formulas are `src/lib/tax-recap/compute.ts`; the extraction prompt in `src/lib/tax-recap/extract.ts` is written from the "Per-return extract" section. Change the map here and there together. The two open questions marked *decided* below were resolved in code as described and are one-line changes if Josiel wants the other reading. Later sections add what each new kind of return taught the tool: the derivation engine, S corporations, every state, other years, the Weinstein return, partnerships and LLCs, and rental real estate with real estate professional status.
 
 ## What the recap contains
 
@@ -40,6 +40,15 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | Gross receipts | Sch C line 1 | 123,038 | 123,038 |
 | Total expenses | Sch C line 28 | — | 60,751 |
 | Home office | Sch C line 30 (Form 8829 line 36) | — | 6,568 |
+| Cost of goods sold (Sch C) | Sch C line 4 — a write-off, zeroed with the expenses (Weinstein: 19,763) | — | — |
+| Wages paid (Sch C) | Sch C line 26 — with depreciation, decides whether the QBI limit over the threshold is zero | — | — |
+| Depreciation (Sch C) | Sch C line 13 | — | — |
+| Qualified dividends | 1040 line 3a — taxed by the capital gains worksheet (Weinstein: 1,317) | — | — |
+| Capital gain or (loss) | 1040 line 7 | — | — |
+| QBI loss carryforward | Form 8995 line 3, as a positive number (Weinstein: 21,039) | — | — |
+| Other taxes (line 23) | 1040 line 23 — printed 0 means no SE tax, even with no Schedule SE in the print | — | — |
+| Other payments (line 31) | 1040 line 31 (= Schedule 3 line 15): extension payment, excess Social Security — inside line 32 but a payment, not a credit (Weinstein: 9,115) | — | — |
+| State adjustments to federal AGI | CA 540 line 16 − line 14 (Schedule CA line 27, column C − column B), carried across (Weinstein: +4,150, an HSA add-back) | — | — |
 | State total tax | 540NR line 74 | 848 | 336 |
 | State payments | 540NR line 88 | — | — |
 | State amount owed | 540NR line 121 | 848 | 336 |
@@ -47,6 +56,17 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | State interest + penalties | 540NR lines 122 + 123 | 38 | — |
 | State total due | 540NR line 124 (= FTB 8879 line 2) | 886 | 336 |
 | State-source income | Nonresident returns only: Schedule CA (540NR) line 10, column E | 16,334 | 16,334 |
+| Partnership income (K-1) | Schedule E page 2, the partnership rows: ordinary income plus guaranteed payments (Singh: 163,173 / 241,298) | — | — |
+| Rental income or (loss) | Schedule E line 26 as deducted (Carpenter: −79,519) | — | — |
+| Rental profits / losses | Schedule E line 21, the profit properties and the loss properties added up separately (Carpenter: 0 / 79,519) | — | — |
+| Prior years' unallowed passive losses | Form 8582 line 1c + 2c (Carpenter: 9,847) | — | — |
+| Real estate professional rentals | Schedule E line 43 — nonzero when REPS is claimed (Carpenter: −79,519) | — | — |
+| Net long-term capital gain | Schedule D line 15 (Carpenter: 19 of the 46 on line 7) | — | — |
+| SEP, SIMPLE and qualified plans | Schedule 1 line 16 — reduces QBI and the health insurance cap (Carpenter: 3,000) | — | — |
+| Itemized deductions | Schedule A line 17, read whenever the print has a Schedule A (Carpenter: 45,683; Singh: 23,598 under the standard deduction) | — | — |
+| State and local taxes paid / deducted | Schedule A lines 5d / 5e (Carpenter: 19,963 / 19,963) | — | — |
+| Medical expenses | Schedule A line 1 (both: 0) | — | — |
+| State deduction taken | CA 540 line 18 — the state's own itemized deductions when they beat its standard deduction (Singh: 21,973) | — | — |
 
 Notes on sources:
 
@@ -121,8 +141,9 @@ Within a return:
 - 1040 line 23 = Schedule 2 line 21; Schedule 2 line 4 = Schedule SE line 12
 - 1040 line 15 = line 11b − line 14 (floor 0)
 - 1040 line 37 = line 24 − line 33 when positive; line 34 = line 33 − line 24 otherwise
-- Sch C line 31 = line 29 − line 30; line 29 = line 7 − line 28
+- Sch C line 31 = line 29 − line 30; line 29 = line 7 − line 28; line 7 = line 1 − line 4 (cost of goods sold) when there are no returns or other income
 - Schedule 1 line 3 = Sch C line 31
+- 1040 line 31 ≤ line 32 (line 32 includes it); the recap's refundable credits are line 32 − line 31
 - 540NR line 124 = line 121 + line 122 + line 123
 
 Across before and after (the same ProSeries file, income untouched):
@@ -138,6 +159,8 @@ Across before and after (the same ProSeries file, income untouched):
 Six pages per return carry everything above: Form 8879, 1040 page 1, 1040 page 2, Schedule 1 page 1, Schedule C page 1, 540NR sides 3 and 5. Schedule 2, Schedule SE, and Form 8829 add the cross-checks.
 
 **This is now automated.** `src/lib/tax-recap/pages.ts` picks the pages before sending, keyed on the printed line wording in the table above, and lands on 10-13 pages of a 26-43 page print. Keep the two in step: an anchor there is a line here. Note that Schedule SE is deliberately not an anchor — its text layer is mojibake on these prints — so self-employment tax is taken from Schedule 2 line 4, which is the same figure.
+
+**Garbled pages are kept, not matched (added 2026-10-01).** The mojibake isn't limited to Schedule SE: on Weinstein's 2024 print it covers both Schedule C copies, Form 8995 and every FTB form (540 sides 1–6, Schedule CA, FTB 5805, the FTB 8879s). The page renders perfectly; the font behind the labels just maps its glyphs to control characters and symbols, while the filled-in values are in ProSeries' data font and come through intact. Matching such a page on wording is impossible, and dropping it was the bug: the filter sent ten pages with no Schedule C on them and the engine reported "Gross receipts, Business net income, Self-employment tax weren't read". `isGarbledText` in `pages.ts` judges a page by its characters (8% or more garbage among the non-space characters; clean pages run under 1%, garbled ones 25–70%) and `selectPages` keeps any such page. Two trims then take the print from 34 pages back to 22 without losing a line: a page whose text layer is identical to an earlier kept page is skipped (ProSeries attaches a second copy of the whole federal return behind the California one — seven pages here), and a garbled page with no filled-in amount in the data fonts is skipped (the blank FTB 5805 annualization sides, Schedule CA side 2, the 540 signature page, FTB 5805 side 1 — five pages). "Amount" means four or more digits in a data font that isn't an SSN, EIN, phone or bank number, so the FTB's three-digit form code on every page doesn't keep a page alive. `pdf-prepare.ts` counts them, since it can see the fonts, and hands the counts to `selectPages`; with no data font identified, every garbled page is sent.
 
 ## What three pairings showed
 
@@ -163,7 +186,7 @@ Added 2026-09-25. The builder takes one PDF, the client's final return; `src/lib
 
 **Tables and rules are both data.** The Tax Tables page (`/portal/tax-recap/tables`) holds a card per year: the federal figures (brackets, standard deduction, tax-table rounding, SE rates, wage base, additional Medicare and QBI thresholds) and a card per state describing its rules as choices the engine interprets — starting point (federal AGI or taxable income), add-backs (SE deduction, QBI), deduction (own standard / federal / none), exemption (none / credit / deduction, with an optional AGI phase-out), brackets, tax-table rounding, surtax, city tax. Seeds ship in `src/lib/tax-recap/tables.ts`; a saved year lives in Firestore and overrides the seed. A new year is a copy of the last with the published figures typed in; a new state is a card filled in on the page. Nothing state-specific is in code. The 2025 seed covers federal, California Form 540 and the nine no-income-tax states; every other state is added on the page and proven there.
 
-**The engine refuses unless it can prove itself.** Before deriving anything it re-runs the return from its own inputs and compares to the lines Claude read — SE tax, adjustments, deduction, QBI, taxable income, income tax, the child tax credit, net investment income tax, federal total, state total, and for an S corporation the entity's tax — each within $2. Any miss names the line and the likely cause, and the builder offers to take the before column typed or from a before print. Refused outright: refundable credits on line 32, Schedule C with COGS/returns/other income, anything but the plain standard deduction, a sole proprietor's before-income over the QBI threshold, any state or year without a card. Since 2026-09-25 the engine also models Form 8995-A above the threshold (when its lines were read), the nonrefundable child tax credit (the number of children is the smallest count that reproduces line 19), the child-care credit as read (gated on earned income), Form 8960 on "other income", and the S corporation shape (next section). The same proof runs on the Tax Tables page against every saved recap whose before was read from a real print, live as a card is edited: a wrong number shows as "off" next to the client, with both figures.
+**The engine refuses unless it can prove itself.** Before deriving anything it re-runs the return from its own inputs and compares to the lines Claude read — SE tax, adjustments, deduction, QBI, taxable income, income tax, the child tax credit, net investment income tax, federal total, state total, and for an S corporation the entity's tax — each within $2. Any miss names the line and the likely cause, and the builder offers to take the before column typed or from a before print. Refused outright: refundable credits on line 32 (net of line 31), a Schedule C with returns or other income on line 6, anything but the plain standard deduction, a sole proprietor's before-income over the QBI threshold when the Schedule C pays wages or claims depreciation, any state or year without a card. Since 2026-10-01 cost of goods sold on a Schedule C, qualified dividends and long-term gains, a QBI loss carryforward, and a state's own adjustments to federal AGI are modeled rather than refused — see "The Weinstein return" below. Since 2026-09-25 the engine also models Form 8995-A above the threshold (when its lines were read), the nonrefundable child tax credit (the number of children is the smallest count that reproduces line 19), the child-care credit as read (gated on earned income), Form 8960 on "other income", and the S corporation shape (next section). The same proof runs on the Tax Tables page against every saved recap whose before was read from a real print, live as a card is edited: a wrong number shows as "off" next to the client, with both figures.
 
 **Nonresident and part-year returns (added 2026-09-25).** A state card can name its nonresident form (California: 540NR); the engine then follows the 540NR line by line: tax as if resident on all income (line 31), state AGI = state-source income less the adjustments' share (32), state taxable income less the standard deduction's share (35), the resident rate to four decimals (36), the prorated tax (37), the exemption credit prorated by the taxable-income share (38–39). State-source income is read from Schedule CA (540NR) line 10 column E and is a fixed dollar amount — Chiu's is $16,334 on both prints — so it doesn't move when the write-offs come off. `pages.ts` keeps the Schedule CA (540NR) sides and 540NR side 2 on their own wording, since they carry no closing total. Proven on Chiu's pairing: before $848, after $336, every federal line too.
 
@@ -217,7 +240,7 @@ New 1040 lines for the shape: S corporation income (Schedule 1 line 5 = Schedule
 
 **S-corp savings.** The Canva's "S-CORP TAX SAVINGS: $35,140" is described as "estimated self-employment tax avoided through the S-Corp structure" and matches no formula on the returns (Schedule SE on the K-1 is 34,467; with the additional Medicare tax 36,587; on the K-1 plus the salary, less the FICA paid, 28,578; the returns carry no Schedule SE at all). The engine reports **36,587**: Schedule SE on the K-1 ordinary income as if it were Schedule C profit, with the whole wage base (a sole proprietor has no W-2), plus the 0.9% additional Medicare tax over the threshold. Gross of the payroll tax the corporation paid on the salary, since as a sole proprietor that pay would have carried SE tax too. It sits outside the before/after — both are S corporation returns — and is added on top, as the Canva does: "Bookkeeping + strategies" + "S-corp" = "Total tax savings". Josiel to confirm the convention.
 
-**Not modeled (refused with the line named):** a second business or K-1, a loss year, more than one shareholder where the K-1 doesn't reconcile to item G, capital gains or qualified dividends in the tax, the QBI phase-in range on the before for a specified service business, a state without an S corporation card, a W-2 from another employer.
+**Not modeled (refused with the line named):** a second business or K-1, a loss year, more than one shareholder where the K-1 doesn't reconcile to item G, the QBI phase-in range on the before for a specified service business, a state without an S corporation card, a W-2 from another employer. (Capital gains and qualified dividends have been modeled since the Weinstein return; partnerships since the Singh return — next sections.)
 
 **The state's S corporation card** (`entity` on a state card; Tax Tables page → "Rules · S corporations"): a rate on the corporation's net income, a minimum tax that is flat or tiered by gross receipts, and the elective pass-through entity tax as brackets on the entity's income plus how it comes back to the owner — a nonrefundable credit inside the state's total (California), a refundable credit claimed with the payments (New Jersey, New York), or the income left off the owner's return (Georgia). A refundable credit is read into its own field, `statePteCreditRefundable` (NJ-1040 line 63), and the recap nets it out of State Taxes and out of the payments the way it does the federal refundable credits; the printed total (NJ-1040 line 54) stays gross. The shareholder's credit is their ownership share of the entity's tax.
 
@@ -250,6 +273,81 @@ Every year card starts unproven except 2025's California and New Jersey. `npm ru
 ## What leaves the browser
 
 Added 2026-09-25. `pdf-prepare.ts` renders only the kept pages, paints out the identity, and sends an images-only PDF (no text layer), so the model reads pages with no name, SSN, address, business name, bank numbers, email, phone or date of birth on them. Two passes: the 1040's header band (between "Your first name" and "Foreign country name") and Schedule C's "Business name" box are painted whole and their values become tokens painted out wherever else they appear (the 8879, Form 8995, every state page, the 540's four-letter name code); then patterns — SSNs in the three ways ProSeries prints them, EINs, 9+ digit runs, emails, phones, dates. The page text sent for the cross-check is scrubbed with the same tokens. The client's name is read locally off the 1040 and fills the client field; the model never sees it. A scan has no text to find any of this in and goes as printed, with a warning on the review list. Checked on Inha's and Chiu's prints page by page (43 and 40 boxes; every number intact; both read and derived correctly afterwards).
+
+**A garbled page gets a third pass (added 2026-10-01).** The patterns and tokens still work on it — the values are readable, so the SSN, name, address, phone, date of birth and bank numbers are all still caught — but the Schedule C business-name box is found by its printed label, which on such a page is unreadable, so the LLC name would have gone through. Rather than trust any wording on the page, every run set in a *data font* that contains two or more letters is painted out. The data fonts are whichever fonts the SSN or one of the identity tokens was printed in anywhere in the document (ProSeries uses one for the federal values, one for the FTB values); the labels are in the broken font and are left alone, and the numbers stay. The page text sent for the cross-check is rebuilt from the unpainted runs. The review list says which pages went this way. If no data font could be identified, the warning says the page went as printed.
+
+## The Weinstein return (added 2026-10-01)
+
+A 2024 return a friend of Jason's dropped in: single, California resident, $185,261 of W-2 wages and a content-creation Schedule C with $95,015 of receipts written down to $0 by $19,763 of cost of goods sold, $60,172 of expenses and $15,080 of home office (another $10,444 of home office carried forward on Form 8829, and a $21,039 QBI loss carryforward on Form 8995). Exactly the tool's case, and it hit six things at once. In the order the engine would have met them:
+
+1. **The page filter dropped Schedule C** (garbled text layer, above). Fixed in `pages.ts`; the filter now sends 34 of the 52 pages.
+2. **No Schedule SE in the print.** Net profit is $0, so ProSeries printed no Schedule 1, 2 or SE, and the engine's required list read a blank SE tax as "not read". `impliedLines` in `derive.ts` takes SE tax as $0 when line 23 prints 0, or when the Schedule C profit is under the $400 floor, and says so in the notes.
+3. **Cost of goods sold on the Schedule C.** The sole-prop identity is now gross − COGS − expenses − home office = net; COGS is zeroed on the before with the expenses and counted in the bookkeeping step of the split.
+4. **Qualified dividends.** Line 16 is $34,379, not the $34,497 the brackets give on $172,728, because $1,317 of dividends is taxed at 15%. `taxOnIncome` runs the Qualified Dividends and Capital Gain Tax Worksheet (ordinary slice by the table, the preferential slice at 0% / 15% / 20% by where it sits, the smaller of that and the plain tax), and the QBI limit takes the net capital gain out of taxable income (Form 8995 line 12). The 0% and top-rate thresholds are a new `capitalGains` block on the federal card (Rev. Procs. 2022-38, 2023-34, 2024-40, 2025-32; the Tax Tables page edits them). Line 7 is taken whole as long-term gain; a Schedule D with short-term gains or 28% / unrecaptured §1250 gain still fails the line 16 proof and refuses.
+5. **Over the QBI threshold on the before.** Taxable income before QBI is $266,470 against the $191,950 single threshold, and the after return has no Form 8995-A to read the wage and property limits from. The gate now reads Schedule C lines 26 (wages) and 13 (depreciation): both blank means the limits are zero and the deduction is whatever the phase-in leaves (here $0), with a note that earlier Section 179 property would add 2.5% of its basis; anything on either line still refuses.
+6. **Line 32 wasn't a refundable credit.** The $9,115 there is an $8,000 extension payment plus $1,115 of excess Social Security (line 31). The engine compared it to the $0 of refundable credits it computes and would have refused. Line 31 is now read, netted out of line 32 for the credit check and for the recap's Federal Taxes, and kept in the payments on both sides.
+7. **California's HSA add-back.** CA AGI is $191,478 = federal $187,328 + $4,150 of employer HSA contributions (Schedule CA line 1a column C). Without it the 540 proof misses by $386. The net of Schedule CA columns B and C is read as `stateAdjustments` and carried across, like the federal carried adjustments.
+
+With all seven in, the after return proves on every line and the before derives: federal $66,657 (tax $63,376 by the worksheet, SE Medicare only since the wages exceed the wage base, $657 of additional Medicare, $79 of NIIT), California $22,494 (the $149 exemption credit phased down to $59 on federal AGI), savings $41,086 split $35,649 bookkeeping / $5,437 home office. `npm run recap:check` carries the case with every figure checked by hand, plus the same return with the Schedule C lines blanked, which has to refuse on "Gross receipts, Business net income" and nothing else.
+
+**The refusal box now shows its evidence.** The reader's notes and the "couldn't verify" line for the after return, and how many of the return's pages were sent, appear under the engine's reasons — the two things that tell "this return has no Schedule C" from "the model never saw the Schedule C".
+
+## Partnerships and LLCs (added 2026-10-01)
+
+Reverse-engineered from the Singh & Saini / YouTwoTV LLC pairing: a married couple filing jointly in California who are the two 50% members of an LLC taxed as a partnership. Four prints: the final 1065 (42 pages: Form 1065 — whose page 1 has the garbled text layer — Schedule K, two K-1s, California Form 568 with its Schedule K-1 (568)s), the final 1040 (44 pages: two Schedule SEs, two Forms 7206, Form 8995, Schedule A, California 540 and Schedule CA), and a zero-write-off print of each. Samples in `Downloads\For Jason part 3`. The Canva recap for this client reads $59,481 before; the CPA who sent the returns said his own before print (what the engine proves against) comes out higher because he zeroes the health insurance too — it reads $70,037 with the LLC's $800, and the engine reproduces it line for line.
+
+**Two after returns in one drop, as for an S corporation.** The 1065 is told apart by its K-1s ("Schedule K-1 (Form 1065)", "Partner's Share of Income") since its own first page can't be read; `detectEntityForm` in `pages.ts` says which form, the reader confirms it (`returnForm` on the entity extract), and the engine uses it to settle which Schedule E line the reader put the K-1 income on. The same `ENTITY_FIELDS` serve both forms; the 1065 lines are named beside the 1120-S ones.
+
+**What "before" means for a partnership.** Every deduction on the 1065 at zero — here $20,494 of interest, $57,631 of other expenses, and the $8,290 of guaranteed payments that are the partners' health premiums (K-1 box 13 code M, Schedule K line 13e) — so each K-1 is that partner's share of the gross receipts and there are no guaranteed payments, hence no self-employed health insurance deduction. The LLC's own California bill doesn't move: the $800 annual tax both sides, and the LLC fee is on total income (Schedule IW), which the write-offs don't touch.
+
+Per-entity extract, the 1065 lines:
+
+| Field | Source | After | Before (print) |
+|---|---|---|---|
+| Gross receipts | 1065 line 1a | 241,298 | 241,298 |
+| Total income | line 8 | 241,298 | 241,298 |
+| Guaranteed payments | line 10 | 8,290 | — |
+| Other deductions | line 21 | 57,631 | — |
+| Total deductions | line 22 | 86,415 | — |
+| Ordinary business income | line 23 | 154,883 | 241,298 |
+| Owner's / spouse's ordinary income | K-1 box 1, each | 77,441 / 77,442 | 120,649 / 120,649 |
+| Owner's / spouse's guaranteed payments | K-1 box 4c, each | 4,145 / 4,145 | — |
+| Ownership % | K-1 item J, each | 50 / 50 | 50 / 50 |
+| Distributions | K-1 box 19 code A, both | 95,222 | 95,222 |
+| State total income (fee base) | Form 568 line 1 | 241,298 | 241,298 |
+| State entity tax | 568 lines 2 + 3 (fee + annual tax) | 800 | 800 |
+
+What the 1040 side needed, and how the engine does it (`derive.ts`, shape `partnership`):
+
+- **Each partner has their own Schedule SE** on their ordinary share plus guaranteed payments, with their own wage base, and the deduction is the sum of each schedule's rounded half (Singh: 5,764 + 5,764 = 11,528 on the after; 8,524 + 8,524 = 17,048 on the before — 34,094 ÷ 2 would be a dollar off). Shares are the K-1s' item J percentages (or box 1 over line 23), and `allocate` gives the last partner the rounding so the K-1s add up to line 23.
+- **Form 7206 per partner**: the premiums (Form 7206 line 1, both forms added up by the reader) are split by the guaranteed payments and capped at each partner's share less their own SE deduction.
+- **QBI per partner** is the ordinary share less the part of the SE deduction that belongs to it — the guaranteed payments carry the rest — and the health insurance deduction is not taken off (Rev. Rul. 91-26 puts it on the guaranteed payments). Checked against the printed Form 8995: 71,970 + 71,971 after, 112,125 + 112,125 before.
+- **Pass-through Schedule Cs.** The 1040 carries two Schedule Cs (5,095 and 9,856 of receipts, each netted to $0 by the same amount of "other expenses", described as "income issued to SSN picked up on partnership return"). The reader is told to leave such a Schedule C out, and the engine drops one that nets to zero alongside a K-1 anyway, with a note — otherwise it would read as a second business and its receipts would become before income.
+- **Recap rows.** Business net income is the partnership income (163,173 / 241,298, which is what the Canva shows). The entity row reads "LLC tax & fee" (800 both sides); the filing page's third row "LLC / partnership". Savings by strategy: business write-offs (30,285), health insurance through the partnership (1,455).
+
+**The state's partnership card** (`partnership` on a state card; Tax Tables page → "Rules · partnerships and LLCs"): a form, a flat annual tax, and the fee tiers by total income. California is seeded and proven ($800; $0 under $250,000, $900, $2,500, $6,000, $11,790 from $5,000,000). No other state is seeded — their partnership returns (New Jersey's $150-per-owner filing fee, Texas's franchise report, New York's filing fee) weren't at hand — so a partner's return in any other state is refused with the card named until the rules are typed in. The elective pass-through entity tax is the S corporation rule (`entity.pte`), which a partnership shares; YouTwoTV didn't elect it, so that path is unproven.
+
+**Verified** (`npm run recap:check`): from the two after returns alone the engine reproduces both before prints to the dollar — federal 57,851 (tax 23,757, SE 34,094), California 11,386 (tax 11,692 on 202,307 of taxable income, the 21,973 of California itemized deductions carried), the LLC's 800 — savings 31,740. A copy of the return with the K-1 income read on the S corporation line derives the same, reconciled by the 1065.
+
+## Rental real estate and real estate professional status (added 2026-10-01)
+
+The Carpenter return (after only, `Downloads\For Jason part 3`, 43 pages, Texas so no state): married filing jointly, the client's content-creation Schedule C ($491,948 of receipts, $70,821 of expenses, $8,868 of home office), the spouse's $129,731 W-2, and four rental properties losing $79,519 this year that the spouse, a real estate professional, deducts in full as nonpassive (Schedule E line 43; Form 8582 carries only $9,847 of earlier passive losses, still suspended at $536,295 of modified AGI). Also a Schedule A ($45,683: $19,963 of taxes, $25,720 of mortgage interest), two children, a $3,000 SEP, a $2,500 IRA, $137 of qualified dividends and $46 of gains ($19 long-term). The question it came with: what the liability would have been had the spouse not claimed REPS.
+
+Seven things the engine had to learn, each proven on the after return before anything is derived:
+
+1. **Whose W-2 it is.** The Schedule C filer's Social Security wage base is used up by their *own* wages; the spouse's $129,731 doesn't touch it. The printed SE tax ($32,877, the full wage base) says which, so on a joint return the engine tries both readings and takes the one that reproduces the line, with a note. The additional Medicare tax still counts every W-2 on the return.
+2. **Form 8582.** `Rental` inputs (the profit properties, the loss properties, prior unallowed losses, whether REPS is claimed, whether the rentals count as QBI): a real estate professional's rentals are nonpassive and deducted whole; anyone else's net loss is allowed up to the special allowance — $25,000 less half of modified AGI over $100,000, on the federal card as `passiveAllowance` — and the rest suspended. Modified AGI is AGI without the rentals, the SE deduction and the retirement plan deduction (the printed $536,295 reproduces).
+3. **Rentals as QBI.** This return lists the four rentals on Form 8995, so their loss comes off the Schedule C's QBI (310,393 = 389,912 − 79,519). Whether a return does that is the preparer's call, so the engine tries it both ways and keeps the one that reproduces line 13.
+4. **Net investment income tax** counts the rentals' net as deducted, the way the software files it (−79,519 wipes out the $213 of dividends and gains on the after; $8 of tax on the before).
+5. **Schedule A** travels with the return and is re-figured at each income: the SALT cap (the 2025 Act's $40,000, phased down by 30% of modified AGI over $500,000 to a $10,000 floor — on the federal card as `salt`, with the flat $10,000 for 2023–24 and $40,400/$505,000 for 2026) and the medical floor; the rest is fixed. The larger of that and the standard deduction is taken. The before's AGI of $595,978 cuts the cap to $11,207, so the total falls to $36,927 but still beats $31,500.
+6. **The SEP deduction** (Schedule 1 line 16) is its own line now: carried across, taken off the business's QBI (389,912 = 412,259 − 16,439 − 2,908 − 3,000) and off the Form 7206 cap.
+7. **Schedule D.** Only the long-term net is preferential: $137 of qualified dividends plus the $19 on Schedule D line 15, which is what gives the printed $64,898 ($64,908 with the whole $46).
+
+The before — Schedule C write-offs at zero, REPS off, everything else as filed — comes to **federal $171,556** against $96,419 as filed: SE tax 35,011 on the whole profit, additional Medicare 3,006, $89,366 of rental losses suspended, no QBI deduction (taxable income before it, $559,051, is past the phase-in range and the Schedule C pays no wages; its $313 of depreciation means a little qualified property, noted rather than refused), the child tax credit phased out, tax 134,731 by the worksheet. Savings $75,137, split write-offs 32,999 / home office 5,215 / real estate professional status 36,923.
+
+**The REPS question.** The status is the last step of the split, so the total it starts from is exactly the year without it, everything else as filed: **$133,342** (rentals suspended, AGI $517,356, the Schedule A unchanged at $45,683 since the cap is still $34,793 there, QBI phased down to $17,879 inside the range, tax 99,313 on $453,794, no child tax credit, $8 of NIIT). The step's note on the recap says so. Checked by hand in `npm run recap:check`.
+
+Not modeled, refused with the line named: rental losses on a married-filing-separately return; a state that phases its itemized deductions down on income when the before's AGI crosses the threshold (California's $504,411 joint); a before over the QBI threshold when the Schedule C or 1065 pays W-2 wages. The rentals' $313-of-depreciation caveat above is a note, not a refusal.
 
 ## Open questions for Josiel
 

@@ -72,6 +72,10 @@ function card(name: string, partial: Partial<StateCard>): StateCard {
     medical: null,
     sharedResponsibility: null,
     entity: null,
+    // No state's partnership return (filing fees, franchise taxes) is
+    // seeded here: a partner's return is refused until the rules are typed
+    // in on the Tax Tables page and proven on a client.
+    partnership: null,
     proven: false,
     note: "",
     ...partial,

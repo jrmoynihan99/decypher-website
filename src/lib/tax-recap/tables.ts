@@ -106,6 +106,18 @@ export type FederalCard = {
   /** Form 8960: the rate on the smaller of net investment income and AGI over the threshold. */
   netInvestmentIncomeTax: { rate: number; threshold: ByStatus<number> };
   /**
+   * The Qualified Dividends and Capital Gain Tax Worksheet: the slice of
+   * taxable income that is qualified dividends and net long-term gain is
+   * taxed at 0% while taxable income is under `zeroRateBelow`, at `rate` up
+   * to `topRateAbove`, and at `topRate` past it, in place of the brackets.
+   */
+  capitalGains: {
+    zeroRateBelow: ByStatus<number>;
+    topRateAbove: ByStatus<number>;
+    rate: number;
+    topRate: number;
+  };
+  /**
    * Form 8962, the premium tax credit. `applicableFigure` is the share of
    * household income the family is expected to pay, by household income as
    * a percentage of the poverty line: within each row the figure runs
@@ -120,9 +132,42 @@ export type FederalCard = {
     capFigure: number;
     repaymentLimit: { below: number; single: number; other: number }[];
   };
+  /**
+   * Schedule A line 5e: the cap on state and local taxes deducted. From
+   * 2025 the cap shrinks by `phaseDownRate` of modified AGI over
+   * `phaseDownAbove`, never below `floor`; a year with a flat cap has no
+   * phase-down (null).
+   */
+  salt: {
+    cap: ByStatus<number>;
+    phaseDownAbove: ByStatus<number> | null;
+    phaseDownRate: number;
+    floor: ByStatus<number>;
+  };
+  /**
+   * Form 8582 Part II: the special allowance for rental real estate losses
+   * with active participation — `amount`, shrinking by `rate` of modified
+   * AGI over `magiAbove` (gone at $150,000). Married filing separately is
+   * refused rather than modeled.
+   */
+  passiveAllowance: { amount: number; magiAbove: number; rate: number };
 };
 
 export type PhaseOut = { threshold: ByStatus<number>; step: ByStatus<number>; reduce: number };
+
+/**
+ * What a state charges a partnership or LLC itself, on the entity's return
+ * (California's Form 568): a flat annual tax and a fee tiered by the
+ * entity's total income (gross receipts, not profit). The first row whose
+ * `below` the income is under applies; the last row's `below` is null. A
+ * partnership's elective pass-through entity tax is the state's `entity.pte`
+ * rule, the same election the S corporation makes.
+ */
+export type PartnershipRules = {
+  form: string;
+  annualTax: number;
+  fee: { below: number | null; amount: number }[];
+};
 
 export type StateCard = {
   name: string;
@@ -163,6 +208,11 @@ export type StateCard = {
    * this state.
    */
   entity: EntityRules | null;
+  /**
+   * What the state charges a partnership or LLC on its own return. Null
+   * means the engine can't derive a partner's return for this state.
+   */
+  partnership: PartnershipRules | null;
   /**
    * Whether the card has reproduced a real client return to the dollar.
    * Every seed starts false except the ones checked against the sample
@@ -267,6 +317,7 @@ export function noIncomeTaxCard(code: string): StateCard {
     medical: null,
     sharedResponsibility: null,
     entity: null,
+    partnership: null,
     proven: true,
     note: "No tax on wages or business income.",
   };
@@ -343,6 +394,13 @@ const FEDERAL_2025: FederalCard = {
     rate: 0.038,
     threshold: { single: 200000, hoh: 200000, mfs: 125000, mfj: 250000, qss: 250000 },
   },
+  // Rev. Proc. 2024-40 §3.03: the 0% and 15% capital gains brackets.
+  capitalGains: {
+    zeroRateBelow: { single: 48350, mfs: 48350, hoh: 64750, mfj: 96700, qss: 96700 },
+    topRateAbove: { single: 533400, mfs: 300000, hoh: 566700, mfj: 600050, qss: 600050 },
+    rate: 0.15,
+    topRate: 0.2,
+  },
   /**
    * Form 8962 for 2025 (the enhanced schedule that runs through 2025) and
    * the 2025 repayment caps from the instructions. Checked on Mahony's
@@ -365,6 +423,21 @@ const FEDERAL_2025: FederalCard = {
       { below: 400, single: 1625, other: 3250 },
     ],
   },
+  // The 2025 Act's $40,000 SALT cap ($20,000 separate), reduced by 30% of
+  // modified AGI over $500,000 ($250,000 separate) down to a $10,000
+  // ($5,000) floor — Schedule A line 5e. Checked on the Carpenter return:
+  // $19,963 of taxes at $437,837 of AGI is under the cap on the after;
+  // the before's higher AGI shrinks the cap and flips the return to the
+  // standard deduction.
+  salt: {
+    cap: { single: 40000, mfj: 40000, qss: 40000, hoh: 40000, mfs: 20000 },
+    phaseDownAbove: { single: 500000, mfj: 500000, qss: 500000, hoh: 500000, mfs: 250000 },
+    phaseDownRate: 0.3,
+    floor: { single: 10000, mfj: 10000, qss: 10000, hoh: 10000, mfs: 5000 },
+  },
+  // Form 8582 Part II: $25,000, reduced by half of modified AGI over
+  // $100,000, so nothing from $150,000 up (statutory, unindexed).
+  passiveAllowance: { amount: 25000, magiAbove: 100000, rate: 0.5 },
 };
 
 /**
@@ -420,8 +493,23 @@ const CALIFORNIA_2025: StateCard = {
     minimum: [{ below: null, amount: 800 }],
     pte: { brackets: b([[null, 0.093]]), credit: "nonrefundable" },
   },
+  // Form 568: the $800 annual LLC tax and the LLC fee by total income
+  // (Schedule IW) — $900 from $250,000, $2,500 from $500,000, $6,000 from
+  // $1,000,000, $11,790 from $5,000,000. Checked on YouTwoTV LLC's returns:
+  // $241,298 of total income → $800 and no fee on both prints.
+  partnership: {
+    form: "568",
+    annualTax: 800,
+    fee: [
+      { below: 250000, amount: 0 },
+      { below: 500000, amount: 900 },
+      { below: 1000000, amount: 2500 },
+      { below: 5000000, amount: 6000 },
+      { below: null, amount: 11790 },
+    ],
+  },
   proven: true,
-  note: "2025 FTB rate schedules and Form 540. Proven on three client returns (a 540, a 540NR, and an S corporation with Form 100S and the PTE election).",
+  note: "2025 FTB rate schedules and Form 540. Proven on four client returns (a 540, a 540NR, an S corporation with Form 100S and the PTE election, and a two-member LLC on Form 568).",
 };
 
 /**
@@ -496,6 +584,10 @@ const NEW_JERSEY_2025: StateCard = {
       credit: "refundable",
     },
   },
+  // The NJ-1065 filing fee ($150 per owner for partnerships with more than
+  // two owners, capped) isn't seeded: a partner's return is refused until
+  // the rules are added on the Tax Tables page.
+  partnership: null,
   proven: true,
   note: "NJ-1040 proven on a sole proprietor with marketplace coverage. The S corporation side (CBT-100S minimum tax tiers, BAIT schedule, refundable credit on line 63) is the Division of Taxation's published figures and not yet proven on a client. Not modeled: the property-tax deduction, senior/blind/veteran exemptions, the bronze-plan cap on the shared responsibility payment.",
 };
@@ -521,6 +613,14 @@ const FEDERAL_2024: FederalCard = {
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 168600 },
   qbi: { ...FEDERAL_2025.qbi, threshold: { single: 191950, mfs: 191950, hoh: 191950, mfj: 383900, qss: 383900 } },
   childTaxCredit: { ...FEDERAL_2025.childTaxCredit, perChild: 2000 },
+  // Rev. Proc. 2023-34 §3.03. Checked on Weinstein's 2024 return: $1,317 of
+  // qualified dividends at 15% inside $172,728 of taxable income gives the
+  // printed $34,379.
+  capitalGains: {
+    ...FEDERAL_2025.capitalGains,
+    zeroRateBelow: { single: 47025, mfs: 47025, hoh: 63000, mfj: 94050, qss: 94050 },
+    topRateAbove: { single: 518900, mfs: 291850, hoh: 551350, mfj: 583750, qss: 583750 },
+  },
   ptc: {
     ...FEDERAL_2025.ptc,
     repaymentLimit: [
@@ -528,6 +628,13 @@ const FEDERAL_2024: FederalCard = {
       { below: 300, single: 975, other: 1950 },
       { below: 400, single: 1625, other: 3250 },
     ],
+  },
+  // The pre-2025 flat $10,000 cap ($5,000 separate), no phase-down.
+  salt: {
+    cap: { single: 10000, mfj: 10000, qss: 10000, hoh: 10000, mfs: 5000 },
+    phaseDownAbove: null,
+    phaseDownRate: 0,
+    floor: { single: 10000, mfj: 10000, qss: 10000, hoh: 10000, mfs: 5000 },
   },
 };
 
@@ -544,6 +651,12 @@ const FEDERAL_2023: FederalCard = {
   standardDeduction: { single: 13850, mfj: 27700, qss: 27700, mfs: 13850, hoh: 20800 },
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 160200 },
   qbi: { ...FEDERAL_2025.qbi, threshold: { single: 182100, mfs: 182100, hoh: 182100, mfj: 364200, qss: 364200 } },
+  // Rev. Proc. 2022-38 §3.03.
+  capitalGains: {
+    ...FEDERAL_2025.capitalGains,
+    zeroRateBelow: { single: 44625, mfs: 44625, hoh: 59750, mfj: 89250, qss: 89250 },
+    topRateAbove: { single: 492300, mfs: 276900, hoh: 523050, mfj: 553850, qss: 553850 },
+  },
   ptc: {
     ...FEDERAL_2025.ptc,
     repaymentLimit: [
@@ -580,6 +693,14 @@ const FEDERAL_2026: FederalCard = {
     threshold: { single: 201775, mfs: 201775, hoh: 201775, mfj: 403550, qss: 403550 },
     phaseInRange: { single: 75000, mfs: 75000, hoh: 75000, mfj: 150000, qss: 150000 },
   },
+  // Rev. Proc. 2025-32 §3.03 as published; not yet checked on a 2026 return.
+  // A wrong figure can't produce a wrong recap: the engine refuses when the
+  // return's own line 16 doesn't reproduce.
+  capitalGains: {
+    ...FEDERAL_2025.capitalGains,
+    zeroRateBelow: { single: 49450, mfs: 49450, hoh: 66200, mfj: 98900, qss: 98900 },
+    topRateAbove: { single: 545500, mfs: 306850, hoh: 579600, mfj: 613700, qss: 613700 },
+  },
   ptc: {
     applicableFigure: [
       { from: 100, to: 133, start: 0.021, end: 0.021 },
@@ -596,6 +717,14 @@ const FEDERAL_2026: FederalCard = {
       { below: 300, single: 975, other: 1950 },
       { below: 400, single: 1650, other: 3300 },
     ],
+  },
+  // The 2025 Act indexes the cap and the phase-down threshold by 1% a year
+  // from 2026 ($40,400 over $505,000); the floor stays $10,000.
+  salt: {
+    cap: { single: 40400, mfj: 40400, qss: 40400, hoh: 40400, mfs: 20200 },
+    phaseDownAbove: { single: 505000, mfj: 505000, qss: 505000, hoh: 505000, mfs: 252500 },
+    phaseDownRate: 0.3,
+    floor: { single: 10000, mfj: 10000, qss: 10000, hoh: 10000, mfs: 5000 },
   },
 };
 
@@ -769,6 +898,12 @@ export function sanitizeStateCard(raw: unknown, code: string, fallback?: StateCa
         : r.entity && typeof r.entity === "object"
           ? entityRules(entity)
           : null,
+    partnership:
+      r.partnership === undefined
+        ? (fallback?.partnership ?? null)
+        : r.partnership && typeof r.partnership === "object"
+          ? partnershipRules(obj(r.partnership))
+          : null,
     proven: typeof r.proven === "boolean" ? r.proven : (fallback?.proven ?? false),
     note: r.note === undefined ? (fallback?.note ?? "") : str(r.note, 1200),
   };
@@ -799,6 +934,17 @@ function entityRules(e: Record<string, unknown>): EntityRules {
   return { form: str(e.form, 20), rate: num(e.rate), minimum, pte };
 }
 
+/** Narrow the partnership rules: the annual tax and the fee tiers by total income. */
+function partnershipRules(p: Record<string, unknown>): PartnershipRules {
+  const fee = Array.isArray(p.fee)
+    ? p.fee.slice(0, 12).map((row) => {
+        const r = obj(row);
+        return { below: numOrNull(r.below), amount: num(r.amount) };
+      })
+    : [];
+  return { form: str(p.form, 20), annualTax: numOr(p.annualTax, 0), fee };
+}
+
 const ZERO_BY_STATUS: ByStatus<number> = { single: 0, mfj: 0, mfs: 0, hoh: 0, qss: 0 };
 
 /** Narrow the federal card; `fallback` (the seed) fills fields a stored card predates. */
@@ -810,8 +956,18 @@ export function sanitizeFederalCard(raw: unknown, fallback?: FederalCard | null)
   const ptc = obj(r.ptc);
   const ctc = obj(r.childTaxCredit);
   const niit = obj(r.netInvestmentIncomeTax);
+  const cg = obj(r.capitalGains);
   const wpl = obj(qbi.wageAndPropertyLimit);
   const fq = fallback?.qbi;
+  // A stored card from before the capital gains block existed: the seed's
+  // figures for that year, or the 2025 ones, rather than zeros the
+  // worksheet would tax everything at the top rate with.
+  const fcg = fallback?.capitalGains ?? FEDERAL_2025.capitalGains;
+  // Likewise the SALT cap and the passive-loss allowance: the seed's.
+  const fsalt = fallback?.salt ?? FEDERAL_2025.salt;
+  const fpa = fallback?.passiveAllowance ?? FEDERAL_2025.passiveAllowance;
+  const salt = obj(r.salt);
+  const pa = obj(r.passiveAllowance);
   return {
     brackets: byStatus(r.brackets, brackets),
     standardDeduction: byStatus(r.standardDeduction, num),
@@ -853,6 +1009,15 @@ export function sanitizeFederalCard(raw: unknown, fallback?: FederalCard | null)
             rate: numOr(niit.rate, 0),
             threshold: niit.threshold === undefined ? ZERO_BY_STATUS : byStatus(niit.threshold, num),
           },
+    capitalGains:
+      r.capitalGains === undefined
+        ? fcg
+        : {
+            zeroRateBelow: cg.zeroRateBelow === undefined ? fcg.zeroRateBelow : byStatus(cg.zeroRateBelow, num),
+            topRateAbove: cg.topRateAbove === undefined ? fcg.topRateAbove : byStatus(cg.topRateAbove, num),
+            rate: numOr(cg.rate, fcg.rate),
+            topRate: numOr(cg.topRate, fcg.topRate),
+          },
     ptc: {
       applicableFigure: (Array.isArray(ptc.applicableFigure) ? ptc.applicableFigure : [])
         .slice(0, 12)
@@ -869,6 +1034,28 @@ export function sanitizeFederalCard(raw: unknown, fallback?: FederalCard | null)
           return { below: num(o.below), single: num(o.single), other: num(o.other) };
         }),
     },
+    salt:
+      r.salt === undefined
+        ? fsalt
+        : {
+            cap: salt.cap === undefined ? fsalt.cap : byStatus(salt.cap, num),
+            phaseDownAbove:
+              salt.phaseDownAbove === undefined
+                ? fsalt.phaseDownAbove
+                : salt.phaseDownAbove && typeof salt.phaseDownAbove === "object"
+                  ? byStatus(salt.phaseDownAbove, num)
+                  : null,
+            phaseDownRate: numOr(salt.phaseDownRate, fsalt.phaseDownRate),
+            floor: salt.floor === undefined ? fsalt.floor : byStatus(salt.floor, num),
+          },
+    passiveAllowance:
+      r.passiveAllowance === undefined
+        ? fpa
+        : {
+            amount: numOr(pa.amount, fpa.amount),
+            magiAbove: numOr(pa.magiAbove, fpa.magiAbove),
+            rate: numOr(pa.rate, fpa.rate),
+          },
   };
 }
 
@@ -958,6 +1145,12 @@ export function validateYearCard(card: YearCard): string[] {
   const niit = f.netInvestmentIncomeTax;
   if (!fin(niit.rate) || niit.rate < 0 || niit.rate >= 1) out.push("Net investment income tax rate must be a percentage");
   validateByStatus(niit.threshold, "Net investment income tax threshold", out);
+  const cg = f.capitalGains;
+  if (!fin(cg.rate) || cg.rate < 0 || cg.rate >= 1 || !fin(cg.topRate) || cg.topRate < 0 || cg.topRate >= 1) {
+    out.push("Capital gains rates must be percentages");
+  }
+  validateByStatus(cg.zeroRateBelow, "Capital gains 0% bracket", out, 1);
+  validateByStatus(cg.topRateAbove, "Capital gains top-rate threshold", out, 1);
   let prevTo = 0;
   f.ptc.applicableFigure.forEach((row, i) => {
     const w = `Premium tax credit figure, row ${i + 1}`;
@@ -975,6 +1168,16 @@ export function validateYearCard(card: YearCard): string[] {
     if (!fin(row.single) || row.single < 0 || !fin(row.other) || row.other < 0) out.push(`${w}: needs both amounts`);
     prevBelow = fin(row.below) ? row.below : prevBelow;
   });
+  validateByStatus(f.salt.cap, "SALT cap", out);
+  validateByStatus(f.salt.floor, "SALT cap floor", out);
+  if (f.salt.phaseDownAbove) {
+    validateByStatus(f.salt.phaseDownAbove, "SALT phase-down threshold", out, 1);
+    if (!fin(f.salt.phaseDownRate) || f.salt.phaseDownRate < 0 || f.salt.phaseDownRate >= 1) out.push("SALT phase-down rate must be a percentage");
+  }
+  const pa = f.passiveAllowance;
+  if (!fin(pa.amount) || pa.amount < 0) out.push("Rental loss allowance needs an amount");
+  if (!fin(pa.magiAbove) || pa.magiAbove < 0) out.push("Rental loss allowance phase-out threshold needs a number");
+  if (!fin(pa.rate) || pa.rate < 0 || pa.rate > 1) out.push("Rental loss allowance phase-out rate must be a percentage");
 
   for (const [code, s] of Object.entries(card.states)) {
     if (!s.incomeTax) continue;
@@ -1027,6 +1230,22 @@ export function validateYearCard(card: YearCard): string[] {
         const rows = { single: e.pte.brackets, mfj: e.pte.brackets, mfs: e.pte.brackets, hoh: e.pte.brackets, qss: e.pte.brackets };
         validateBrackets(rows, `${where} PTE elective tax`, out);
       }
+    }
+    if (s.partnership) {
+      const p = s.partnership;
+      if (!fin(p.annualTax) || p.annualTax < 0) out.push(`${where} partnership annual tax needs an amount`);
+      let prev = 0;
+      p.fee.forEach((row, i) => {
+        const last = i === p.fee.length - 1;
+        if (!fin(row.amount) || row.amount < 0) out.push(`${where} LLC fee, row ${i + 1}: needs an amount`);
+        if (last) {
+          if (row.below !== null) out.push(`${where} LLC fee: the last row must be "and over"`);
+        } else if (row.below === null || !fin(row.below) || row.below <= prev) {
+          out.push(`${where} LLC fee, row ${i + 1}: "income below" must be higher than the row above`);
+        } else {
+          prev = row.below;
+        }
+      });
     }
   }
   return out;

@@ -35,9 +35,9 @@ import {
  * does arithmetic — that's compute.ts, in code.
  *
  * Two readers share the machinery: the client's 1040 (with its state
- * return) and, when the business is an S corporation, the corporation's
- * 1120-S (with its state return). Each has its own field list in schema.ts
- * and its own instructions below.
+ * return) and, when the business is an S corporation or a partnership, the
+ * entity's 1120-S or 1065 (with its state return). Each has its own field
+ * list in schema.ts and its own instructions below.
  *
  * Output is constrained with a JSON schema (structured outputs), so the
  * response always parses; the sanitisers still narrow it, because a schema
@@ -61,6 +61,24 @@ export class TaxRecapExtractError extends Error {
 export const DEFAULT_MODEL = "claude-opus-5";
 export function modelName(): string {
   return process.env.AI_MODEL?.trim() || DEFAULT_MODEL;
+}
+
+/**
+ * How much the reader thinks before answering: `AI_EFFORT` = off, low,
+ * medium or high. The Claude 5 models think unless told not to, and at the
+ * API's default a read wrote 4,000–11,500 tokens of thinking — minutes of
+ * waiting. With none at all (2026-10-01) reads took 10–30 seconds but filed
+ * numbers on the wrong line now and then: Form 8995's QBI on the 8995-A
+ * line, a nonresident column worked into the state adjustments, one
+ * partner's Schedule E row as S corporation income. Low is the middle
+ * ground; turn it up if a kind of return keeps misreading. Read per call,
+ * like the model.
+ */
+export type ReadEffort = "off" | "low" | "medium" | "high";
+export const DEFAULT_EFFORT: ReadEffort = "low";
+export function readEffort(): ReadEffort {
+  const v = process.env.AI_EFFORT?.trim().toLowerCase();
+  return v === "off" || v === "low" || v === "medium" || v === "high" ? v : DEFAULT_EFFORT;
 }
 
 /**
@@ -137,20 +155,25 @@ const OUTPUT_SCHEMA = {
 const ENTITY_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
-    entityName: { type: "string", description: "The corporation's name as printed on Form 1120-S. Empty string if not found." },
+    entityName: { type: "string", description: "The entity's name as printed on Form 1120-S or Form 1065. Empty string if not found." },
     taxYear: { type: "integer", description: "The tax year of the return. 0 if not found." },
+    returnForm: {
+      type: "string",
+      enum: ["1120-S", "1065", ""],
+      description: "Which federal return this is: 1120-S for an S corporation, 1065 for a partnership. Empty string if it can't be told.",
+    },
     stateCode: {
       type: "string",
-      description: "Two-letter code of the state whose S corporation return carries the corporation's own tax. Empty string if none.",
+      description: "Two-letter code of the state whose entity return carries the entity's own tax. Empty string if none.",
     },
     stateForm: {
       type: "string",
-      description: "The state S corporation form the state figures came from, e.g. 100S. Empty string if none.",
+      description: "The state entity form the state figures came from, e.g. 100S or 568. Empty string if none.",
     },
     notes: {
       type: "string",
       description:
-        "Anything the reviewer should know: more than one shareholder or state, unusual items, lines you were unsure about. Empty string if nothing.",
+        "Anything the reviewer should know: more than one owner or state, unusual items, lines you were unsure about. Empty string if nothing.",
     },
     lines: {
       type: "array",
@@ -159,7 +182,7 @@ const ENTITY_OUTPUT_SCHEMA = {
       items: lineSchema(ENTITY_FIELD_KEYS),
     },
   },
-  required: ["entityName", "taxYear", "stateCode", "stateForm", "notes", "lines"],
+  required: ["entityName", "taxYear", "returnForm", "stateCode", "stateForm", "notes", "lines"],
   additionalProperties: false,
 };
 
@@ -194,32 +217,52 @@ ${CONVENTIONS}
 
 Federal lines (2025 Form 1040 layout; on an older layout use the line with the same meaning):
 - w2Income: Form 1040 line 1z (total wages). If line 1z is blank and line 1a has a value, use 1a.
-- businessNetIncome: Schedule 1 line 3, which equals Schedule C line 31 (net profit or loss). If Schedule 1 is absent, use Schedule C line 31. Omit when there is no Schedule C.
-- scorpIncome: Schedule 1 line 5 (rental real estate, royalties, partnerships, S corporations, trusts), which equals Schedule E page 2 line 41, when that income is an S corporation's ordinary income from a Schedule K-1 (Form 1120-S). Omit when blank.
+- qualifiedDividends: Form 1040 line 3a. Omit when blank.
+- capitalGain: Form 1040 line 7 (capital gain or loss; a loss as a negative number). Omit when blank.
+- capitalGainLongTerm: Schedule D line 15 (net long-term capital gain or loss) when the print has a Schedule D. Omit otherwise.
+- businessNetIncome: Schedule 1 line 3, which equals Schedule C line 31 (net profit or loss). If Schedule 1 is absent, use Schedule C line 31. Omit when there is no Schedule C. A Schedule C whose only purpose is to pass income through — its receipts are described as "income issued to SSN picked up on the partnership (or S corporation) return" and the same amount is deducted as other expenses, so line 31 is 0 — is NOT a business: omit every Schedule C field for it and say so in notes.
+- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up. This is Schedule 1 line 5 when the only Schedule E income is from S corporations. Omit when there is no S corporation row.
+- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments. Omit when there is no partnership row. Never report the same Schedule E figure under both scorpIncome and partnershipIncome.
+- rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number). Omit when there is no Schedule E page 1.
+- rentalProfits: Schedule E line 21 for the properties showing a profit, added up across every Schedule E page 1 copy. Omit when none.
+- rentalLosses: Schedule E line 21 for the properties showing a loss, added up across every copy, as a POSITIVE number — the losses before any limitation. Omit when none.
+- passivePriorUnallowed: Form 8582 line 1c plus line 2c (prior years' unallowed losses), as a positive number. Omit when there is no Form 8582 or the lines are blank.
+- rentalReps: Schedule E page 2 line 43 (reconciliation for real estate professionals), the net income or loss from rentals the taxpayer materially participated in; a loss as a negative number. Omit when blank — it is the sign that real estate professional status was claimed.
 - totalIncome: Form 1040 line 9.
 - agi: Form 1040 line 11a (or line 11 on older layouts).
 - dependentCount: how many dependents are listed in the Dependents block on Form 1040 page 1. Omit when none.
 - qbiDeduction: Form 1040 line 13a (or 13).
-- qbiIncome: Form 8995-A line 2 (qualified business income), added across the business columns. Only when the return has Form 8995-A; omit when it uses the simplified Form 8995 or has neither.
+- qbiIncome: Form 8995-A line 2 (qualified business income), added across the business columns. Only when the return has Form 8995-A — its title reads "Qualified Business Income Deduction" with a Part II "Determine Your Adjusted Qualified Business Income". Form 8995 (the simplified computation, one page, title "Qualified Business Income Deduction Simplified Computation") also prints a qualified business income figure: never put that one here. Omit all three 8995-A fields when the return has Form 8995 or neither.
 - qbiW2Wages: Form 8995-A line 4 (allocable share of W-2 wages), added across the business columns. Same condition.
 - qbiUbia: Form 8995-A line 7 (allocable share of the unadjusted basis of qualified property), added across the business columns. Omit when blank.
+- qbiLossCarryforward: Form 8995 line 3, the qualified business net loss carryforward from the prior year, as a positive number. Omit when blank or when the return uses Form 8995-A.
+- sepDeduction: Schedule 1 line 16 (self-employed SEP, SIMPLE and qualified plans). Omit when blank.
+- itemizedDeductions: Schedule A line 17 (total itemized deductions), when the print has a Schedule A — even if the return took the standard deduction instead. Omit when there is no Schedule A.
+- saltPaid: Schedule A line 5d (state and local taxes added up, before the cap). Omit when there is no Schedule A.
+- saltDeducted: Schedule A line 5e (state and local taxes after the cap). Omit when there is no Schedule A.
+- medicalExpenses: Schedule A line 1 (medical and dental expenses before the floor). Report 0 when printed as 0; omit when there is no Schedule A.
 - taxableIncome: Form 1040 line 15.
 - incomeTax: Form 1040 line 16.
 - childTaxCredit: Form 1040 line 19. Omit when blank.
 - childCareCredit: Schedule 3 line 2 (= Form 2441 line 11), the credit for child and dependent care expenses. Omit when blank.
 - nonrefundableCredits: Form 1040 line 20 (= Schedule 3 line 8). Omit when blank.
 - seTax: Schedule 2 line 4, which equals Schedule SE line 12. If Schedule 2 is absent use Schedule SE line 12; if neither exists, omit.
+- otherTaxes: Form 1040 line 23 (other taxes, including self-employment tax, from Schedule 2 line 21). Report 0 when printed as 0; omit when blank.
 - niit: Schedule 2 line 12 (= Form 8960 line 17), net investment income tax. Omit when blank or 0.
 - federalTotalTax: Form 1040 line 24.
 - federalPayments: Form 1040 line 33 (total payments — this line includes line 32).
 - federalWithholding: Form 1040 line 25d (federal income tax withheld). Omit when blank.
-- federalRefundableCredits: Form 1040 line 32 (total other payments and refundable credits: net premium tax credit, additional child tax credit, earned income credit, etc.). Omit when blank.
+- federalRefundableCredits: Form 1040 line 32 (total other payments and refundable credits: net premium tax credit, additional child tax credit, earned income credit, and line 31 — this line includes line 31). Omit when blank.
+- otherPayments: Form 1040 line 31, which equals Schedule 3 line 15 (amount paid with an extension, excess Social Security withheld, other payments). Omit when blank — and it usually is. Estimated tax payments are line 26, not line 31; when line 32 is blank, line 31 is blank too.
 - federalRefund: Form 1040 line 35a; omit when there is no refund.
 - federalAmountOwed: Form 1040 line 37; omit when there is a refund.
 - federalPenalty: Form 1040 line 38 (estimated tax penalty); omit when empty.
 - grossReceipts: Schedule C line 1. If there are several Schedules C, sum them and say so in notes. Omit when there is no Schedule C.
 - totalExpenses: Schedule C line 28.
 - homeOffice: Schedule C line 30.
+- cogs: Schedule C line 4 (cost of goods sold). Omit when blank.
+- schCWages: Schedule C line 26 (wages, less employment credits). Omit when blank.
+- schCDepreciation: Schedule C line 13 (depreciation and section 179). Omit when blank.
 
 State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field. If there is more than one state, sum the amounts and list the states in notes.
 - stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
@@ -230,6 +273,8 @@ State lines. The state return can be for any state; identify the main individual
 - statePenalty: underpayment penalty plus interest and late penalties. California 540: line 112 plus line 113. California 540NR: line 122 plus line 123. Omit when none.
 - stateTotalDue: total amount due including penalties. California 540: line 114. California 540NR: line 124.
 - stateSourceIncome: ONLY on a nonresident or part-year state return (California Form 540NR): the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Omit on a resident return.
+- stateAdjustments: the state's net adjustment to federal AGI before its own deductions, additions less subtractions. California Form 540: line 16 minus line 14 (Schedule CA (540) Part I line 27, column C less column B). Form 540NR: Schedule CA (540NR) Part II line 27, column C less column B. Negative when the subtractions are larger. Omit when both columns are blank, and for a state that starts from its own gross income (New Jersey).
+- stateDeduction: the deduction the state return took — its standard deduction or its own itemized deductions, whichever line 18 of California Form 540 shows (= Schedule CA (540) Part II line 30). Omit for states without such a line.
 - stateBusinessIncome: the state's own business profit line when the state return has one (New Jersey NJ-1040 line 18, "Net profits from business"; for an S corporation shareholder, NJ-1040 line 22, "Net pro rata share of S corporation income"). Omit for California.
 - stateExemptions: the state's total exemption amount when it is a deduction from income (NJ-1040 line 13). Omit for California.
 - stateExemptionCredits: the state's exemption credits after any phase-out, when they are a credit off the tax (California 540 line 32). Omit for other states.
@@ -241,10 +286,10 @@ State lines. The state return can be for any state; identify the main individual
 - stateSharedResponsibility: a state shared responsibility (health coverage) payment (NJ-1040 line 53c). Omit when blank.
 - uninsuredMonths: on Schedule NJ-HCC, the number of months of the year with NO box checked for the taxpayer (0 if every month is checked or Part I says Yes). Omit when there is no such schedule.
 
-Marketplace health coverage lines (only when Form 8962 is in the print; omit all of these otherwise):
+Health coverage lines (sehiDeduction and sehiPaid whenever the return has them; the Form 8962 lines only when Form 8962 is in the print — omit those otherwise):
 - additionalTaxes: Form 1040 line 17 (Schedule 2 line 3), the excess advance premium tax credit repayment. Omit when blank.
 - sehiDeduction: Schedule 1 line 17, self-employed health insurance deduction. Omit when blank.
-- sehiPaid: Form 7206 line 1, the premiums paid. Omit when there is no Form 7206.
+- sehiPaid: Form 7206 line 1, the premiums paid; with several Forms 7206 (one per spouse or business), their line 1 amounts added up. Omit when there is no Form 7206.
 - medicareWages: Form 7206 line 11, the Medicare wages from an S corporation the taxpayer owns more than 2% of. Omit when blank.
 - ptcFamilySize: Form 8962 line 1.
 - ptcPovertyLine: Form 8962 line 4.
@@ -258,12 +303,14 @@ Marketplace health coverage lines (only when Form 8962 is in the print; omit all
 
 Also report the taxpayer's name as printed on Form 1040, the tax year, the filing status, and the two-letter state code of the state return. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
 
-const ENTITY_SYSTEM = `You read US S corporation income tax returns (Form 1120-S with the state's S corporation return) printed from Intuit ProSeries and report specific line values as JSON.
+const ENTITY_SYSTEM = `You read US pass-through entity income tax returns printed from Intuit ProSeries — an S corporation's Form 1120-S or a partnership's Form 1065, with the state's own return for the entity — and report specific line values as JSON.
 
 ${CONVENTIONS}
-- The print may include a cover letter, filing instructions, estimated-tax vouchers, e-file authorizations (Form 8879-CORP, FTB 8453-C), worksheets, statements, and one or more state returns. Read the primary form lines listed below.
+- The print may include a cover letter, filing instructions, estimated-tax vouchers, e-file authorizations (Form 8879-CORP, 8879-PE, FTB 8453-C, FTB 8453-LLC), worksheets, statements, and one or more state returns. Read the primary form lines listed below.
+- First decide which return this is (returnForm): "1120-S" for an S corporation, "1065" for a partnership. Page 1 of the federal form may have an unreadable text layer; the Schedules K-1 that follow name the form ("Schedule K-1 (Form 1065)" with "Partner's Share of Income" is a partnership).
+- Several of the K-1 fields come in pairs: the owner's and a second owner's. The second owner's fields are for the case where two people on the same joint Form 1040 both hold K-1s (a married couple who are both partners). Report the first K-1 as the owner's and the second as the spouse's; with one K-1, omit the second owner's fields; with more than two owners, report the two whose K-1s go on this client's 1040 and list the others in notes.
 
-Federal lines (2025 Form 1120-S layout; on an older layout use the line with the same meaning):
+Federal lines — Form 1120-S (2025 layout; on an older layout use the line with the same meaning):
 - grossReceipts: Form 1120-S line 1a (gross receipts or sales). If line 1b has returns and allowances, report line 1c instead and say so in notes.
 - cogs: Form 1120-S line 2 (cost of goods sold). Omit when blank.
 - totalIncome: Form 1120-S line 6.
@@ -275,25 +322,46 @@ Federal lines (2025 Form 1120-S layout; on an older layout use the line with the
 - otherDeductions: Form 1120-S line 20. Omit when blank.
 - totalDeductions: Form 1120-S line 21.
 - ordinaryIncome: Form 1120-S line 22 (ordinary business income or loss).
-- k1Ordinary: Schedule K-1 (Form 1120-S) Part III box 1, ordinary business income, for the shareholder. If there is more than one K-1, report the largest share and list the others in notes.
+- k1Ordinary: Schedule K-1 (Form 1120-S) Part III box 1, ordinary business income, for the shareholder.
 - ownershipPct: Schedule K-1 (Form 1120-S) item G, the shareholder's current year allocation percentage, as a plain number (100 for 100%).
-- distributions: Schedule K-1 (Form 1120-S) box 16 code D. Omit when blank.
+- k1Ordinary2, ownershipPct2: the same two lines from the second shareholder's K-1, when a second owner is on the same 1040. Omit otherwise.
+- distributions: Schedule K-1 (Form 1120-S) box 16 code D, every owner on this 1040 added up. Omit when blank.
 
-State lines: the state's own S corporation return (California Form 100S, New Jersey CBT-100S with Form PTE-100; other states have an equivalent). If more than one state return is in the print, report the state where the corporation's address is and list the others in notes. If there is none, set stateCode and stateForm to empty strings and omit every state field.
-- stateNetIncome: the corporation's net income for state tax (California 100S line 20; New Jersey: the entire net income on CBT-100S, or the total distributive proceeds on Form PTE-100 when the CBT-100S has none).
+Federal lines — Form 1065 (2025 layout):
+- grossReceipts: Form 1065 line 1a. If line 1b has returns and allowances, report line 1c instead and say so in notes.
+- cogs: Form 1065 line 2. Omit when blank.
+- totalIncome: Form 1065 line 8.
+- wages: Form 1065 line 9 (salaries and wages other than to partners). Omit when blank.
+- guaranteedPayments: Form 1065 line 10 (guaranteed payments to partners). Omit when blank.
+- taxesLicenses: Form 1065 line 14. Omit when blank.
+- pension: Form 1065 line 18. Omit when blank.
+- employeeBenefits: Form 1065 line 19. Omit when blank.
+- otherDeductions: Form 1065 line 21. Omit when blank.
+- totalDeductions: Form 1065 line 22.
+- ordinaryIncome: Form 1065 line 23 (ordinary business income or loss).
+- k1Ordinary: Schedule K-1 (Form 1065) Part III box 1 for the first partner.
+- k1Guaranteed: Schedule K-1 (Form 1065) box 4c (total guaranteed payments) for the first partner. Omit when blank.
+- ownershipPct: Schedule K-1 (Form 1065) item J, the partner's ending profit percentage, as a plain number (50 for 50%).
+- k1Ordinary2, k1Guaranteed2, ownershipPct2: the same lines from the second partner's K-1, when a second partner is on the same 1040 (a spouse). Omit otherwise.
+- distributions: Schedule K-1 (Form 1065) box 19 code A, every partner on this 1040 added up. Omit when blank.
+- officerComp: omit for a partnership.
+
+State lines: the state's own entity return — California Form 100S for an S corporation, California Form 568 for an LLC or Form 565 for a partnership, New Jersey CBT-100S with Form PTE-100; other states have an equivalent. If more than one state return is in the print, report the state where the entity's address is and list the others in notes. If there is none, set stateCode and stateForm to empty strings and omit every state field.
+- stateNetIncome: the entity's net income for state tax (California 100S line 20; New Jersey: the entire net income on CBT-100S, or the total distributive proceeds on Form PTE-100 when the CBT-100S has none). For Form 568, Schedule B line 23 (ordinary income).
+- stateGrossIncome: California Form 568 line 1 (total income from Schedule IW), the base of the LLC fee. Omit for other forms.
 - stateAddBack: taxes based on income that were deducted federally and are added back for the state (California 100S line 2). Omit when blank.
-- stateTax: the state's own tax on the corporation before credits, at least the minimum franchise tax (California 100S line 21; New Jersey CBT-100S: the minimum tax / tax due).
-- pteTax: the pass-through entity elective tax (California 100S line 29, or Form 3804 line 3 when that form is in the print and line 29 is blank; New Jersey Form PTE-100: the total pass-through business alternative income tax). Omit when neither is printed.
-- stateTotalTax: the state's total tax on the corporation (California 100S line 30; New Jersey CBT-100S total tax).
-- statePayments: the corporation's total state payments (California 100S line 36). Omit when blank.
-- stateAmountDue: the total amount due (California 100S line 45). Report 0 when printed as 0.
-- stateRefund: the refund (California 100S line 43). Omit when blank.
+- stateTax: the state's own tax on the entity before credits, at least the minimum (California 100S line 21; California 568: line 2 plus line 3, the LLC fee and the annual LLC tax; New Jersey CBT-100S: the minimum tax / tax due).
+- pteTax: the pass-through entity elective tax (California 100S line 29 or 568 line 4, or Form 3804 line 3 when that form is in the print and the line is blank; New Jersey Form PTE-100: the total pass-through business alternative income tax). Omit when neither is printed.
+- stateTotalTax: the state's total tax on the entity (California 100S line 30; 568 line 7; New Jersey CBT-100S total tax).
+- statePayments: the entity's total state payments (California 100S line 36; 568 line 12). Omit when blank.
+- stateAmountDue: the total amount due (California 100S line 45; 568 line 21). Report 0 when printed as 0.
+- stateRefund: the refund (California 100S line 43; 568 line 19). Omit when blank.
 
-Also report the corporation's name as printed on Form 1120-S, the tax year, the two-letter state code and the state form. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
+Also report the entity's name as printed on the federal form, the tax year, which form it is, the two-letter state code and the state form. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
 
 function userPrompt(kind: "before" | "after" | "entity"): string {
   if (kind === "entity") {
-    return `This is the S corporation's return (Form 1120-S and its state return) for the client's business, as filed. Read the lines described in your instructions from this PDF and return the JSON.`;
+    return `This is the entity's return (Form 1120-S or Form 1065, with its state return) for the client's business, as filed. Read the lines described in your instructions from this PDF and return the JSON.`;
   }
   return kind === "before"
     ? `This is the BEFORE return: the same client's return prepared with income only and no deductions or strategies applied. Read the lines described in your instructions from this PDF and return the JSON.`
@@ -302,17 +370,26 @@ function userPrompt(kind: "before" | "after" | "entity"): string {
 
 /* ─────────────────────────────── the call ───────────────────────────────── */
 
+/** What a read cost and how long it took, with the model and effort it ran at. */
+export type ReadUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  model: string;
+  effort: ReadEffort;
+  seconds: number;
+};
+
 export type ExtractResult = {
   extract: ReturnExtract;
   /** Reviewer-facing notes: unverified numbers, Claude's own notes. */
   warnings: string[];
-  usage: { inputTokens: number; outputTokens: number };
+  usage: ReadUsage;
 };
 
 export type EntityExtractResult = {
   extract: EntityExtract;
   warnings: string[];
-  usage: { inputTokens: number; outputTokens: number };
+  usage: ReadUsage;
 };
 
 let client: Anthropic | null = null;
@@ -344,15 +421,19 @@ async function readPdf(
   kind: "before" | "after" | "entity",
   system: string,
   schema: Record<string, unknown>,
-): Promise<{ parsed: unknown; usage: Anthropic.Message["usage"]; model: string }> {
-  const label = kind === "entity" ? "S corporation return" : `${kind} return`;
+): Promise<{ parsed: unknown; usage: ReadUsage }> {
+  const label = kind === "entity" ? "entity return" : `${kind} return`;
   // Streamed so a long read (a 40-page client copy takes a while) can't trip
   // an idle-connection timeout somewhere between here and the API.
   const model = modelName();
+  const effort = readEffort();
+  const started = Date.now();
   const read = async (): Promise<Anthropic.Message> => {
     const stream = anthropic().messages.stream({
       model,
-      max_tokens: 16000,
+      // Thinking counts against this, so there's room for a "high" read.
+      max_tokens: 32000,
+      ...(effort === "off" ? { thinking: { type: "disabled" as const } } : {}),
       system,
       messages: [
         {
@@ -373,6 +454,7 @@ async function readPdf(
       ],
       output_config: {
         format: { type: "json_schema", schema },
+        ...(effort === "off" ? {} : { effort }),
       },
     });
     try {
@@ -424,7 +506,16 @@ async function readPdf(
   } catch {
     throw new TaxRecapExtractError("The model's answer wasn't valid JSON");
   }
-  return { parsed: toFieldShape(parsed), usage: message.usage, model };
+  return {
+    parsed: toFieldShape(parsed),
+    usage: {
+      inputTokens: message.usage.input_tokens,
+      outputTokens: message.usage.output_tokens,
+      model,
+      effort,
+      seconds: Math.round((Date.now() - started) / 100) / 10,
+    },
+  };
 }
 
 const noTextWarning = (pageTexts: string[] | null) =>
@@ -440,7 +531,7 @@ export async function extractReturn(
   pageMap: number[] | null = null,
 ): Promise<ExtractResult> {
   checkPdf(pdf);
-  const { parsed, usage, model } = await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA);
+  const { parsed, usage } = await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA);
   const raw = sanitizeExtract(parsed);
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 
@@ -460,15 +551,11 @@ export async function extractReturn(
   if (extract.notes) warnings.push(`Reader notes: ${extract.notes}`);
 
   console.log(
-    `[tax-recap] read ${kind} return with ${model}: ${pageTexts?.length ?? "?"} pages sent, ` +
-      `${usage.input_tokens} in / ${usage.output_tokens} out, ${unverified.length} unverified`,
+    `[tax-recap] read ${kind} return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
+      `${pageTexts?.length ?? "?"} pages sent, ${usage.inputTokens} in / ${usage.outputTokens} out, ${unverified.length} unverified`,
   );
 
-  return {
-    extract,
-    warnings,
-    usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens },
-  };
+  return { extract, warnings, usage };
 }
 
 /** The corporation's return: Form 1120-S, its K-1, and the state S corporation return. */
@@ -478,7 +565,7 @@ export async function extractEntityReturn(
   pageMap: number[] | null = null,
 ): Promise<EntityExtractResult> {
   checkPdf(pdf);
-  const { parsed, usage, model } = await readPdf(pdf, "entity", ENTITY_SYSTEM, ENTITY_OUTPUT_SCHEMA);
+  const { parsed, usage } = await readPdf(pdf, "entity", ENTITY_SYSTEM, ENTITY_OUTPUT_SCHEMA);
   const raw = sanitizeEntityExtract(parsed);
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 
@@ -487,21 +574,18 @@ export async function extractEntityReturn(
   const { unverified, noText } = verified;
 
   const warnings: string[] = [];
+  const formName = extract.returnForm ?? "entity return";
   if (unverified.length) {
     const labels = unverified.map((k) => ENTITY_FIELDS.find((f) => f.key === k)?.label ?? k);
-    warnings.push(`Couldn't find these numbers in the 1120-S text, check them by hand: ${labels.join(", ")}`);
+    warnings.push(`Couldn't find these numbers in the ${formName} text, check them by hand: ${labels.join(", ")}`);
   }
   if (noText) warnings.push(noTextWarning(pageTexts));
-  if (extract.notes) warnings.push(`Reader notes (1120-S): ${extract.notes}`);
+  if (extract.notes) warnings.push(`Reader notes (${formName}): ${extract.notes}`);
 
   console.log(
-    `[tax-recap] read entity return with ${model}: ${pageTexts?.length ?? "?"} pages sent, ` +
-      `${usage.input_tokens} in / ${usage.output_tokens} out, ${unverified.length} unverified`,
+    `[tax-recap] read entity return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
+      `${pageTexts?.length ?? "?"} pages sent, ${usage.inputTokens} in / ${usage.outputTokens} out, ${unverified.length} unverified`,
   );
 
-  return {
-    extract,
-    warnings,
-    usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens },
-  };
+  return { extract, warnings, usage };
 }

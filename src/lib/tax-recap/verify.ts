@@ -35,12 +35,51 @@ export function appearsOn(pageText: string | undefined, value: number): boolean 
   return re.test(hay);
 }
 
+/** Every standalone amount printed on a page, commas dropped. */
+function amountsOn(pageText: string | undefined): number[] {
+  if (!pageText) return [];
+  return (pageText.match(/(?<![\d.,])\d[\d,]*(?![\d])/g) ?? [])
+    .map((s) => Number(s.replace(/,/g, "")))
+    .filter((v) => Number.isFinite(v) && v > 0);
+}
+
+/**
+ * Is `value` two printed amounts added together? Only asked of the fields
+ * the field map defines as a sum the return never prints — the premiums on
+ * two Forms 7206 (one per partner), Form 8582 lines 1c + 2c, the properties
+ * on Schedule E line 21, the distributions on two K-1s, Form 568's fee plus
+ * annual tax. The same amount twice (4,145 on each partner's 7206) counts
+ * only when it's printed twice.
+ */
+function sumOfTwoOn(pageTexts: (string | undefined)[], value: number): boolean {
+  const target = Math.abs(Math.round(value));
+  const counts = new Map<number, number>();
+  for (const t of pageTexts) for (const a of amountsOn(t)) counts.set(a, (counts.get(a) ?? 0) + 1);
+  for (const [a, c] of counts) {
+    const b = target - a;
+    if (b <= 0) continue;
+    if (b === a ? c >= 2 : counts.has(b)) return true;
+  }
+  return false;
+}
+
+/** Fields the field map defines as an addition of printed amounts. */
+const SUM_FIELDS = new Set<string>([
+  "sehiPaid",
+  "passivePriorUnallowed",
+  "rentalProfits",
+  "rentalLosses",
+  "distributions",
+  "stateTax",
+]);
+
 /**
  * Stamp `verified` on each value. Off-by-one page citations are common
  * enough (a cover page counted or not) that the neighbours are checked too
  * and the page corrected when the number is found there instead. A number
  * found nowhere in the document is flagged, not dropped — the reviewer
- * decides.
+ * decides. A field that is a sum by definition (`SUM_FIELDS`) also passes
+ * as two amounts on the cited page and its neighbours.
  */
 export function verifyFields<K extends string>(
   fields: Record<K, ExtractedValue>,
@@ -77,6 +116,12 @@ export function verifyFields<K extends string>(
     const anywhere = pageTexts.findIndex((t) => appearsOn(t, value));
     if (anywhere !== -1) {
       out[key] = { value, page: anywhere + 1, verified: true };
+    } else if (
+      SUM_FIELDS.has(key) &&
+      candidates.length &&
+      sumOfTwoOn(candidates.map((p) => pageTexts[p - 1]), value)
+    ) {
+      out[key] = { value, page: cited, verified: true };
     } else {
       out[key] = { ...f, verified: false };
       unverified.push(key);
