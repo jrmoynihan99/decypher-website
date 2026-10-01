@@ -198,6 +198,7 @@ export async function listProofPairings(): Promise<ProofPairing[]> {
         filingStatus: a.filingStatus,
         stateCode: doc.stateCode ?? a.stateCode,
         stateForm: a.stateForm,
+        entityForm: doc.extraction.entity?.returnForm ?? null,
       },
       before: doc.before,
       after: doc.after,

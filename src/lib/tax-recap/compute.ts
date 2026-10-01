@@ -10,6 +10,8 @@
  *  - Federal Taxes is total tax (line 24) net of refundable credits (line
  *    32): a credit lowers the client's tax, it isn't money they paid. What
  *    they paid is line 33 minus line 32 — withholding and estimates only.
+ *    Line 32 also carries line 31 (paid with an extension, excess Social
+ *    Security withheld), which IS money paid, so that part is netted back.
  *  - State Taxes is the state's tax before payments and WITHOUT underpayment
  *    penalties or interest; Penalties get their own row. Some state totals
  *    bundle the penalty in (NJ-1040 "Total Tax Due"); extraction unbundles
@@ -31,6 +33,14 @@ const n = (v: number | null | undefined) => (typeof v === "number" && isFinite(v
 const has = (v: number | null | undefined): v is number =>
   typeof v === "number" && isFinite(v);
 
+/**
+ * The refundable credits proper: line 32 less the other payments on line
+ * 31 it includes (an extension payment, excess Social Security withheld),
+ * which are money the client sent in, not a credit against the tax.
+ */
+export const refundableCreditsOf = (r: ReturnNumbers): number =>
+  Math.max(0, n(r.federalRefundableCredits) - n(r.otherPayments));
+
 export type RecapSide = {
   w2Income: number;
   businessNetIncome: number;
@@ -38,19 +48,34 @@ export type RecapSide = {
   grossIncome: number;
   federalTaxes: number;
   stateTaxes: number;
-  /** The S corporation's own state tax plus its PTE elective tax; 0 for a sole proprietor. */
+  /** The entity's own state tax (an S corporation's franchise tax, an LLC's annual tax and fee) plus its PTE elective tax; 0 for a sole proprietor. */
   entityTaxes: number;
   penalties: number;
   totalTaxes: number;
 };
 
+/**
+ * What kind of business the client runs through an entity return, from the
+ * lines the 1040 carries: an S corporation's K-1, a partnership's, or
+ * neither (a sole proprietor). Decides the recap's labels.
+ */
+export type EntityKind = "scorp" | "partnership" | null;
+
+export function entityKindOf(after: ReturnNumbers, before: ReturnNumbers | null = null, entity: EntityNumbers | null = null): EntityKind {
+  if (n(after.partnershipIncome) > 0 || n(before?.partnershipIncome) > 0) return "partnership";
+  if (n(after.scorpIncome) > 0 || n(before?.scorpIncome) > 0) return "scorp";
+  // An entity return with guaranteed payments is a partnership; one with officer pay is an S corporation.
+  if (entity) return n(entity.guaranteedPayments) > 0 || n(entity.k1Guaranteed) > 0 ? "partnership" : "scorp";
+  return null;
+}
+
 export function sideSummary(r: ReturnNumbers, e: EntityNumbers | null = null): RecapSide {
   const w2 = n(r.w2Income);
-  const biz = n(r.businessNetIncome) + n(r.scorpIncome);
+  const biz = n(r.businessNetIncome) + n(r.scorpIncome) + n(r.partnershipIncome);
   // Total income falls back to the parts when line 9 wasn't read, so a
   // half-extracted return still previews instead of showing $0 everywhere.
   const gross = has(r.totalIncome) ? r.totalIncome : w2 + biz;
-  const federal = n(r.federalTotalTax) - n(r.federalRefundableCredits);
+  const federal = n(r.federalTotalTax) - refundableCreditsOf(r);
   // A refundable PTE credit (New Jersey's BAIT) sits with the payments, so
   // the printed state tax is gross of it; the shareholder's real state bill
   // is net, the same convention as the federal refundable credits.
@@ -120,8 +145,10 @@ export type RecapComputed = {
   };
   currentYearIncome: number;
   priorYearIncome: number | null;
-  /** True when the client's business is an S corporation. */
+  /** True when the client's business runs through an entity return (an S corporation or a partnership). */
   scorp: boolean;
+  /** Which kind of entity, for the recap's labels; null for a sole proprietor. */
+  entityKind: EntityKind;
 };
 
 export function computeRecap(
@@ -134,11 +161,12 @@ export function computeRecap(
   const after = sideSummary(input.after, ea);
   const a = input.after;
   const b = input.before;
-  const scorp = n(a.scorpIncome) > 0 || n(b.scorpIncome) > 0 || !!ea;
+  const entityKind = entityKindOf(a, b, ea ?? eb);
+  const scorp = entityKind !== null;
 
   // Line 33 bundles refundable credits in with payments; only the payments
   // count as "paid" — the credit already lowered the tax figure above.
-  const fedPaid = Math.max(0, n(a.federalPayments) - n(a.federalRefundableCredits));
+  const fedPaid = Math.max(0, n(a.federalPayments) - refundableCreditsOf(a));
   const federal = filingLine(
     fedPaid,
     a.federalRefund,
@@ -192,6 +220,7 @@ export function computeRecap(
     currentYearIncome: receipts + (scorp ? 0 : n(a.w2Income ?? b.w2Income)),
     priorYearIncome: input.priorYearIncome,
     scorp,
+    entityKind,
   };
 }
 
@@ -210,17 +239,17 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
   const add = (message: string) => w.push({ side, message });
 
   if (!has(r.federalTotalTax)) add("Federal total tax (1040 line 24) wasn't read");
-  if (!has(r.totalIncome) && !has(r.businessNetIncome) && !has(r.scorpIncome) && !has(r.w2Income)) {
+  if (!has(r.totalIncome) && !has(r.businessNetIncome) && !has(r.scorpIncome) && !has(r.partnershipIncome) && !has(r.w2Income)) {
     add("No income lines were read");
   }
 
   if (has(r.federalTotalTax) && has(r.incomeTax)) {
     // Line 24 = 16 + 17 − 19 − 20 + 23 (SE tax, additional Medicare, NIIT…).
-    // Not every piece of line 23 is read, so a gap is a glance, not an alarm.
+    // Line 23 is the whole of it when read; otherwise not every piece of it
+    // is, so a gap is a glance, not an alarm.
     const expected =
       Math.max(0, r.incomeTax + n(r.additionalTaxes) - n(r.childTaxCredit) - n(r.nonrefundableCredits)) +
-      n(r.seTax) +
-      n(r.niit);
+      (has(r.otherTaxes) ? r.otherTaxes : n(r.seTax) + n(r.niit));
     const gap = r.federalTotalTax - expected;
     if (Math.abs(gap) > TOL) {
       add(
@@ -232,7 +261,8 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
     add("Taxable income is larger than AGI");
   }
   if (has(r.totalIncome)) {
-    const parts = n(r.w2Income) + n(r.businessNetIncome) + n(r.scorpIncome);
+    const parts =
+      n(r.w2Income) + n(r.businessNetIncome) + n(r.scorpIncome) + n(r.partnershipIncome) + Math.min(0, n(r.rentalIncome));
     // A capital loss (capped at $3,000) is the usual reason total income
     // runs under the parts; anything bigger is worth a look.
     if (r.totalIncome + 3000 + TOL < parts) {
@@ -240,6 +270,12 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
         `Total income ${fmt(r.totalIncome)} is ${fmt(parts - r.totalIncome)} less than W-2 + business income ${fmt(parts)} — a loss on Schedule D or E, or a misread line`,
       );
     }
+  }
+  if (has(r.rentalLosses) && has(r.rentalIncome) && r.rentalLosses > 0 && r.rentalIncome < -(r.rentalLosses + n(r.rentalProfits)) - TOL) {
+    add(`Rental income or loss ${fmt(r.rentalIncome)} is a bigger loss than the properties' own losses ${fmt(r.rentalLosses)}`);
+  }
+  if (has(r.saltDeducted) && has(r.saltPaid) && r.saltDeducted > r.saltPaid + TOL) {
+    add("State and local taxes deducted (Schedule A line 5e) exceed the taxes paid (line 5d)");
   }
   if (has(r.federalAmountOwed) && has(r.federalTotalTax)) {
     const expected = r.federalTotalTax - n(r.federalPayments) + n(r.federalPenalty);
@@ -262,6 +298,9 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
   if (has(r.federalRefundableCredits) && has(r.federalPayments) && r.federalRefundableCredits > r.federalPayments + TOL) {
     add("Refundable credits (line 32) exceed total payments (line 33), which includes them");
   }
+  if (has(r.otherPayments) && r.otherPayments > n(r.federalRefundableCredits) + TOL) {
+    add("Other payments (line 31) exceed line 32, which includes them");
+  }
   if (
     has(r.stateTotalTax) &&
     has(r.stateTotalDue) &&
@@ -273,10 +312,10 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
     );
   }
   if (has(r.businessNetIncome) && has(r.grossReceipts)) {
-    const expected = r.grossReceipts - n(r.totalExpenses) - n(r.homeOffice);
+    const expected = r.grossReceipts - n(r.cogs) - n(r.totalExpenses) - n(r.homeOffice);
     if (off(r.businessNetIncome, expected)) {
       add(
-        `Schedule C net profit ${fmt(r.businessNetIncome)} ≠ gross receipts − expenses − home office ${fmt(expected)} (COGS, returns or other income may explain it)`,
+        `Schedule C net profit ${fmt(r.businessNetIncome)} ≠ gross receipts − cost of goods sold − expenses − home office ${fmt(expected)} (returns and allowances or other income on line 6 may explain it)`,
       );
     }
   }
@@ -305,8 +344,15 @@ export function validateEntity(e: EntityNumbers, r: ReturnNumbers): Warning[] {
   if (has(e.ordinaryIncome) && has(e.totalIncome) && has(e.totalDeductions) && off(e.ordinaryIncome, e.totalIncome - e.totalDeductions)) {
     add(`1120-S ordinary income ${fmt(e.ordinaryIncome)} ≠ total income − total deductions ${fmt(e.totalIncome - e.totalDeductions)}`);
   }
-  if (has(e.k1Ordinary) && has(r.scorpIncome) && off(e.k1Ordinary, r.scorpIncome)) {
-    add(`The K-1's ordinary income ${fmt(e.k1Ordinary)} isn't what the 1040 reports on Schedule E (${fmt(r.scorpIncome)})`);
+  // Every K-1 on this 1040 added up — ordinary income and, for a partner,
+  // the guaranteed payments — is what Schedule E reports.
+  const k1Total = n(e.k1Ordinary) + n(e.k1Ordinary2) + n(e.k1Guaranteed) + n(e.k1Guaranteed2);
+  const reported = has(r.partnershipIncome) ? r.partnershipIncome : has(r.scorpIncome) ? r.scorpIncome : null;
+  if (has(e.k1Ordinary) && reported !== null && off(k1Total, reported)) {
+    add(`The K-1s' income ${fmt(k1Total)} isn't what the 1040 reports on Schedule E (${fmt(reported)})`);
+  }
+  if (has(e.guaranteedPayments) && (has(e.k1Guaranteed) || has(e.k1Guaranteed2)) && off(e.guaranteedPayments, n(e.k1Guaranteed) + n(e.k1Guaranteed2))) {
+    add(`Guaranteed payments on the 1065 (${fmt(e.guaranteedPayments)}) aren't the K-1s' box 4c added up (${fmt(n(e.k1Guaranteed) + n(e.k1Guaranteed2))}) — a partner who isn't on this 1040`);
   }
   if (has(e.officerComp) && has(r.w2Income) && r.w2Income > e.officerComp + TOL) {
     add(`W-2 wages on the 1040 (${fmt(r.w2Income)}) exceed the officer compensation on the 1120-S (${fmt(e.officerComp)})`);
@@ -354,6 +400,9 @@ export function crossValidate(
     !(n(before.scorpIncome) > 0 || n(after.scorpIncome) > 0)
   ) {
     add("W-2 wages differ between the two returns");
+  }
+  if (has(before.rentalLosses) && has(after.rentalLosses) && off(before.rentalLosses, after.rentalLosses)) {
+    add("The rental properties' losses differ between the two returns — the before return should carry the same Schedule E");
   }
   if (
     has(before.federalPayments) &&

@@ -16,6 +16,7 @@ import {
   type ByStatus,
   type EntityRules,
   type FederalCard,
+  type PartnershipRules,
   type StateCard,
   type TaxTableRule,
   type YearCard,
@@ -443,6 +444,8 @@ function FederalEditor({ card, onChange }: { card: FederalCard; onChange: (patch
         <StatusRow label="Additional Medicare threshold" hint="Form 8959: wages + SE earnings above this pay the extra rate." value={card.additionalMedicare.threshold} onChange={(threshold) => onChange({ additionalMedicare: { ...card.additionalMedicare, threshold } })} />
         <StatusRow label="Net investment income tax threshold" hint="Form 8960: the rate applies to investment income above this AGI." value={card.netInvestmentIncomeTax.threshold} onChange={(threshold) => onChange({ netInvestmentIncomeTax: { ...card.netInvestmentIncomeTax, threshold } })} />
         <StatusRow label="Child tax credit phase-out threshold" hint="Schedule 8812: the credit shrinks above this AGI." value={card.childTaxCredit.phaseOutThreshold} onChange={(phaseOutThreshold) => onChange({ childTaxCredit: { ...card.childTaxCredit, phaseOutThreshold } })} />
+        <StatusRow label="Capital gains 0% bracket" hint="Qualified Dividends and Capital Gain Tax Worksheet: dividends and long-term gains inside this much taxable income are taxed at 0%." value={card.capitalGains.zeroRateBelow} onChange={(zeroRateBelow) => onChange({ capitalGains: { ...card.capitalGains, zeroRateBelow } })} />
+        <StatusRow label="Capital gains top-rate threshold" hint="Taxable income above this is taxed at the top capital gains rate." value={card.capitalGains.topRateAbove} onChange={(topRateAbove) => onChange({ capitalGains: { ...card.capitalGains, topRateAbove } })} />
       </Panel>
       <Panel title="Federal · child tax credit and QBI limits">
         <div className="grid gap-4 sm:grid-cols-3">
@@ -464,6 +467,51 @@ function FederalEditor({ card, onChange }: { card: FederalCard; onChange: (patch
           <Labeled label="QBI wages + property: property" hint="Form 8995-A line 8.">
             <Num value={card.qbi.wageAndPropertyLimit.property} pct onChange={(v) => onChange({ qbi: { ...card.qbi, wageAndPropertyLimit: { ...card.qbi.wageAndPropertyLimit, property: v ?? 0 } } })} />
           </Labeled>
+        </div>
+      </Panel>
+      <Panel title="Federal · itemized deductions and rental losses">
+        <StatusRow label="SALT cap" hint="Schedule A line 5e: the most state and local tax that can be deducted." value={card.salt.cap} onChange={(cap) => onChange({ salt: { ...card.salt, cap } })} />
+        <div className="py-3">
+          <Check
+            value={!!card.salt.phaseDownAbove}
+            onChange={(on) =>
+              onChange({
+                salt: {
+                  ...card.salt,
+                  phaseDownAbove: on ? { single: 500000, mfj: 500000, qss: 500000, hoh: 500000, mfs: 250000 } : null,
+                  phaseDownRate: on ? card.salt.phaseDownRate || 0.3 : 0,
+                },
+              })
+            }
+            label="The cap phases down on income"
+            hint="From 2025 the $40,000 cap shrinks by 30% of modified AGI over $500,000, down to a $10,000 floor. Years with a flat $10,000 cap have no phase-down."
+          />
+        </div>
+        {card.salt.phaseDownAbove ? (
+          <div className="space-y-1 rounded-[16px] border border-edge px-4 py-3">
+            <StatusRow label="Phases down above (modified AGI)" value={card.salt.phaseDownAbove} onChange={(phaseDownAbove) => onChange({ salt: { ...card.salt, phaseDownAbove } })} />
+            <Labeled label="Reduce by (share of the excess)" className="max-w-[160px] pt-3">
+              <Num value={card.salt.phaseDownRate} pct onChange={(v) => onChange({ salt: { ...card.salt, phaseDownRate: v ?? 0 } })} />
+            </Labeled>
+            <StatusRow label="Floor" value={card.salt.floor} onChange={(floor) => onChange({ salt: { ...card.salt, floor } })} />
+          </div>
+        ) : null}
+        <div className="mt-5 border-t border-edge pt-4">
+          <Mono className="text-mist">Rental loss allowance (Form 8582)</Mono>
+          <p className="mt-1 text-[11.5px] leading-snug text-dusk">
+            The special allowance for rental real estate losses with active participation, shrinking by the rate for every dollar of modified AGI over the threshold. Statutory: $25,000, half of the excess over $100,000.
+          </p>
+          <div className="mt-3 grid max-w-[520px] gap-4 sm:grid-cols-3">
+            <Labeled label="Allowance">
+              <Num value={card.passiveAllowance.amount} onChange={(v) => onChange({ passiveAllowance: { ...card.passiveAllowance, amount: v ?? 0 } })} />
+            </Labeled>
+            <Labeled label="Phases out above">
+              <Num value={card.passiveAllowance.magiAbove} onChange={(v) => onChange({ passiveAllowance: { ...card.passiveAllowance, magiAbove: v ?? 0 } })} />
+            </Labeled>
+            <Labeled label="Rate">
+              <Num value={card.passiveAllowance.rate} pct onChange={(v) => onChange({ passiveAllowance: { ...card.passiveAllowance, rate: v ?? 0 } })} />
+            </Labeled>
+          </div>
         </div>
       </Panel>
       <Panel title="Federal · premium tax credit (Form 8962)">
@@ -555,6 +603,12 @@ function FederalEditor({ card, onChange }: { card: FederalCard; onChange: (patch
           </Labeled>
           <Labeled label="Net investment income tax rate">
             <Num value={card.netInvestmentIncomeTax.rate} pct onChange={(v) => onChange({ netInvestmentIncomeTax: { ...card.netInvestmentIncomeTax, rate: v ?? 0 } })} />
+          </Labeled>
+          <Labeled label="Capital gains rate" hint="Qualified dividends and long-term gains between the two thresholds">
+            <Num value={card.capitalGains.rate} pct onChange={(v) => onChange({ capitalGains: { ...card.capitalGains, rate: v ?? 0 } })} />
+          </Labeled>
+          <Labeled label="Capital gains top rate">
+            <Num value={card.capitalGains.topRate} pct onChange={(v) => onChange({ capitalGains: { ...card.capitalGains, topRate: v ?? 0 } })} />
           </Labeled>
           <Labeled label="SS wage base" hint="Schedule SE line 7">
             <Num value={card.selfEmployment.wageBase} onChange={(v) => onChange({ selfEmployment: { ...card.selfEmployment, wageBase: v ?? 0 } })} />
@@ -833,6 +887,16 @@ function StateEditor({
             {card.entity ? <EntityEditor value={card.entity} onChange={(entity) => onChange({ entity })} /> : null}
           </Panel>
 
+          <Panel title="Rules · partnerships and LLCs">
+            <Check
+              value={!!card.partnership}
+              onChange={(on) => onChange({ partnership: on ? { form: "", annualTax: 0, fee: [{ below: null, amount: 0 }] } : null })}
+              label="The state has its own return for the partnership or LLC"
+              hint="What the entity itself pays: a flat annual tax (California's $800) and a fee tiered by its total income — gross receipts, not profit (California's $900 from $250,000 up to $11,790 from $5,000,000). A state that charges nothing still needs the rule, with zeros, or the engine refuses a partner's return. The elective pass-through entity tax is the S corporation rule above, which a partnership shares."
+            />
+            {card.partnership ? <PartnershipEditor value={card.partnership} onChange={(partnership) => onChange({ partnership })} /> : null}
+          </Panel>
+
           <Panel title="Extras">
             <Check
               value={!!card.surtax}
@@ -1006,6 +1070,74 @@ function EntityEditor({ value, onChange }: { value: EntityRules; onChange: (v: E
             </Labeled>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────── partnership rules ─────────────────────────────── */
+
+function PartnershipEditor({ value, onChange }: { value: PartnershipRules; onChange: (v: PartnershipRules) => void }) {
+  const fee = value.fee.length ? value.fee : [{ below: null, amount: 0 }];
+  const setFee = (rows: PartnershipRules["fee"]) => onChange({ ...value, fee: rows });
+  return (
+    <div className="mt-4 space-y-5">
+      <div className="grid max-w-[520px] gap-4 sm:grid-cols-2">
+        <Labeled label="Form" hint="e.g. 568, 565, NJ-1065">
+          <input value={value.form} onChange={(e) => onChange({ ...value, form: e.target.value.slice(0, 20) })} className={inputCls} />
+        </Labeled>
+        <Labeled label="Annual tax" hint="A flat amount every year, whatever the income.">
+          <Num value={value.annualTax} onChange={(v) => onChange({ ...value, annualTax: v ?? 0 })} />
+        </Labeled>
+      </div>
+      <div>
+        <Mono className="text-mist">Fee by total income</Mono>
+        <p className="mt-1 text-[11.5px] leading-snug text-dusk">
+          The first row the entity&rsquo;s total income falls under applies; the last row is &ldquo;and over&rdquo;. One row of 0 means no fee.
+        </p>
+        <div className="mt-3 max-w-[420px]">
+          <div className="grid grid-cols-[1fr_1fr_28px] gap-2 border-b border-edge pb-2">
+            <Mono className="text-dusk">Income below</Mono>
+            <Mono className="text-dusk">Fee</Mono>
+            <span />
+          </div>
+          {fee.map((row, i) => {
+            const last = i === fee.length - 1;
+            return (
+              <div key={i} className="grid grid-cols-[1fr_1fr_28px] items-center gap-2 border-b border-edge py-1.5 last:border-b-0">
+                {last ? (
+                  <span className="px-2.5 font-mono text-[11.5px] text-dusk">and over</span>
+                ) : (
+                  <Num value={row.below} nullable onChange={(v) => setFee(fee.map((r, j) => (j === i ? { ...r, below: v } : r)))} ariaLabel={`Fee row ${i + 1} income below`} />
+                )}
+                <Num value={row.amount} onChange={(v) => setFee(fee.map((r, j) => (j === i ? { ...r, amount: v ?? 0 } : r)))} ariaLabel={`Fee row ${i + 1} amount`} />
+                <button
+                  type="button"
+                  disabled={fee.length <= 1}
+                  onClick={() => {
+                    const rows = fee.filter((_, j) => j !== i);
+                    rows[rows.length - 1] = { ...rows[rows.length - 1], below: null };
+                    setFee(rows);
+                  }}
+                  aria-label={`Remove fee row ${i + 1}`}
+                  className="cursor-pointer text-center text-[14px] text-dusk hover:text-danger disabled:opacity-30"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              const lastRow = fee[fee.length - 1];
+              setFee([...fee.slice(0, -1), { ...lastRow, below: 0 }, { below: null, amount: lastRow.amount }]);
+            }}
+            className={`${linkBtn} mt-3`}
+          >
+            + Add tier
+          </button>
+        </div>
       </div>
     </div>
   );
