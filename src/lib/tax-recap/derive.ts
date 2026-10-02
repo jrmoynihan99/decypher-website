@@ -868,7 +868,21 @@ type Scenario = {
   pte: boolean;
   healthInsurance: boolean;
   reps: boolean;
+  /**
+   * The same return without its dependents — not a strategy (the kids are
+   * there before and after), only how much they're worth: no child tax
+   * credit, no child-care credit, single instead of head of household, no
+   * state dependent exemptions.
+   */
+  noKids?: boolean;
 };
+
+/**
+ * The filing status once the dependents are gone. Head of household and
+ * qualifying surviving spouse both need a qualifying person; without one
+ * the filer is single. A joint or separate return stays as it is.
+ */
+const statusWithoutDependents = (s: FilingStatus): FilingStatus => (s === "hoh" || s === "qss" ? "single" : s);
 
 const ALL_OFF: Scenario = { expenses: false, homeOffice: false, writeOffs: false, salary: false, retirement: false, pte: false, healthInsurance: false, reps: false };
 const ALL_ON: Scenario = { expenses: true, homeOffice: true, writeOffs: true, salary: true, retirement: true, pte: true, healthInsurance: true, reps: true };
@@ -943,6 +957,10 @@ type Model = {
     itemized: Itemized | null;
     /** The state's own deduction as read, when it beats the state's standard deduction. */
     stateDeduction: number | null;
+    /** Dependents on the return: the count read, or the qualifying children the child tax credit implies when that's more. */
+    dependents: number;
+    /** Schedule 3 line 2 as read. */
+    childCareCredit: number;
   };
 };
 
@@ -1913,19 +1931,43 @@ function buildModel(
     // A real estate professional's rentals are nonpassive only with the
     // status switched on; off, the losses go through Form 8582's allowance.
     if (rental) fi = { ...fi, rental: { ...rental, reps: rental.reps && s.reps } };
-    const f = federal(fed, status, fi);
+    // Without the dependents: no child tax credit, no child-care credit, and
+    // no qualifying person for head of household.
+    const runStatus = s.noKids ? statusWithoutDependents(status) : status;
+    if (s.noKids) fi = { ...fi, children: 0, childCareCredit: 0 };
+    const f = federal(fed, runStatus, fi);
     let st: State | null = null;
     const pteShare = ent ? Math.round(ent.pte * (shape === "partnership" ? sharesTotal : ownershipPct)) : 0;
     if (stateCard) {
       const stateBiz = biz + Math.round(stateBizDelta * Math.min(1, Math.max(0, fraction)));
-      const si = stateInputsFor(
+      let si = stateInputsFor(
         f,
         stateBiz,
         mode === "exclusion" ? 0 : pteShare,
         fi.w2,
         mode === "exclusion" && s.pte && electing ? k1 : 0,
       );
-      st = stateSource !== null ? nonresidentState(stateCard, status, f, si, stateSource) : state(stateCard, status, f, si);
+      if (s.noKids) {
+        // The state's dependent exemptions go; an exemption deduction carried
+        // as read loses the dependents' share; and a state deduction that was
+        // just the standard deduction for the status (California's head of
+        // household amount) becomes the single one.
+        const ex = stateCard.exemption;
+        const dd = stateCard.deduction;
+        si = {
+          ...si,
+          dependents: 0,
+          exemptionsRead:
+            si.exemptionsRead !== null && ex.kind === "deduction"
+              ? Math.max(0, si.exemptionsRead - dependents * ex.dependentAmount)
+              : si.exemptionsRead,
+          deductionRead:
+            si.deductionRead !== null && dd.kind === "standard" && si.deductionRead === dd.amount[status]
+              ? null
+              : si.deductionRead,
+        };
+      }
+      st = stateSource !== null ? nonresidentState(stateCard, runStatus, f, si, stateSource) : state(stateCard, runStatus, f, si);
     }
     const salaryOn = shape !== "scorp" || s.salary;
     const numbers = fillNumbers(
@@ -2001,6 +2043,8 @@ function buildModel(
         k1Note,
         itemized,
         stateDeduction,
+        dependents: Math.max(dependents, children),
+        childCareCredit,
       },
     },
   };
@@ -2700,7 +2744,60 @@ export function attributeStrategies(
     };
   }
 
-  return { version: DERIVE_VERSION, attribution, scorpSavings, notes };
+  const kids = kidsValue(m);
+  if (kids.note) notes.push(kids.note);
+
+  return { version: DERIVE_VERSION, attribution, scorpSavings, kids: kids.value, notes };
+}
+
+/**
+ * What the dependents are worth: the before and the after each re-run
+ * without them, everything else as filed. Not a strategy — the kids are on
+ * both sides — so it sits beside the savings, never inside them. Null when
+ * the return has none, when they change nothing at this income, or when the
+ * return has a premium tax credit that depends on household size (the
+ * poverty line for a smaller household isn't on the tables).
+ */
+function kidsValue(m: Model): { value: RecapAnalysis["kids"]; note: string | null } {
+  const { facts } = m;
+  const count = facts.dependents;
+  const headOfHousehold = statusWithoutDependents(m.status) !== m.status;
+  if (count <= 0 && facts.childCareCredit <= 0) return { value: null, note: null };
+  const sides = [ALL_OFF, ALL_ON].map((s) => ({ with: m.run(s), without: m.run({ ...s, noKids: true }) }));
+  const capAt = m.card.federal.ptc.capAt;
+  if (sides.some(({ with: w }) => w.fed.ptc && (w.fed.ptc.allowed > 0 || w.fed.ptc.pct < capAt))) {
+    return {
+      value: null,
+      note: "What the dependents are worth isn't shown: the premium tax credit on Form 8962 is figured on household size, and the poverty line for a smaller household isn't on the tables",
+    };
+  }
+  const [before, after] = sides.map(({ with: w, without }) => without.total - w.total);
+  if (before <= 0 && after <= 0) {
+    return {
+      value: null,
+      note: `The ${count === 1 ? "dependent" : `${count} dependents`} on the return don't change the tax at this income: the child tax credit has phased out${headOfHousehold ? "" : " and there's no filing status riding on them"}`,
+    };
+  }
+  // The pieces, from the after side: the two credits, what head of
+  // household is worth federally, and the state's share.
+  const w = sides[1].with;
+  const wo = sides[1].without;
+  const ctc = w.fed.childTaxCredit - wo.fed.childTaxCredit;
+  const care = w.fed.credits - wo.fed.credits;
+  const stateTax = (x: Outcome) => (x.st ? x.st.netTax : 0);
+  const stateDiff = stateTax(wo) - stateTax(w);
+  const filing = after - stateDiff - ctc - care;
+  const stateName = m.card.state?.name ?? "State";
+  const parts: string[] = [];
+  if (ctc > 0) parts.push(`Child tax credit ${fmt(ctc)}`);
+  if (care > 0) parts.push(`Child and dependent care credit ${fmt(care)}`);
+  if (headOfHousehold && filing > 0) parts.push(`Head of household instead of single ${fmt(filing)}`);
+  else if (filing > 0) parts.push(`Other federal ${fmt(filing)}`);
+  if (stateDiff > 0) parts.push(`${stateName} tax ${fmt(stateDiff)}`);
+  return {
+    value: { dependents: count, before: Math.max(0, before), after: Math.max(0, after), note: parts.join(" · ") },
+    note: null,
+  };
 }
 
 /* ─────────────────────────────── proving a card ─────────────────────────────── */

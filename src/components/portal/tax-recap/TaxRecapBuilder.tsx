@@ -1720,6 +1720,33 @@ export default function TaxRecapBuilder({
               </div>
             ) : null}
 
+            {analysis?.kids ? (
+              <div className="mt-6">
+                <Mono className="text-dusk">
+                  What the kids saved (beside the savings, not part of them)
+                </Mono>
+                <div className="mt-1">
+                  <StrategyRow
+                    label={`After: ${analysis.kids.dependents === 1 ? "1 dependent" : `${analysis.kids.dependents} dependents`} on the return`}
+                    note={analysis.kids.note}
+                    value={analysis.kids.after}
+                  />
+                  <StrategyRow
+                    label="Before: the same kids on the before return"
+                    note=""
+                    value={analysis.kids.before}
+                  />
+                </div>
+                <Note className="!mt-2">
+                  Each side re-run without the dependents, everything else as
+                  filed: no child tax credit, no child-care credit, single
+                  instead of head of household. The kids are on both returns,
+                  so this is never added to the savings. It shows on the
+                  client&rsquo;s recap as its own section.
+                </Note>
+              </div>
+            ) : null}
+
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <Field
                 label="Improvements / tax strategy"
