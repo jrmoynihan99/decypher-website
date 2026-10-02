@@ -70,6 +70,20 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   {
+    key: "rentalRents",
+    label: "Rents received (Sch E line 23a)",
+    source: "Schedule E line 23a: every rental property's rents (line 3) added up — the before's rental income, with the expenses zeroed",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "rentalExpenses",
+    label: "Rental expenses (Sch E line 23e)",
+    source: "Schedule E line 23e: every rental property's total expenses (line 20), depreciation included — zeroed on the before",
+    group: "income",
+    optional: true,
+  },
+  {
     key: "passivePriorUnallowed",
     label: "Prior years' unallowed passive losses",
     source: "Form 8582 line 1c plus line 2c, as a positive number",
