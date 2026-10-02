@@ -843,15 +843,26 @@ for (const p of PAIRINGS) {
    reproduces that way). The four rentals lose $79,519 this year and are
    nonpassive under REPS; $9,847 of earlier passive losses stay suspended. The
    return itemizes ($45,683: $19,963 of taxes, $25,720 of mortgage interest)
-   and treats the rentals as QBI (Form 8995 lists them). The before — Schedule C
-   write-offs at zero, REPS off — has: SE tax on $491,948 with the full wage
-   base (35,011), 3,006 of additional Medicare tax, modified AGI far over
-   $150,000 so no rental loss allowed, the SALT cap phased down to $11,207 at
-   $595,978 of AGI (itemized total 36,927, still over the standard deduction),
-   taxable income before QBI over the phase-in range so no QBI deduction (the
-   Schedule C pays no wages; its $313 of depreciation is noted), the child
-   tax credit phased out entirely, $8 of NIIT on the $213 of dividends and
-   gains, and 134,731 of tax by the worksheet ($156 preferential).            */
+   and treats the rentals as QBI (Form 8995 lists them).
+
+   The before follows the tax team's convention (answered 2026-10-02): rental
+   costs are write-offs found, zeroed like the Schedule C's, and REPS is off.
+   By hand: the properties net their $111,643 of rents, less $9,847 of
+   earlier suspended losses = $101,796 of passive income; other income
+   $102,009 with the $213 of dividends and gains, total income 723,688 (the
+   team's Canva shows the same 102,009 and 723,688). SE tax on $491,948 with
+   the full wage base 35,011, half 17,506; adjustments 17,506 + 2,908 SEHI +
+   3,000 SEP + 2,500 IRA = 25,914, AGI 697,774. SALT cap at the 10,000 floor,
+   itemized 35,720 > 31,500. Taxable 662,054, no QBI deduction (over the
+   phase-in range; the Schedule C pays no wages and the rentals' property
+   cost isn't on the return — see the note). Tax by the worksheet: 501,050
+   at the 35% bracket start = 114,462, + 35% × 160,848 = 56,296.80, + the
+   $156 preferential at 20% (taxable over 600,050) = 31.20 → 170,790. Other
+   taxes 35,011 + 3,006 additional Medicare + 3,876 NIIT (3.8% of 102,009)
+   = 41,893. Less the 1,200 child-care credit (child tax credit phased out):
+   211,483. The team's Canva says 203,879: the $7,604 between is the QBI
+   deduction their software gave the before (≈ $21,725 at 35%), figured
+   from property cost the after return doesn't print.                      */
 {
   console.log("\nCarpenter 2025 (married filing jointly, no state, Schedule C + rentals under REPS)");
   const meta = { taxYear: 2025, filingStatus: "Married filing jointly", stateCode: null, stateForm: null };
@@ -863,6 +874,9 @@ for (const p of PAIRINGS) {
     businessNetIncome: 412259,
     rentalIncome: -79519,
     rentalLosses: 79519,
+    // Schedule E lines 23a and 23e: 111,643 of rents less 191,162 of expenses = −79,519
+    rentalRents: 111643,
+    rentalExpenses: 191162,
     passivePriorUnallowed: 9847,
     rentalReps: -79519,
     totalIncome: 462684,
@@ -895,24 +909,27 @@ for (const p of PAIRINGS) {
   const want = {
     w2Income: 129731,
     businessNetIncome: 491948,
-    rentalIncome: 0,
+    rentalIncome: 101796,
+    rentalRents: 111643,
+    rentalExpenses: null,
+    rentalLosses: null,
     rentalReps: null,
-    totalIncome: 621892,
-    agi: 595978,
+    totalIncome: 723688,
+    agi: 697774,
     qbiDeduction: null,
     sepDeduction: 3000,
-    itemizedDeductions: 36927,
-    saltDeducted: 11207,
-    taxableIncome: 559051,
-    incomeTax: 134731,
+    itemizedDeductions: 35720,
+    saltDeducted: 10000,
+    taxableIncome: 662054,
+    incomeTax: 170790,
     seTax: 35011,
-    otherTaxes: 38025,
+    otherTaxes: 41893,
     childTaxCredit: null,
     childCareCredit: 1200,
-    niit: 8,
-    federalTotalTax: 171556,
+    niit: 3876,
+    federalTotalTax: 211483,
     federalPayments: 95156,
-    federalAmountOwed: 76400,
+    federalAmountOwed: 116327,
     sehiDeduction: 2908,
   };
   const r = deriveBefore(after, meta);
@@ -929,9 +946,15 @@ for (const p of PAIRINGS) {
     }
     // before 171,556; after 96,419
     const savings = computeRecap({ before: r.before, after, priorYearIncome: null }).savings;
-    const ok = savings === 75137;
+    // 211,483 − 96,419. The team's Canva: 107,460 (its before has the QBI
+    // deduction on the rentals the return can't show the property cost for).
+    const ok = savings === 115064;
     if (!ok) failed++;
-    console.log(`  savings ${money(savings)} vs by hand $75,137 ${ok ? "ok" : "MISMATCH"}`);
+    console.log(`  savings ${money(savings)} vs by hand $115,064 (team's Canva $107,460) ${ok ? "ok" : "MISMATCH"}`);
+    const rentalStep = attributeStrategies(after, meta)?.attribution.find((a) => /rental expenses/i.test(a.label));
+    const stepOk = rentalStep?.savings === 47819;
+    if (!stepOk) failed++;
+    console.log(`  rental expenses step ${money(rentalStep?.savings)} vs 47,819 ${stepOk ? "ok" : "MISMATCH"}`);
     console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
     const analysis = attributeStrategies(after, meta);
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;

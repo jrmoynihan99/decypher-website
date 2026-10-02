@@ -274,6 +274,17 @@ export function validateNumbers(r: ReturnNumbers, side: "before" | "after"): War
   if (has(r.rentalLosses) && has(r.rentalIncome) && r.rentalLosses > 0 && r.rentalIncome < -(r.rentalLosses + n(r.rentalProfits)) - TOL) {
     add(`Rental income or loss ${fmt(r.rentalIncome)} is a bigger loss than the properties' own losses ${fmt(r.rentalLosses)}`);
   }
+  // Schedule E line 23a less 23e is the properties' net (line 21 added up).
+  if (
+    has(r.rentalRents) &&
+    has(r.rentalExpenses) &&
+    (has(r.rentalProfits) || has(r.rentalLosses)) &&
+    off(r.rentalRents - r.rentalExpenses, n(r.rentalProfits) - n(r.rentalLosses))
+  ) {
+    add(
+      `Rents ${fmt(r.rentalRents)} less rental expenses ${fmt(r.rentalExpenses)} isn't the properties' net ${fmt(n(r.rentalProfits) - n(r.rentalLosses))} (Schedule E lines 23a, 23e and 21)`,
+    );
+  }
   if (has(r.saltDeducted) && has(r.saltPaid) && r.saltDeducted > r.saltPaid + TOL) {
     add("State and local taxes deducted (Schedule A line 5e) exceed the taxes paid (line 5d)");
   }
@@ -401,8 +412,10 @@ export function crossValidate(
   ) {
     add("W-2 wages differ between the two returns");
   }
-  if (has(before.rentalLosses) && has(after.rentalLosses) && off(before.rentalLosses, after.rentalLosses)) {
-    add("The rental properties' losses differ between the two returns — the before return should carry the same Schedule E");
+  // The before zeroes the rental expenses, so its losses differ by design;
+  // the rents are what both sides share.
+  if (has(before.rentalRents) && has(after.rentalRents) && off(before.rentalRents, after.rentalRents)) {
+    add("The rental properties' rents differ between the two returns — the before return should carry the same rents");
   }
   if (
     has(before.federalPayments) &&

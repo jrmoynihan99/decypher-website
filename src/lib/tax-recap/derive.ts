@@ -229,7 +229,17 @@ type Partner = { ordinary: number; guaranteed: number; premiums: number; wages: 
  * who materially participates, Schedule E line 43 — and whether their net
  * counts as qualified business income (Form 8995 lists them).
  */
-type Rental = { profits: number; losses: number; prior: number; reps: boolean; qbi: boolean };
+type Rental = {
+  profits: number;
+  losses: number;
+  prior: number;
+  reps: boolean;
+  qbi: boolean;
+  /** Schedule E line 23a: every property's rents. With the expenses zeroed (the before), each property nets its rents. */
+  rents: number;
+  /** Schedule E line 23e: every property's expenses, depreciation included — zeroed on the before, like the Schedule C's. */
+  expenses: number;
+};
 
 /**
  * Schedule A as read: the total, the state and local taxes before and after
@@ -867,6 +877,13 @@ type Scenario = {
   retirement: boolean;
   pte: boolean;
   healthInsurance: boolean;
+  /**
+   * The rental properties' expenses (Schedule E line 20: mortgage interest,
+   * depreciation, repairs, taxes). Off, each property nets its rents — the
+   * tax team's convention for the zero-write-off before (2026-10-02):
+   * rental costs are write-offs found, like the Schedule C's.
+   */
+  rentalExpenses: boolean;
   reps: boolean;
   /**
    * The same return without its dependents — not a strategy (the kids are
@@ -884,8 +901,8 @@ type Scenario = {
  */
 const statusWithoutDependents = (s: FilingStatus): FilingStatus => (s === "hoh" || s === "qss" ? "single" : s);
 
-const ALL_OFF: Scenario = { expenses: false, homeOffice: false, writeOffs: false, salary: false, retirement: false, pte: false, healthInsurance: false, reps: false };
-const ALL_ON: Scenario = { expenses: true, homeOffice: true, writeOffs: true, salary: true, retirement: true, pte: true, healthInsurance: true, reps: true };
+const ALL_OFF: Scenario = { expenses: false, homeOffice: false, writeOffs: false, salary: false, retirement: false, pte: false, healthInsurance: false, rentalExpenses: false, reps: false };
+const ALL_ON: Scenario = { expenses: true, homeOffice: true, writeOffs: true, salary: true, retirement: true, pte: true, healthInsurance: true, rentalExpenses: true, reps: true };
 
 /** One run of the whole return at some point between the before and the after. */
 type Outcome = {
@@ -1350,7 +1367,27 @@ function buildModel(
   if (hasRental) {
     const profits = has(after.rentalProfits) ? after.rentalProfits : Math.max(0, rentalReadNet + n(after.rentalLosses));
     const losses = has(after.rentalLosses) ? after.rentalLosses : Math.max(0, n(after.rentalProfits) - rentalReadNet);
-    rental = { profits, losses, prior: n(after.passivePriorUnallowed), reps: n(after.rentalReps) !== 0, qbi: true };
+    // The before zeroes the rental expenses, so it needs the rents. Line
+    // 23a less line 23e is the properties' net (line 21 added up): either
+    // line gives the other, and with both read they have to agree.
+    const net = profits - losses;
+    const rentsRead = has(after.rentalRents) ? after.rentalRents : null;
+    const expensesRead = has(after.rentalExpenses) ? after.rentalExpenses : null;
+    if (rentsRead === null && expensesRead === null) {
+      reasons.push(
+        "Schedule E line 23a (the rents) wasn't read — the before zeroes the rental expenses, so it needs the rents the properties brought in",
+      );
+      return refuse();
+    }
+    const rents = rentsRead ?? net + (expensesRead as number);
+    const rentalExpenses = expensesRead ?? rents - net;
+    if (off(rents - rentalExpenses, net)) {
+      reasons.push(
+        `Schedule E's rents (${fmt(rents)}, line 23a) less its expenses (${fmt(rentalExpenses)}, line 23e) aren't the properties' net as read (${fmt(net)}, line 21) — a royalty property, or one of the lines misread`,
+      );
+      return refuse();
+    }
+    rental = { profits, losses, prior: n(after.passivePriorUnallowed), reps: n(after.rentalReps) !== 0, qbi: true, rents, expenses: rentalExpenses };
   }
 
   // Schedule A as read; the medical piece inside the total is at the after's AGI.
@@ -1930,7 +1967,13 @@ function buildModel(
     }
     // A real estate professional's rentals are nonpassive only with the
     // status switched on; off, the losses go through Form 8582's allowance.
-    if (rental) fi = { ...fi, rental: { ...rental, reps: rental.reps && s.reps } };
+    // Without the rental expenses every property nets its rents: profits
+    // are the rents and there are no losses (earlier years' suspended
+    // losses still come off on Form 8582).
+    if (rental) {
+      const r = s.rentalExpenses ? rental : { ...rental, profits: rental.rents, losses: 0 };
+      fi = { ...fi, rental: { ...r, reps: rental.reps && s.reps } };
+    }
     // Without the dependents: no child tax credit, no child-care credit, and
     // no qualifying person for head of household.
     const runStatus = s.noKids ? statusWithoutDependents(status) : status;
@@ -2092,8 +2135,12 @@ function fillNumbers(
   out.partnershipIncome = shape === "partnership" ? fi.partners.reduce((s, p) => s + p.ordinary + p.guaranteed, 0) : null;
   if (fi.rental) {
     out.rentalIncome = b.rentalDeducted;
-    out.rentalProfits = after.rentalProfits;
-    out.rentalLosses = after.rentalLosses;
+    // On the after these are the lines as read; with the rental expenses
+    // zeroed every property nets its rents.
+    out.rentalProfits = s.rentalExpenses ? after.rentalProfits : fi.rental.profits > 0 ? fi.rental.profits : null;
+    out.rentalLosses = s.rentalExpenses ? after.rentalLosses : null;
+    out.rentalRents = fi.rental.rents > 0 ? fi.rental.rents : null;
+    out.rentalExpenses = s.rentalExpenses && fi.rental.expenses > 0 ? fi.rental.expenses : null;
     out.passivePriorUnallowed = after.passivePriorUnallowed;
     out.rentalReps = fi.rental.reps ? (has(after.rentalReps) ? after.rentalReps : fi.rental.profits - fi.rental.losses) : null;
   }
@@ -2374,6 +2421,16 @@ export function deriveBefore(
           : " Section 179 property from an earlier year would add 2.5% of its basis"
       }`,
     );
+    // Rentals counted as QBI are limited the same way, and a rental always
+    // has property: 2.5% of the buildings' original cost (UBIA), which no
+    // line of the return prints. Say how much is at stake rather than guess.
+    const r = facts.rental;
+    if (r?.qbi && b.fed.rentalDeducted > 0) {
+      const most = Math.round(b.fed.rentalDeducted * fed.qbi.rate);
+      earlyNotes.push(
+        `The rentals' ${fmt(b.fed.rentalDeducted)} on the before is qualified business income too. Over the threshold its deduction is capped at 2.5% of the properties' original cost (UBIA), which isn't printed on the return, so it's taken as $0 here. With enough property cost it could be up to ${fmt(most)}, about ${fmt(Math.round(most * 0.35))} less tax on the before. ProSeries' zero-write-off print shows it on Form 8995-A`,
+      );
+    }
   }
   // A state that phases its itemized deductions down on income (California)
   // isn't modeled; the before's AGI has to stay under the threshold.
@@ -2414,17 +2471,20 @@ export function deriveBefore(
 
   const stateName = stateCard?.name;
   const notes: string[] = [];
+  const rentalBit = facts.rental
+    ? `, the rentals' ${fmt(facts.rental.expenses)} of expenses zeroed${facts.rental.reps ? " and the rentals treated as passive" : ""}`
+    : "";
   if (m.shape === "soleProp") {
     notes.push(
-      `Derived from the after return: Schedule C expenses (${fmt(facts.expenses)})${facts.schCogs > 0 ? `, cost of goods sold (${fmt(facts.schCogs)})` : ""} and home office (${fmt(facts.homeOffice)}) set to zero${facts.rental?.reps ? ", the rentals treated as passive" : ""} and the ${year} federal${stateName ? ` and ${stateName}` : ""} tables re-run (engine v${DERIVE_VERSION})`,
+      `Derived from the after return: Schedule C expenses (${fmt(facts.expenses)})${facts.schCogs > 0 ? `, cost of goods sold (${fmt(facts.schCogs)})` : ""} and home office (${fmt(facts.homeOffice)}) set to zero${rentalBit} and the ${year} federal${stateName ? ` and ${stateName}` : ""} tables re-run (engine v${DERIVE_VERSION})`,
     );
   } else if (m.shape === "partnership") {
     notes.push(
-      `Derived from the two after returns: every deduction on the 1065 set to zero — ${facts.cogs > 0 ? `cost of goods sold (${fmt(facts.cogs)}), ` : ""}write-offs (${fmt(facts.writeOffs)}) and the ${fmt(facts.guaranteedPayments)} of guaranteed payments${facts.partnerPremiums > 0 ? " (the partners' health premiums)" : ""} — so the K-1s are the gross receipts${facts.rental?.reps ? ", the rentals treated as passive" : ""}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} partnership` : ""} tables re-run (engine v${DERIVE_VERSION})`,
+      `Derived from the two after returns: every deduction on the 1065 set to zero — ${facts.cogs > 0 ? `cost of goods sold (${fmt(facts.cogs)}), ` : ""}write-offs (${fmt(facts.writeOffs)}) and the ${fmt(facts.guaranteedPayments)} of guaranteed payments${facts.partnerPremiums > 0 ? " (the partners' health premiums)" : ""} — so the K-1s are the gross receipts${rentalBit}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} partnership` : ""} tables re-run (engine v${DERIVE_VERSION})`,
     );
   } else {
     notes.push(
-      `Derived from the two after returns: every deduction on the 1120-S set to zero — cost of goods sold (${fmt(facts.cogs)}), write-offs (${fmt(facts.writeOffs)}), the owner's ${fmt(facts.officerComp)} of pay, the ${fmt(facts.pension)} retirement plan, the ${fmt(facts.stateAddBack)} of state taxes — so the K-1 is the gross receipts, with no PTE election${facts.rental?.reps ? ", the rentals treated as passive" : ""}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} S corporation` : ""} tables re-run (engine v${DERIVE_VERSION})`,
+      `Derived from the two after returns: every deduction on the 1120-S set to zero — cost of goods sold (${fmt(facts.cogs)}), write-offs (${fmt(facts.writeOffs)}), the owner's ${fmt(facts.officerComp)} of pay, the ${fmt(facts.pension)} retirement plan, the ${fmt(facts.stateAddBack)} of state taxes — so the K-1 is the gross receipts, with no PTE election${rentalBit}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} S corporation` : ""} tables re-run (engine v${DERIVE_VERSION})`,
     );
   }
   notes.push(
@@ -2441,17 +2501,13 @@ export function deriveBefore(
     );
   }
   if (facts.rental) {
+    // The tax team's convention (2026-10-02): rental costs are write-offs
+    // found, zeroed on the before like the Schedule C's.
     const r = facts.rental;
-    const suspendedBefore = Math.max(0, r.losses + r.prior - r.profits + b.fed.rentalDeducted);
-    if (r.reps) {
-      notes.push(
-        `Real estate professional: the rentals' ${fmt(r.losses)} of losses are nonpassive on the after return and deducted in full. The before has no such status, so they go through Form 8582 — modified AGI of ${fmt(b.fed.magi)} leaves ${fmt(b.fed.passiveAllowance)} of the $25,000 allowance — and ${fmt(suspendedBefore)} is suspended to later years`,
-      );
-    } else {
-      notes.push(
-        `Rental losses (${fmt(r.losses)}${r.prior > 0 ? ` this year, ${fmt(r.prior)} from earlier years` : ""}) go through Form 8582 on both sides: ${fmt(-m.after.fed.rentalDeducted)} allowed on the after, ${fmt(-b.fed.rentalDeducted)} on the before at its modified AGI of ${fmt(b.fed.magi)}`,
-      );
-    }
+    const afterNet = m.after.fed.rentalDeducted;
+    notes.push(
+      `Rentals: ${fmt(r.rents)} of rents and ${fmt(r.expenses)} of expenses (Schedule E lines 23a and 23e, depreciation included), ${afterNet < 0 ? `a ${fmt(-afterNet)} loss deducted on the after${r.reps ? " in full by a real estate professional" : " after Form 8582"}` : `${fmt(afterNet)} taxed on the after`}. The before zeroes the expenses like the Schedule C's, so each property nets its rents${r.reps ? " and, with no real estate professional status, the rentals are passive" : ""}: ${fmt(b.fed.rentalDeducted)} taxed on the before${r.prior > 0 ? `, after ${fmt(r.prior)} of earlier years' suspended losses (Form 8582) come off` : ""}`,
+    );
     if (!r.qbi) notes.push("The rentals aren't counted as qualified business income, as the after return's Form 8995 shows");
   }
   if (facts.itemized) {
@@ -2621,6 +2677,14 @@ export function attributeStrategies(
       `The rentals' ${fmt(rental?.losses ?? 0)} of losses deducted in full as nonpassive instead of suspended under the passive loss rules. Without it, this year's total would have been ${fmt(previous)}`,
     skip: !rental?.reps,
   };
+  // The rental expenses come before real estate professional status: the
+  // status only matters once the properties show a loss.
+  const rentalStep: Step = {
+    key: "rentalExpenses",
+    label: "Bookkeeping: rental expenses",
+    note: `${fmt(rental?.expenses ?? 0)} of rental property expenses (mortgage interest, depreciation, repairs, taxes) deducted on Schedule E against ${fmt(rental?.rents ?? 0)} of rents`,
+    skip: !rental || rental.expenses <= 0,
+  };
   const steps: Step[] =
     m.shape === "soleProp"
       ? [
@@ -2636,6 +2700,7 @@ export function attributeStrategies(
             note: `${fmt(facts.homeOffice)} for the business use of the home (Form 8829)`,
             skip: facts.homeOffice <= 0,
           },
+          rentalStep,
           repsStep,
         ]
       : m.shape === "partnership"
@@ -2655,6 +2720,7 @@ export function attributeStrategies(
                   : `${fmt(facts.guaranteedPayments)} of guaranteed payments deducted by the partnership`,
               skip: facts.guaranteedPayments <= 0,
             },
+            rentalStep,
             repsStep,
           ]
         : [
@@ -2686,6 +2752,7 @@ export function attributeStrategies(
             }`,
             skip: !(m.after.entity && m.after.entity.pte > 0),
           },
+          rentalStep,
           repsStep,
         ];
 

@@ -251,6 +251,8 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number). Omit when there is no Schedule E page 1.
 - rentalProfits: Schedule E line 21 for the properties showing a profit, added up across every Schedule E page 1 copy. Omit when none.
 - rentalLosses: Schedule E line 21 for the properties showing a loss, added up across every copy, as a POSITIVE number — the losses before any limitation. Omit when none.
+- rentalRents: Schedule E line 23a, the total of line 3 (rents received) for all rental properties. When the properties run over several Schedule E page 1 copies, the totals are printed on the first copy only; read them there. Omit when there is no Schedule E Part I.
+- rentalExpenses: Schedule E line 23e, the total of line 20 (total expenses, depreciation included) for all properties, from the same first copy. Omit when there is no Schedule E Part I.
 - passivePriorUnallowed: Form 8582 line 1c plus line 2c (prior years' unallowed losses), as a positive number. Omit when there is no Form 8582 or the lines are blank.
 - rentalReps: Schedule E page 2 line 43 (reconciliation for real estate professionals), the net income or loss from rentals the taxpayer materially participated in; a loss as a negative number. Omit when blank — it is the sign that real estate professional status was claimed.
 - totalIncome: Form 1040 line 9.
