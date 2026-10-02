@@ -46,6 +46,9 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
   const scorpSavings = recap.analysis?.scorpSavings?.amount ?? 0;
   const totalSavings = c.savings + scorpSavings;
   const attribution = recap.analysis?.attribution ?? [];
+  // What the dependents are worth on each return. Beside the savings, never
+  // in them: the kids are on both sides.
+  const kids = recap.analysis?.kids ?? null;
 
   const sections: { label: string; title: string; sub?: string; body: React.ReactNode }[] = [
     {
@@ -144,6 +147,26 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
                     </div>
                   ) : null}
                 </Panel>
+              </Reveal>
+            ),
+          },
+        ]
+      : []),
+    ...(kids
+      ? [
+          {
+            label: "your kids",
+            title: "What your kids saved you",
+            sub: `Your return figured again without your ${kids.dependents === 1 ? "dependent" : "dependents"}, everything else the same. They lower your tax on both versions of ${recap.taxYear}, so this sits beside your savings, not inside them. The amount moves with income: credits shrink as income rises, while a better filing status is worth more at higher rates.`,
+            body: (
+              <Reveal>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <StatTile label="With DeCypher" value={money(kids.after)} tone="pos" />
+                  <StatTile label="Before DeCypher" value={money(kids.before)} />
+                </div>
+                {kids.note ? (
+                  <p className="mx-auto mt-5 max-w-[680px] text-center text-[13px] leading-relaxed text-dusk">{kids.note}</p>
+                ) : null}
               </Reveal>
             ),
           },

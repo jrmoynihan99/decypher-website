@@ -358,3 +358,11 @@ Not modeled, refused with the line named: rental losses on a married-filing-sepa
 5. **Print set.** Can before and after be printed with the same form set? The 8879s should always be included. And export from ProSeries rather than scanning: a scan reads fine but nothing can be cross-checked, and a redaction box on a scan hides the line under it (Mahony's line 38).
 7. ~~**The 70% column.**~~ Resolved: not wanted. The recap is before and after only.
 6. **Redaction.** The after PDF's black boxes sit on top of the page; the text layer still contains the SSN, date of birth, email, and bank routing/account numbers (FTB 8455). ProSeries can zero the SSN at print time, as the before PDF shows (000-00-0000). The tool should never store the raw PDFs.
+
+## What the kids saved (added 2026-10-02)
+
+Asked for by the site owner: on a return with dependents, show how much they're worth. `kidsValue` in `derive.ts` re-runs the before and the after with the scenario switch `noKids`, everything else as filed: no child tax credit, no child-care credit, single instead of head of household (or qualifying surviving spouse), no state dependent exemptions, and a state deduction that was only the head-of-household standard deduction becomes the single one. The difference on each side is `analysis.kids` (`{dependents, before, after, note}`), shown in the builder, as its own section on the client page ("What your kids saved you") and at the top of the PDF's last page. It is never added to the savings: the kids are on both returns.
+
+Shown only when the return claims dependents and they change the tax. Not shown when the return has a premium tax credit that depends on household size (below 400% of the poverty line, or any credit allowed), since the poverty line for a smaller household isn't on the tables.
+
+Verified by hand in `npm run recap:check`: Carpenter $3,700 after (child tax credit $2,500 + child-care credit $1,200), $1,200 before (the child tax credit has phased out). Wilson $5,095 after (head of household instead of single $4,495 + child-care credit $600; California stays $0 under the PTE credit), $11,121 before (federal $4,652 + California $6,469, with no salary there is no child-care credit). Every other sample return shows nothing.

@@ -326,6 +326,13 @@ const PAIRINGS = [
     // before 258,625 + 76,243 + 12,554 = 347,422; after 131,708 + 0 + 55,288 = 186,996
     savings: 160426,
     scorpSavings: 36587,
+    // The one dependent, by hand from the card's brackets. After: single
+    // instead of head of household on 515,124 of AGI (standard deduction
+    // 15,750 not 23,625) is 133,283 vs 128,788 = 4,495, plus the $600
+    // child-care credit; California stays $0 under the PTE credit. Before
+    // (no salary, no PTE): federal 259,757 vs 255,105 = 4,652, California
+    // 82,712 vs 76,243 = 6,469.
+    kids: { after: 5095, before: 11121 },
   },
 
   /* ── Singh & Saini / YouTwoTV LLC 2025, married filing jointly, CA 540 + CA 568 ──
@@ -692,6 +699,15 @@ for (const p of PAIRINGS) {
       if (!scOk) failed++;
       console.log(`  S-corp SE tax avoided ${money(got)} vs expected ${money(p.scorpSavings)} ${scOk ? "ok" : "MISMATCH"}`);
     }
+    // What the dependents are worth: only on a return that claims them.
+    const kids = analysis.kids;
+    const kidsOk = p.kids === undefined ? kids === null : kids !== null && kids.after === p.kids.after && kids.before === p.kids.before;
+    if (!kidsOk) failed++;
+    console.log(
+      `  kids: ${kids ? `after ${money(kids.after)}, before ${money(kids.before)} (${kids.note})` : "none"}${
+        p.kids === undefined ? (kidsOk ? "" : " — EXPECTED NONE") : ` vs expected after ${money(p.kids.after)}, before ${money(p.kids.before)} ${kidsOk ? "ok" : "MISMATCH"}`
+      }`,
+    );
   }
 }
 
@@ -934,6 +950,13 @@ for (const p of PAIRINGS) {
     const repsOk = withoutReps === 133342;
     if (!repsOk) failed++;
     console.log(`  without REPS the federal total would be ${money(withoutReps)} vs by hand $133,342 ${repsOk ? "ok" : "MISMATCH"}`);
+    // The two children, joint return so no filing status rides on them: the
+    // after's $2,500 child tax credit and $1,200 child-care credit; the
+    // before's child tax credit has phased out, the care credit stays.
+    const kids = analysis?.kids;
+    const kidsOk = kids?.after === 3700 && kids?.before === 1200 && kids?.dependents === 2;
+    if (!kidsOk) failed++;
+    console.log(`  kids: after ${money(kids?.after)}, before ${money(kids?.before)} (${kids?.note}) vs by hand $3,700 / $1,200 ${kidsOk ? "ok" : "MISMATCH"}`);
   }
 }
 

@@ -408,10 +408,36 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     footer(ctx, page, recapUrl, 3, TOTAL);
   }
 
-  /* ── 4 · next steps ── */
+  /* ── 4 · your kids (when the return claims them) + next steps ── */
   {
     const page = newPage(ctx, header);
     let y = PAGE.h - 96;
+    // What the dependents are worth on each return: beside the savings,
+    // never in them, as the page shows it.
+    const kids = recap.analysis?.kids ?? null;
+    if (kids) {
+      eyebrow(ctx, page, "Your kids", M, y);
+      y -= 26;
+      page.drawText("What your kids saved you", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
+      y -= 22;
+      y = paragraph(
+        page,
+        ctx.reg,
+        `Your return figured again without your ${kids.dependents === 1 ? "dependent" : "dependents"}, everything else the same. They lower your tax on both versions of ${recap.taxYear}, so this sits beside your savings, not inside them.`,
+        M,
+        y,
+        9,
+        W,
+        C.dusk,
+      );
+      y -= 8;
+      const kw = (W - 8) / 2;
+      stat(ctx, page, M, y - 56, kw, 56, "With DeCypher", money(kids.after), C.teal, 18);
+      stat(ctx, page, M + kw + 8, y - 56, kw, 56, "Before DeCypher", money(kids.before), C.fog, 18);
+      y -= 56 + 18;
+      if (kids.note) y = paragraph(page, ctx.reg, kids.note, M, y, 9, W, C.mist);
+      y -= 30;
+    }
     eyebrow(ctx, page, "Next steps", M, y);
     y -= 26;
     page.drawText("What to do now", { x: M, y, size: 22, font: ctx.bold, color: C.fog });

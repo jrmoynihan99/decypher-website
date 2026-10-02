@@ -656,6 +656,12 @@ export type RecapAnalysis = {
   version: string;
   attribution: { label: string; savings: number; note: string }[];
   scorpSavings: { amount: number; note: string } | null;
+  /**
+   * What the dependents are worth on each side: the return re-run without
+   * them (no child credits, single instead of head of household). Shown
+   * beside the savings, never added to them — the kids are on both sides.
+   */
+  kids: { dependents: number; before: number; after: number; note: string } | null;
   notes: string[];
 };
 
@@ -880,10 +886,24 @@ export function sanitizeAnalysis(raw: unknown): RecapAnalysis | null {
   const notes = Array.isArray(r.notes)
     ? r.notes.map((s) => (typeof s === "string" ? s.trim().slice(0, 400) : "")).filter(Boolean).slice(0, 12)
     : [];
+  // Recaps saved before the kids figure existed have none.
+  const k = (r.kids && typeof r.kids === "object" ? r.kids : null) as Record<string, unknown> | null;
+  const kidsBefore = k ? asMoney(k.before) : null;
+  const kidsAfter = k ? asMoney(k.after) : null;
+  const kidsCount = k ? asMoney(k.dependents) : null;
   return {
     version,
     attribution,
     scorpSavings: sc && amount !== null ? { amount, note: text(sc.note, 400) ?? "" } : null,
+    kids:
+      k && kidsBefore !== null && kidsAfter !== null
+        ? {
+            dependents: Math.max(0, Math.min(20, Math.round(kidsCount ?? 0))),
+            before: Math.max(0, kidsBefore),
+            after: Math.max(0, kidsAfter),
+            note: text(k.note, 400) ?? "",
+          }
+        : null,
     notes,
   };
 }
