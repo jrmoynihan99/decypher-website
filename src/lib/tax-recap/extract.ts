@@ -82,6 +82,31 @@ export function readEffort(): ReadEffort {
 }
 
 /**
+ * The request fields for a read at this effort on this model. "Off" means
+ * the least thinking the model allows, and each family spells it
+ * differently — the wrong spelling is a 400, so every read would fail:
+ *
+ *  - Claude Sonnet 5.5 rejects `disabled`; its no-thinking setting is
+ *    `between_tools` (thinking only between tool calls, and a read has no
+ *    tools, so none at all).
+ *  - Claude Opus 5.5 and the Fable and Mythos models can't turn thinking
+ *    off; the lowest they go is effort `low`.
+ *  - Everything earlier (Sonnet 5, Opus 5, Opus 4.x) takes `disabled`.
+ */
+export function readThinking(
+  model: string,
+  effort: ReadEffort,
+): { thinking: Anthropic.ThinkingConfigParam | null; effort: "low" | "medium" | "high" | null } {
+  if (effort !== "off") return { thinking: null, effort };
+  if (/sonnet-5-5/.test(model)) {
+    // The installed SDK's types predate `between_tools`; the API takes it.
+    return { thinking: { type: "between_tools" } as unknown as Anthropic.ThinkingConfigParam, effort: null };
+  }
+  if (/opus-5-5|fable|mythos/.test(model)) return { thinking: null, effort: "low" };
+  return { thinking: { type: "disabled" }, effort: null };
+}
+
+/**
  * Raw-byte cap on a PDF handed to the model. The builder only accepts
  * exports up to 6MB and sends a redacted, images-only copy of the kept
  * pages, which runs 2-4MB however big the original; anything over
@@ -427,13 +452,14 @@ async function readPdf(
   // an idle-connection timeout somewhere between here and the API.
   const model = modelName();
   const effort = readEffort();
+  const setting = readThinking(model, effort);
   const started = Date.now();
   const read = async (): Promise<Anthropic.Message> => {
     const stream = anthropic().messages.stream({
       model,
       // Thinking counts against this, so there's room for a "high" read.
       max_tokens: 32000,
-      ...(effort === "off" ? { thinking: { type: "disabled" as const } } : {}),
+      ...(setting.thinking ? { thinking: setting.thinking } : {}),
       system,
       messages: [
         {
@@ -454,7 +480,7 @@ async function readPdf(
       ],
       output_config: {
         format: { type: "json_schema", schema },
-        ...(effort === "off" ? {} : { effort }),
+        ...(setting.effort ? { effort: setting.effort } : {}),
       },
     });
     try {
