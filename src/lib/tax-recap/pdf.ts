@@ -1,12 +1,15 @@
 import { PDFDocument, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFRef } from "pdf-lib";
+import QRCode from "qrcode";
+import { centsPerDollar } from "@/lib/decyphered/buildRecap";
+import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 import { computeRecap, type EntityKind, type RecapSide } from "./compute";
 import type { RecapDoc } from "./schema";
 import { US_STATES } from "./tables";
 
 /**
- * The recap as a PDF: the same six beats as the page (cover, before/after,
- * savings, at filing, strategy, next steps), set in the site's palette on
- * four Letter pages, with every link live. Built from the recap's numbers
+ * The recap as a PDF: the same beats as the page in the same order (cover,
+ * before, savings, after, by strategy, at filing, strategy, next steps),
+ * set in the site's palette on five Letter pages, with every link live. Built from the recap's numbers
  * with pdf-lib, so it's the same on every machine and needs no browser —
  * the email attachment next to the link.
  *
@@ -177,12 +180,29 @@ function stat(ctx: Ctx, page: PDFPage, x: number, y: number, w: number, h: numbe
   page.drawText(value, { x: x + 14, y: y + 16, size: big, font: ctx.bold, color });
 }
 
-/** A ledger column: label left, value right, totals with a rule above. */
-function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, side: RecapSide, stateLabel: string, totalLabel: string, totalColor: ReturnType<typeof rgb>, entityKind: EntityKind = null): number {
-  const scorp = entityKind !== null;
+type Color = ReturnType<typeof rgb>;
+
+/** A QR code drawn as vector modules on a white plate (with its quiet zone), so it scans off a dark page. */
+function qrCode(page: PDFPage, text: string, x: number, y: number, size: number) {
+  const { modules } = QRCode.create(text, { errorCorrectionLevel: "M" });
+  const n = modules.size;
+  const quiet = 2;
+  const cell = size / (n + quiet * 2);
+  page.drawRectangle({ x, y, width: size, height: size, color: rgb(1, 1, 1) });
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (!modules.get(r, c)) continue;
+      // rows run down the code, PDF y runs up the page
+      page.drawRectangle({ x: x + (c + quiet) * cell, y: y + size - (r + quiet + 1) * cell, width: cell, height: cell, color: C.night });
+    }
+  }
+}
+type LedgerRow = [label: string, value: string, opts?: { total?: boolean; color?: Color }];
+
+/** A ledger column: label left, value right, totals with a rule above. Returns the y below it. */
+function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, rows: LedgerRow[]): number {
   let y = top;
-  const row = (label: string, value: string, opts: { total?: boolean; color?: ReturnType<typeof rgb>; gap?: boolean } = {}) => {
-    if (opts.gap) y -= 8;
+  for (const [label, value, opts = {}] of rows) {
     if (opts.total) {
       page.drawLine({ start: { x, y: y + 6 }, end: { x: x + w, y: y + 6 }, thickness: 1, color: C.edge });
       y -= 8;
@@ -190,19 +210,96 @@ function ledger(ctx: Ctx, page: PDFPage, x: number, top: number, w: number, side
     page.drawText(label, { x, y, size: opts.total ? 10.5 : 9.5, font: opts.total ? ctx.bold : ctx.reg, color: opts.total ? C.mist : C.muted });
     rightText(page, ctx.bold, value, x + w, y, opts.total ? 13 : 10, opts.color ?? (opts.total ? C.fog : C.mist));
     y -= opts.total ? 24 : 18;
-  };
-  row("W-2 income", dash(side.w2Income));
-  row(scorp ? "Business net income (K-1)" : "Business net income", money(side.businessNetIncome), { color: C.magenta });
-  row("Other income (loss)", dash(side.otherIncome));
-  row("Gross income", money(side.grossIncome), { total: true });
-  row("Federal taxes", money(side.federalTaxes), { gap: true });
-  row(`${stateLabel} taxes`, dash(side.stateTaxes));
-  // The entity's own state tax: its own row for an S corporation (tax plus the elective tax) or an LLC (annual tax plus fee).
-  if (entityKind === "scorp") row(`${stateLabel} S-corp tax & PTET`, dash(side.entityTaxes));
-  if (entityKind === "partnership") row(`${stateLabel} LLC tax & fee`, dash(side.entityTaxes));
-  row("Penalties", dash(side.penalties));
-  row(totalLabel, money(side.totalTaxes), { total: true, color: totalColor });
+  }
   return y;
+}
+
+/**
+ * One side of the sandwich, as the page draws it: heading, the year's total
+ * as the hero figure, the cents-per-dollar bar (the after's with the
+ * before's extent left behind it), and the ledger in two columns, income and
+ * taxes. Returns the y below it.
+ */
+function stage(
+  ctx: Ctx,
+  page: PDFPage,
+  top: number,
+  o: {
+    label: string;
+    title: string;
+    sub: string;
+    side: RecapSide;
+    color: Color;
+    /** The bar's one scale on both sides: the before return's total income. */
+    scale: number;
+    /** The after only: the before side, for the "was" figure and the bar's ghost. */
+    was?: RecapSide;
+    stateLabel: string;
+    entityKind: EntityKind;
+  },
+): number {
+  let y = top;
+  eyebrow(ctx, page, o.label, M, y, o.color);
+  y -= 26;
+  page.drawText(o.title, { x: M, y, size: 22, font: ctx.bold, color: C.fog });
+  y -= 18;
+  y = paragraph(page, ctx.reg, o.sub, M, y, 9.5, W, C.muted);
+  y -= 34;
+  page.drawText(money(o.side.totalTaxes), { x: M, y, size: 44, font: ctx.bold, color: o.color });
+  y -= 20;
+  const label = "TOTAL TAXES OWED";
+  page.drawText(label, { x: M, y, size: 7.5, font: ctx.bold, color: C.muted });
+  if (o.was !== undefined) {
+    const lx = M + ctx.bold.widthOfTextAtSize(label, 7.5) + 10;
+    const was = `WAS ${money(o.was.totalTaxes)}`;
+    page.drawText(was, { x: lx, y, size: 7.5, font: ctx.bold, color: C.mist });
+    // struck through, as the page shows it
+    const sx = lx + ctx.bold.widthOfTextAtSize("WAS ", 7.5);
+    page.drawLine({ start: { x: sx, y: y + 2.6 }, end: { x: lx + ctx.bold.widthOfTextAtSize(was, 7.5), y: y + 2.6 }, thickness: 0.8, color: C.danger });
+  }
+  y -= 30;
+
+  // Cents of every dollar brought in that went to tax, on one scale for both
+  // sides (the before's total income), rounded as the page and the
+  // DeCyphered video round it.
+  if (o.scale > 0 && o.side.totalTaxes >= 0) {
+    const exact = (v: number) => Math.max(0, Math.min(1, v / o.scale));
+    const before = o.was ? centsPerDollar(o.was.totalTaxes, o.scale) : null;
+    const lead = `${centsPerDollar(o.side.totalTaxes, o.scale)}¢`;
+    page.drawText(lead, { x: M, y, size: 15, font: ctx.bold, color: C.fog });
+    const rest = ` of every dollar you brought in${before !== null ? `, down from ${before}¢` : ""}`;
+    page.drawText(rest, { x: M + ctx.bold.widthOfTextAtSize(lead, 15), y, size: 10, font: ctx.reg, color: C.mist });
+    rightText(page, ctx.bold, `${money(o.scale)} BROUGHT IN`, M + W, y, 7.5, C.muted);
+    y -= 16;
+    page.drawRectangle({ x: M, y, width: W, height: 8, color: o.color, opacity: 0.16 });
+    if (o.was) page.drawRectangle({ x: M, y, width: W * exact(o.was.totalTaxes), height: 8, color: C.danger, opacity: 0.4 });
+    page.drawRectangle({ x: M, y, width: W * exact(o.side.totalTaxes), height: 8, color: o.color });
+    y -= 34;
+  }
+
+  const colW = (W - 36) / 2;
+  const right = M + colW + 36;
+  page.drawText("INCOME ON THE RETURN", { x: M, y, size: 7.5, font: ctx.bold, color: C.dusk });
+  page.drawText("TAXES", { x: right, y, size: 7.5, font: ctx.bold, color: C.dusk });
+  y -= 20;
+  const s = o.side;
+  const st = o.stateLabel;
+  const left = ledger(ctx, page, M, y, colW, [
+    ["W-2 income", dash(s.w2Income)],
+    [o.entityKind ? "Business net income (K-1)" : "Business net income", money(s.businessNetIncome), { color: C.magenta }],
+    ["Other income (loss)", dash(s.otherIncome)],
+    ["Gross income", money(s.grossIncome), { total: true }],
+  ]);
+  const taxes = ledger(ctx, page, right, y, colW, [
+    ["Federal taxes", money(s.federalTaxes)],
+    [`${st} taxes`, dash(s.stateTaxes)],
+    // The entity's own state tax: its own row for an S corporation (tax plus the elective tax) or an LLC (annual tax plus fee).
+    ...(o.entityKind === "scorp" ? ([[`${st} S-corp tax & PTET`, dash(s.entityTaxes)]] as LedgerRow[]) : []),
+    ...(o.entityKind === "partnership" ? ([[`${st} LLC tax & fee`, dash(s.entityTaxes)]] as LedgerRow[]) : []),
+    ["Penalties", dash(s.penalties)],
+    ["Total taxes owed", money(s.totalTaxes), { total: true, color: o.color }],
+  ]);
+  return Math.min(left, taxes);
 }
 
 export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<Uint8Array> {
@@ -220,31 +317,31 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
   const stateLabel = recap.stateCode ? (US_STATES[recap.stateCode] ?? recap.stateCode) : "State";
   const header = { left: "DeCypher Financials", right: `TAX RECAP  ·  ${recap.taxYear}` };
-  const TOTAL = 4;
+  const TOTAL = 5;
   // An S corporation's SE-tax saving sits outside the before/after and is
   // added on top, as the page does.
   const scorpSavings = recap.analysis?.scorpSavings?.amount ?? 0;
   const totalSavings = c.savings + scorpSavings;
   const attribution = recap.analysis?.attribution ?? [];
+  // The before doesn't claim the dependents (engine v8 on); a recap saved
+  // earlier shows them beside the total, as the page does.
+  const kids = recap.analysis?.kids ?? null;
+  const kidsBeside = kids && !kids.inBefore && kids.after > 0 ? kids : null;
 
-  /* ── 1 · cover ── */
+  /* ── 1 · cover: the headline, and only the before under it ── */
   {
     const page = newPage(ctx, header);
     let y = PAGE.h - 190;
     eyebrow(ctx, page, `${recap.taxYear} tax recap`, M, y);
+    y -= 46;
+    page.drawText(`${firstName}, you saved`, { x: M, y, size: 38, font: ctx.bold, color: C.fog });
     y -= 44;
-    for (const l of wrap(ctx.bold, `${firstName}, here's your ${recap.taxYear} on one page.`, 34, W)) {
-      page.drawText(l, { x: M, y, size: 34, font: ctx.bold, color: C.fog });
-      y -= 40;
-    }
-    y -= 6;
+    page.drawText(money(totalSavings), { x: M, y, size: 38, font: ctx.bold, color: C.teal });
+    y -= 30;
     y = paragraph(page, ctx.reg, "Where your taxes landed before DeCypher, where they landed after, and what comes next.", M, y, 12, 380);
-    y -= 28;
-    const tw = (W - 16) / 3;
+    y -= 26;
     const th = 72;
-    stat(ctx, page, M, y - th, tw, th, "Before DeCypher", money(c.before.totalTaxes), C.danger);
-    stat(ctx, page, M + tw + 8, y - th, tw, th, "After DeCypher", money(c.after.totalTaxes), C.fog);
-    stat(ctx, page, M + (tw + 8) * 2, y - th, tw, th, "Total tax savings", money(totalSavings), C.teal);
+    stat(ctx, page, M, y - th, 200, th, "Before DeCypher", money(c.before.totalTaxes), C.danger);
     y -= th + 40;
 
     card(page, M, y - 96, W, 96);
@@ -271,107 +368,65 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     footer(ctx, page, recapUrl, 1, TOTAL);
   }
 
-  /* ── 2 · before / after + savings ── */
+  /* ── 2 · before, then the savings ── */
   {
     const page = newPage(ctx, header);
-    let y = PAGE.h - 96;
-    eyebrow(ctx, page, "Tax summary", M, y);
-    y -= 26;
-    page.drawText("Where your taxes landed", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
-    y -= 22;
-    const colW = (W - 16) / 2;
-    const cardH = c.scorp ? 280 : 262;
-    // before
-    card(page, M, y - cardH, colW, cardH);
-    eyebrow(ctx, page, "Before DeCypher", M + 18, y - 22);
-    page.drawText("Income only", { x: M + 18, y: y - 42, size: 14, font: ctx.bold, color: C.fog });
-    page.drawText("No write-offs, no strategies", { x: M + 18, y: y - 56, size: 9, font: ctx.reg, color: C.muted });
-    ledger(ctx, page, M + 18, y - 84, colW - 36, c.before, stateLabel, "Total taxes owed", C.danger, c.entityKind);
-    // after
-    const ax = M + colW + 16;
-    card(page, ax, y - cardH, colW, cardH, C.teal);
-    eyebrow(ctx, page, "After DeCypher", ax + 18, y - 22, C.teal);
-    page.drawText("Bookkeeping + strategies", { x: ax + 18, y: y - 42, size: 14, font: ctx.bold, color: C.fog });
-    page.drawText(c.scorp ? "Your final returns" : "Your final return", { x: ax + 18, y: y - 56, size: 9, font: ctx.reg, color: C.muted });
-    ledger(ctx, page, ax + 18, y - 84, colW - 36, c.after, stateLabel, "New total taxes owed", C.teal, c.entityKind);
-    y -= cardH + 20;
+    let y = stage(ctx, page, PAGE.h - 96, {
+      label: "Before DeCypher",
+      title: `What ${recap.taxYear} would have cost`,
+      sub: `Your income with nothing taken off it: no write-offs, no strategies${kids?.inBefore ? ", no dependents claimed" : ""}.`,
+      side: c.before,
+      color: C.danger,
+      scale: c.before.grossIncome,
+      stateLabel,
+      entityKind: c.entityKind,
+    });
+    y -= 14;
 
-    // savings callout
-    const sh = scorpSavings > 0 ? 226 : 168;
+    const sh = scorpSavings > 0 ? 150 : 124;
     card(page, M, y - sh, W, sh, C.teal);
-    eyebrow(ctx, page, "The result", M + 18, y - 22, C.teal);
+    eyebrow(ctx, page, "The difference", M + 18, y - 22, C.teal);
     page.drawText("Total tax savings", { x: M + 18, y: y - 44, size: 14, font: ctx.bold, color: C.fog });
-    page.drawText(money(totalSavings), { x: M + 18, y: y - 88, size: 40, font: ctx.bold, color: C.teal });
+    page.drawText(money(totalSavings), { x: M + 18, y: y - 92, size: 40, font: ctx.bold, color: C.teal });
     paragraph(
       page,
       ctx.reg,
       scorpSavings > 0
-        ? `The difference between what ${recap.taxYear} would have cost on income alone and what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
-        : `The difference between what ${recap.taxYear} would have cost on income alone and what it cost with your books done and every strategy applied.`,
+        ? `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
+        : `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied.`,
       M + 260,
       y - 48,
       9.5,
       W - 278,
       C.mist,
     );
-    const bw = (W - 36 - 24) / 4;
-    const by = y - sh + 14;
     if (scorpSavings > 0) {
-      const tw3 = (W - 36 - 16) / 3;
-      const split: [string, number, ReturnType<typeof rgb>][] = [
-        ["Bookkeeping + strategies", c.savings, C.fog],
-        ["S-corp: SE tax avoided", scorpSavings, C.fog],
-        ["Total tax savings", totalSavings, C.teal],
-      ];
-      split.forEach(([l, v, col], i) => stat(ctx, page, M + 18 + i * (tw3 + 8), by + 58, tw3, 50, l, money(v), col, 14));
+      page.drawText(
+        `${money(c.savings)} between your two returns  +  ${money(scorpSavings)} of self-employment tax your S corporation avoided`,
+        { x: M + 18, y: y - sh + 18, size: 9.5, font: ctx.reg, color: C.mist },
+      );
     }
-    const tiles: [string, number][] = [
-      ["Deductions found", c.breakdown.deductionsFound],
-      c.entityKind === "scorp" ? ["S-corp state tax & PTET saved", c.breakdown.entitySaved] : ["SE tax saved", c.breakdown.seTaxSaved],
-      ["Income tax saved", c.breakdown.incomeTaxSaved],
-      [`${stateLabel} tax saved`, c.breakdown.stateSaved + c.breakdown.penaltiesSaved],
-    ];
-    tiles.forEach(([l, v], i) => stat(ctx, page, M + 18 + i * (bw + 8), by, bw, 50, l, signed(v), C.fog, 14));
     footer(ctx, page, recapUrl, 2, TOTAL);
   }
 
-  /* ── 3 · at filing + strategy ── */
+  /* ── 3 · after, then where the savings came from ── */
   {
     const page = newPage(ctx, header);
-    let y = PAGE.h - 96;
-    eyebrow(ctx, page, "At filing", M, y);
-    y -= 26;
-    page.drawText("Taxes due or refund", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
-    y -= 26;
-    const rows: [string, { owed: number; paid: number; due: number }][] = [
-      ["Federal", c.filing.federal],
-      [stateLabel, c.filing.state],
-      ...(c.filing.entity
-        ? ([[c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)", c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
-        : []),
-    ];
-    for (const [label, line] of rows) {
-      page.drawRectangle({ x: M, y: y - 40, width: W, height: 40, color: C.panel, borderColor: C.edge, borderWidth: 0.6 });
-      page.drawText(label, { x: M + 16, y: y - 24, size: 12, font: ctx.bold, color: C.fog });
-      page.drawText(`${money(line.owed)} owed  −  ${money(line.paid)} paid`, { x: M + 130, y: y - 24, size: 9.5, font: ctx.reg, color: C.muted });
-      const refund = line.due < 0;
-      const t = `${money(Math.abs(line.due))} ${refund ? "REFUND" : "DUE"}`;
-      rightText(page, ctx.bold, t, M + W - 16, y - 24, 12, refund ? C.teal : C.danger);
-      y -= 46;
-    }
-    page.drawLine({ start: { x: M, y: y - 2 }, end: { x: M + W, y: y - 2 }, thickness: 1, color: C.edge });
-    y -= 24;
-    page.drawText("Total", { x: M + 16, y, size: 12, font: ctx.bold, color: C.mist });
-    {
-      const refund = c.filing.total < 0;
-      rightText(page, ctx.bold, `${money(Math.abs(c.filing.total))} ${refund ? "REFUND" : "DUE"}`, M + W - 16, y, 16, refund ? C.teal : C.danger);
-    }
-    y -= 22;
-    y = paragraph(page, ctx.reg, "Owed is the tax on the return. Paid is what was already sent in through withholding and estimated payments. What's left is due at filing, or comes back as a refund.", M, y, 9, W, C.dusk);
+    let y = stage(ctx, page, PAGE.h - 96, {
+      label: "After DeCypher",
+      title: "What it cost with DeCypher",
+      sub: `Your books done and every strategy applied: the ${c.scorp ? "returns" : "return"} you're filing.`,
+      side: c.after,
+      color: C.teal,
+      scale: c.before.grossIncome,
+      was: c.before,
+      stateLabel,
+      entityKind: c.entityKind,
+    });
 
-    // Where the savings came from: one line per strategy, adding up to the total.
+    // One line per strategy, adding up to the total.
     if (attribution.length) {
-      y -= 30;
+      y -= 18;
       eyebrow(ctx, page, "Where it came from", M, y);
       y -= 24;
       page.drawText("Savings by strategy", { x: M, y, size: 18, font: ctx.bold, color: C.fog });
@@ -381,17 +436,76 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         rightText(page, ctx.bold, signed(a.savings), M + W, y, 10.5, a.savings >= 0 ? C.teal : C.danger);
         y -= 16;
       }
-      page.drawLine({ start: { x: M, y: y + 6 }, end: { x: M + W, y: y + 6 }, thickness: 1, color: C.edge });
-      y -= 8;
-      page.drawText("Bookkeeping + strategies", { x: M, y, size: 10.5, font: ctx.bold, color: C.mist });
-      rightText(page, ctx.bold, money(c.savings), M + W, y, 12, C.teal);
-      y -= 16;
+      const total = (label: string, value: number, color: Color) => {
+        page.drawLine({ start: { x: M, y: y + 6 }, end: { x: M + W, y: y + 6 }, thickness: 1, color: C.edge });
+        y -= 8;
+        page.drawText(label, { x: M, y, size: 10.5, font: ctx.bold, color: C.mist });
+        rightText(page, ctx.bold, money(value), M + W, y, 12, color);
+        y -= 18;
+      };
       if (recap.analysis?.scorpSavings) {
+        total("Between your two returns", c.savings, C.fog);
         page.drawText("S corporation: self-employment tax avoided (estimated)", { x: M, y, size: 10.5, font: ctx.reg, color: C.fog });
         rightText(page, ctx.bold, money(recap.analysis.scorpSavings.amount), M + W, y, 10.5, C.teal);
         y -= 16;
       }
+      total("Total tax savings", totalSavings, C.teal);
+      if (kidsBeside) {
+        y -= 4;
+        paragraph(
+          page,
+          ctx.reg,
+          `Not in your total: your ${kidsBeside.dependents === 1 ? "dependent" : "dependents"} took ${money(kidsBeside.after)} off this return. They're claimed on both versions of ${recap.taxYear}, so they aren't part of your savings.`,
+          M,
+          y,
+          8.5,
+          W,
+          C.dusk,
+        );
+      }
     }
+    footer(ctx, page, recapUrl, 3, TOTAL);
+  }
+
+  /* ── 4 · at filing (owed − paid = due) + strategy ── */
+  {
+    const page = newPage(ctx, header);
+    let y = PAGE.h - 96;
+    const refund = c.filing.total < 0;
+    eyebrow(ctx, page, "At filing", M, y);
+    y -= 26;
+    page.drawText(refund ? "Your refund" : "Taxes due at filing", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
+    y -= 22;
+    const lines: [string, { owed: number; paid: number; due: number }][] = [
+      ["Federal", c.filing.federal],
+      [stateLabel, c.filing.state],
+      ...(c.filing.entity
+        ? ([[c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)", c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
+        : []),
+    ];
+    // The year in three figures: owed, already paid, and what's left.
+    const owed = lines.reduce((s, [, l]) => s + l.owed, 0);
+    const paid = lines.reduce((s, [, l]) => s + l.paid, 0);
+    const op = 26;
+    const fw = (W - op * 2) / 3;
+    const fh = 64;
+    stat(ctx, page, M, y - fh, fw, fh, `Owed for ${recap.taxYear}`, money(owed), C.fog, 20);
+    page.drawText("-", { x: M + fw + op / 2 - 4, y: y - fh / 2 - 6, size: 20, font: ctx.bold, color: C.dusk });
+    stat(ctx, page, M + fw + op, y - fh, fw, fh, "Already paid", money(paid), C.teal, 20);
+    page.drawText("=", { x: M + fw * 2 + op * 1.5 - 5, y: y - fh / 2 - 6, size: 20, font: ctx.bold, color: C.dusk });
+    stat(ctx, page, M + (fw + op) * 2, y - fh, fw, fh, refund ? "Refund" : "Due at filing", money(Math.abs(c.filing.total)), refund ? C.teal : C.danger, 20);
+    y -= fh + 14;
+
+    for (const [label, line] of lines) {
+      page.drawRectangle({ x: M, y: y - 32, width: W, height: 32, color: C.panel, borderColor: C.edge, borderWidth: 0.6 });
+      page.drawText(label, { x: M + 16, y: y - 20, size: 11, font: ctx.bold, color: C.fog });
+      page.drawText(`${money(line.owed)} owed  −  ${money(line.paid)} paid`, { x: M + 130, y: y - 20, size: 9.5, font: ctx.reg, color: C.muted });
+      const r = line.due < 0;
+      rightText(page, ctx.bold, `${money(Math.abs(line.due))} ${r ? "REFUND" : "DUE"}`, M + W - 16, y - 20, 11, r ? C.teal : C.danger);
+      y -= 37;
+    }
+    y -= 8;
+    y = paragraph(page, ctx.reg, "Owed is the tax on the return for the whole year. Paid is what already went in through withholding and estimated payments. What's left is due when you file, or comes back to you.", M, y, 9, W, C.dusk);
 
     if (recap.strategies.length) {
       y -= 34;
@@ -405,39 +519,13 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         y -= 8;
       });
     }
-    footer(ctx, page, recapUrl, 3, TOTAL);
+    footer(ctx, page, recapUrl, 4, TOTAL);
   }
 
-  /* ── 4 · your kids (when the return claims them) + next steps ── */
+  /* ── 5 · next steps ── */
   {
     const page = newPage(ctx, header);
     let y = PAGE.h - 96;
-    // What the dependents are worth on each return: beside the savings,
-    // never in them, as the page shows it.
-    const kids = recap.analysis?.kids ?? null;
-    if (kids) {
-      eyebrow(ctx, page, "Your kids", M, y);
-      y -= 26;
-      page.drawText("What your kids saved you", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
-      y -= 22;
-      y = paragraph(
-        page,
-        ctx.reg,
-        `Your return figured again without your ${kids.dependents === 1 ? "dependent" : "dependents"}, everything else the same. They lower your tax on both versions of ${recap.taxYear}, so this sits beside your savings, not inside them.`,
-        M,
-        y,
-        9,
-        W,
-        C.dusk,
-      );
-      y -= 8;
-      const kw = (W - 8) / 2;
-      stat(ctx, page, M, y - 56, kw, 56, "With DeCypher", money(kids.after), C.teal, 18);
-      stat(ctx, page, M + kw + 8, y - 56, kw, 56, "Before DeCypher", money(kids.before), C.fog, 18);
-      y -= 56 + 18;
-      if (kids.note) y = paragraph(page, ctx.reg, kids.note, M, y, 9, W, C.mist);
-      y -= 30;
-    }
     eyebrow(ctx, page, "Next steps", M, y);
     y -= 26;
     page.drawText("What to do now", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
@@ -463,11 +551,39 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       y -= h + 12;
     }
     y -= 12;
+
+    // The DeCyphered video can't live in a PDF; the QR code opens it on the
+    // client's phone, Share button and all (/recap/<token>/share).
+    if (recap.video && videoIsCurrent(recap)) {
+      const shareLink = `${recapUrl}/share`;
+      const ch = 150;
+      card(page, M, y - ch, W, ch, C.magenta);
+      const qrSize = 114;
+      const qx = M + W - 18 - qrSize;
+      const qy = y - 18 - qrSize;
+      qrCode(page, shareLink, qx, qy, qrSize);
+      link(ctx, page, qx, qy, qrSize, qrSize, shareLink);
+      eyebrow(ctx, page, "Your DeCyphered", M + 18, y - 24);
+      page.drawText("Post your year to your story", { x: M + 18, y: y - 46, size: 15, font: ctx.bold, color: C.fog });
+      paragraph(
+        page,
+        ctx.reg,
+        `We made your ${recap.taxYear} into a short video for Instagram. Scan the code with your phone's camera to open it with a Share button. Tag @we.decypher when you post it and we'll send you a $50 Visa gift card.`,
+        M + 18,
+        y - 66,
+        10,
+        W - 36 - qrSize - 24,
+        C.mist,
+      );
+      page.drawText(shareLink, { x: M + 18, y: y - ch + 16, size: 8.5, font: ctx.reg, color: C.teal });
+      y -= ch + 14;
+    }
+
     card(page, M, y - 70, W, 70);
     page.drawText("Your recap online", { x: M + 18, y: y - 24, size: 12, font: ctx.bold, color: C.fog });
     page.drawText(recapUrl, { x: M + 18, y: y - 44, size: 10, font: ctx.reg, color: C.teal });
     link(ctx, page, M, y - 70, W, 70, recapUrl);
-    footer(ctx, page, recapUrl, 4, TOTAL);
+    footer(ctx, page, recapUrl, 5, TOTAL);
   }
 
   flushLinks(ctx);

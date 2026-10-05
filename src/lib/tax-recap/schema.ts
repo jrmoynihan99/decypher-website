@@ -164,6 +164,20 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   {
+    key: "iraDeduction",
+    label: "IRA deduction",
+    source: "Schedule 1 line 20 — off on the before, like the SEP: a contribution DeCypher set up",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "hsaDeduction",
+    label: "HSA deduction",
+    source: "Schedule 1 line 13 (Form 8889) — off on the before, like the SEP",
+    group: "federal",
+    optional: true,
+  },
+  {
     key: "itemizedDeductions",
     label: "Itemized deductions (Schedule A)",
     source: "Schedule A line 17, when the return has a Schedule A",
@@ -668,14 +682,31 @@ export type DerivedBefore = { version: string; notes: string[] };
  */
 export type RecapAnalysis = {
   version: string;
-  attribution: { label: string; savings: number; note: string }[];
+  /**
+   * `key` names the step for code that reads the split (the DeCyphered
+   * video maps it to a strategy kind): the Scenario switch, "kids", or
+   * "guaranteedPayments". Recaps saved before keys existed have none.
+   */
+  attribution: { key?: string; label: string; savings: number; note: string }[];
   scorpSavings: { amount: number; note: string } | null;
   /**
    * What the dependents are worth on each side: the return re-run without
-   * them (no child credits, single instead of head of household). Shown
-   * beside the savings, never added to them — the kids are on both sides.
+   * them (no child credits, single instead of head of household).
+   *
+   * `inBefore` (engine v8 on): the recap's before doesn't claim them. The
+   * before side's worth, split by the recap's rows, is added to the before
+   * column (`computeRecap`) and is the first step of `attribution`, so the
+   * split still adds up to before − after. Null on recaps saved earlier,
+   * whose before claims the kids and shows them beside the savings — and
+   * when they're worth nothing at the before's income.
    */
-  kids: { dependents: number; before: number; after: number; note: string } | null;
+  kids: {
+    dependents: number;
+    before: number;
+    after: number;
+    note: string;
+    inBefore: { federal: number; state: number; note: string } | null;
+  } | null;
   notes: string[];
 };
 
@@ -703,8 +734,37 @@ export type RecapInput = {
   analysis: RecapAnalysis | null;
 };
 
+/** The two cuts of the DeCyphered video: with dollar amounts, and percentages only. */
+export const VIDEO_VARIANTS = ["dollars", "percent"] as const;
+export type VideoVariant = (typeof VIDEO_VARIANTS)[number];
+
+/**
+ * The client's DeCyphered video, rendered in the builder when the recap is
+ * saved (lib/decyphered) and stored privately in Cloud Storage. `hash` is
+ * of the figures it was made from: when the recap's numbers change and the
+ * video wasn't re-rendered, the hashes differ and the page doesn't offer it.
+ */
+export type RecapVideo = {
+  hash: string;
+  variants: VideoVariant[];
+  renderedAt: string;
+};
+
+export function sanitizeVideo(raw: unknown): RecapVideo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const hash = text(r.hash, 64);
+  const variants = (Array.isArray(r.variants) ? r.variants : []).filter((v): v is VideoVariant =>
+    (VIDEO_VARIANTS as readonly unknown[]).includes(v),
+  );
+  if (!hash || !variants.length) return null;
+  return { hash, variants, renderedAt: text(r.renderedAt, 40) ?? "" };
+}
+
 export type RecapDoc = RecapInput & {
   id: string;
+  /** Set by the builder once the video is uploaded; never part of a save. */
+  video: RecapVideo | null;
   /** Unguessable URL segment for the client-facing page. */
   token: string;
   /** Switched on to kill the public link without losing the record. */
@@ -888,9 +948,10 @@ export function sanitizeAnalysis(raw: unknown): RecapAnalysis | null {
       const label = text(o.label, 120);
       const savings = asMoney(o.savings);
       if (!label || savings === null) return null;
-      return { label, savings, note: text(o.note, 400) ?? "" };
+      const key = text(o.key, 40);
+      return { ...(key ? { key } : {}), label, savings, note: text(o.note, 400) ?? "" };
     })
-    .filter((s): s is { label: string; savings: number; note: string } => s !== null)
+    .filter((s): s is RecapAnalysis["attribution"][number] => s !== null)
     .slice(0, 12);
   const sc = (r.scorpSavings && typeof r.scorpSavings === "object" ? r.scorpSavings : null) as Record<
     string,
@@ -905,6 +966,9 @@ export function sanitizeAnalysis(raw: unknown): RecapAnalysis | null {
   const kidsBefore = k ? asMoney(k.before) : null;
   const kidsAfter = k ? asMoney(k.after) : null;
   const kidsCount = k ? asMoney(k.dependents) : null;
+  const ib = (k?.inBefore && typeof k.inBefore === "object" ? k.inBefore : null) as Record<string, unknown> | null;
+  const ibFederal = ib ? asMoney(ib.federal) : null;
+  const ibState = ib ? asMoney(ib.state) : null;
   return {
     version,
     attribution,
@@ -916,6 +980,10 @@ export function sanitizeAnalysis(raw: unknown): RecapAnalysis | null {
             before: Math.max(0, kidsBefore),
             after: Math.max(0, kidsAfter),
             note: text(k.note, 400) ?? "",
+            inBefore:
+              ib && ibFederal !== null && ibState !== null
+                ? { federal: ibFederal, state: ibState, note: text(ib.note, 400) ?? "" }
+                : null,
           }
         : null,
     notes,

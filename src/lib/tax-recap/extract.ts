@@ -264,6 +264,8 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - qbiUbia: Form 8995-A line 7 (allocable share of the unadjusted basis of qualified property), added across the business columns. Omit when blank.
 - qbiLossCarryforward: Form 8995 line 3, the qualified business net loss carryforward from the prior year, as a positive number. Omit when blank or when the return uses Form 8995-A.
 - sepDeduction: Schedule 1 line 16 (self-employed SEP, SIMPLE and qualified plans). Omit when blank.
+- iraDeduction: Schedule 1 line 20 (IRA deduction). Omit when blank.
+- hsaDeduction: Schedule 1 line 13 (health savings account deduction, Form 8889). Only the Schedule 1 line: an HSA paid through payroll (W-2 box 12 code W) isn't on it. Omit when blank.
 - itemizedDeductions: Schedule A line 17 (total itemized deductions), when the print has a Schedule A — even if the return took the standard deduction instead. Omit when there is no Schedule A.
 - saltPaid: Schedule A line 5d (state and local taxes added up, before the cap). Omit when there is no Schedule A.
 - saltDeducted: Schedule A line 5e (state and local taxes after the cap). Omit when there is no Schedule A.

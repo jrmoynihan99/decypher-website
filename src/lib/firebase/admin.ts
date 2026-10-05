@@ -38,6 +38,11 @@ function credentials() {
 
 let cached: App | null = null;
 
+/** The admin app itself, for SDK surfaces this file doesn't wrap (Cloud Storage). */
+export function adminApp(): App {
+  return app();
+}
+
 function app(): App {
   if (cached) return cached;
   cached = getApps().length

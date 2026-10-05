@@ -128,6 +128,8 @@ export type RecapComputed = {
   savings: number;
   /** Exact decompositions of `savings` — no counterfactual involved. */
   breakdown: {
+    /** What the dependents the before doesn't claim add to it; 0 when it claims them. */
+    kids: number;
     deductionsFound: number;
     seTaxSaved: number;
     incomeTaxSaved: number;
@@ -144,6 +146,8 @@ export type RecapComputed = {
     total: number;
   };
   currentYearIncome: number;
+  /** What the business took in: Schedule C line 1, or the entity return's line 1a. */
+  receipts: number;
   priorYearIncome: number | null;
   /** True when the client's business runs through an entity return (an S corporation or a partnership). */
   scorp: boolean;
@@ -153,11 +157,23 @@ export type RecapComputed = {
 
 export function computeRecap(
   input: Pick<RecapInput, "before" | "after" | "priorYearIncome"> &
-    Partial<Pick<RecapInput, "entityBefore" | "entityAfter">>,
+    Partial<Pick<RecapInput, "entityBefore" | "entityAfter" | "analysis">>,
 ): RecapComputed {
   const eb = input.entityBefore ?? null;
   const ea = input.entityAfter ?? null;
-  const before = sideSummary(input.before, eb);
+  // The before column as read or derived claims the dependents; the
+  // recap's before doesn't (the engine's `kids.inBefore`, v8 on), so their
+  // worth on that side goes onto its federal and state rows.
+  const kids = input.analysis?.kids?.inBefore ?? null;
+  const asFiled = sideSummary(input.before, eb);
+  const before: RecapSide = kids
+    ? {
+        ...asFiled,
+        federalTaxes: asFiled.federalTaxes + kids.federal,
+        stateTaxes: asFiled.stateTaxes + kids.state,
+        totalTaxes: asFiled.totalTaxes + kids.federal + kids.state,
+      }
+    : asFiled;
   const after = sideSummary(input.after, ea);
   const a = input.after;
   const b = input.before;
@@ -209,15 +225,17 @@ export function computeRecap(
     after,
     savings: before.totalTaxes - after.totalTaxes,
     breakdown: {
+      kids: before.totalTaxes - asFiled.totalTaxes,
       deductionsFound: before.businessNetIncome - after.businessNetIncome,
       seTaxSaved: n(b.seTax) - n(a.seTax),
       incomeTaxSaved: n(b.incomeTax) - n(a.incomeTax),
-      stateSaved: before.stateTaxes - after.stateTaxes,
+      stateSaved: asFiled.stateTaxes - after.stateTaxes,
       entitySaved: before.entityTaxes - after.entityTaxes,
       penaltiesSaved: before.penalties - after.penalties,
     },
     filing: { federal, state, entity, total: federal.due + state.due + (entity?.due ?? 0) },
     currentYearIncome: receipts + (scorp ? 0 : n(a.w2Income ?? b.w2Income)),
+    receipts,
     priorYearIncome: input.priorYearIncome,
     scorp,
     entityKind,
