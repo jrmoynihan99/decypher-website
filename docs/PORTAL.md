@@ -275,7 +275,7 @@ the tab is the tax team.
   holds to decypher it — the ring fills, the headline decrypts in step
   (`scrambleCells` in lib/decrypt), the cipher glyphs on screen are pulled
   into the hand, and at 100% it bursts. The decyphered headline then stays
-  as the page's hero (the lock gives way to the before/after/savings tiles)
+  as the page's hero (the lock gives way to the before figure)
   and the rest of the recap mounts below it in the home page's language:
   full-bleed sections, a decrypting heading each (`SectionHeading`), frosted
   panels. Letting go early winds it back. It has a sound (`reveal-sound.ts`,
@@ -287,6 +287,35 @@ the tab is the tax team.
   `?open` renders it all open — use it from the portal to check numbers. The
   handout is the PDF route; browser print of the scroll page isn't supported
   (below-the-fold sections reveal on scroll).
+- **The sandwich (2026-10-05).** The hero shows only the before. Below it:
+  Before (full screen, red) → total savings → After (the same layout, teal),
+  then savings by strategy, taxes due (owed − paid = due), strategy and next
+  steps; the PDF follows the same order on five pages. The bar on both sides
+  is cents of every dollar brought in, both over the BEFORE return's total
+  income so the after's bar is shorter by exactly the savings
+  (`centsPerDollar`, shared with the video so the three never disagree). The before
+  doesn't claim the dependents (`analysis.kids.inBefore`, engine v8):
+  `computeRecap` adds their before-side worth to the federal and state rows
+  and they're the strategy split's first line, so before − after is the
+  savings. Recaps saved earlier keep their numbers until re-saved.
+- **The DeCyphered video (2026-10-05).** A 1080×1920 MP4 for the client's
+  Instagram story, from an advisor's kit ported into `src/lib/decyphered/`
+  (`buildRecap` + `config` are his number rules; `fromRecap` maps a recap
+  in; `scenes.ts` is his template redrawn on a canvas; `encode.ts` encodes it
+  with the browser's WebCodecs via mediabunny). **Nothing renders on a
+  server:** every save in the builder calls `POST /api/portal/tax-recap/<id>/video`
+  (the figures as saved, a hash, signed upload URLs; `current: true` when the
+  stored video already matches), the staff member's Chrome renders both cuts
+  (dollars / percentages only, ~25s), PUTs them to the private default
+  bucket (`taxRecaps/<id>/<cut>.mp4`; bucket CORS allows signed PUT/GET), and
+  `PUT …/video` records `video {hash, variants}` on the doc. The client gets
+  it at `/recap/<token>/video/<cut>` (302 to an hour-long signed URL), a
+  "Post your DeCyphered" section at the bottom of the page (Web Share with
+  the file on phones → Instagram → Story; QR to `/recap/<token>/share` on
+  desktop) and a QR card on the PDF's last page. A recap whose numbers moved
+  since its video hashes differently and isn't offered until re-saved.
+  Deleting a recap deletes its videos. Incentive: tag @we.decypher, get a
+  $50 Visa — fulfilled by hand from the Instagram mention; nothing tracks it.
 - **Env.** `ANTHROPIC_API_KEY`. Unset means "Read both returns" returns a
   clear 400; nothing else is affected. `AI_MODEL` (optional) picks the model,
   default `claude-opus-5`; the server log line `[tax-recap] read … with

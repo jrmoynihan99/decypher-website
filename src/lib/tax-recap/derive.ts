@@ -54,7 +54,7 @@
  * (`npm run recap:check`).
  */
 
-import { totalTaxesOf } from "./compute";
+import { sideSummary, totalTaxesOf } from "./compute";
 import {
   ENTITY_FIELDS,
   RETURN_FIELDS,
@@ -80,7 +80,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "7";
+export const DERIVE_VERSION = "9";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -868,6 +868,12 @@ function allocate(total: number, shares: number[]): number[] {
  * S corporation keys are writeOffs, salary, retirement and pte; the
  * partnership keys are writeOffs and healthInsurance; reps (the rentals
  * treated as nonpassive by a real estate professional) applies to any shape.
+ *
+ * The tax team's call (2026-10-05): what the client saves into a SEP, an IRA
+ * or an HSA (Schedule 1 lines 16, 20, 13) is something DeCypher set up, so
+ * `retirement` switches it on for every shape; and a sole proprietor's
+ * self-employed health insurance deduction is something DeCypher caught, so
+ * `healthInsurance` switches it on for the sole proprietor too.
  */
 type Scenario = {
   expenses: boolean;
@@ -886,10 +892,10 @@ type Scenario = {
   rentalExpenses: boolean;
   reps: boolean;
   /**
-   * The same return without its dependents — not a strategy (the kids are
-   * there before and after), only how much they're worth: no child tax
-   * credit, no child-care credit, single instead of head of household, no
-   * state dependent exemptions.
+   * The same return without its dependents: no child tax credit, no
+   * child-care credit, single instead of head of household, no state
+   * dependent exemptions. The recap's before is figured this way (see
+   * kidsValue); the CPA's before prints, and so `deriveBefore`, keep them.
    */
   noKids?: boolean;
 };
@@ -974,6 +980,10 @@ type Model = {
     itemized: Itemized | null;
     /** The state's own deduction as read, when it beats the state's standard deduction. */
     stateDeduction: number | null;
+    /** Schedule 1 lines 16, 20 and 13 as read: switched off on the before. */
+    sep: number;
+    ira: number;
+    hsa: number;
     /** Dependents on the return: the count read, or the qualifying children the child tax credit implies when that's more. */
     dependents: number;
     /** Schedule 3 line 2 as read. */
@@ -1360,6 +1370,10 @@ function buildModel(
   const preferential = Math.max(0, n(after.qualifiedDividends)) + Math.max(0, longTerm);
   const qbiCarryforward = qbiRead ? 0 : Math.max(0, n(after.qbiLossCarryforward));
   const sep = Math.max(0, n(after.sepDeduction));
+  // Schedule 1 lines 20 and 13: part of the "other" adjustments as read,
+  // taken back out of them when the before switches retirement off.
+  const ira = Math.max(0, n(after.iraDeduction));
+  const hsa = Math.max(0, n(after.hsaDeduction));
 
   // Schedule E Part I. When only the net was read, it's all profit or all
   // loss, as its sign says.
@@ -1464,6 +1478,12 @@ function buildModel(
     return refuse();
   }
   const carried = otherAdjustments > TOL ? otherAdjustments : 0;
+  if (ira + hsa > carried + TOL) {
+    reasons.push(
+      `The IRA (${fmt(ira)}) and HSA (${fmt(hsa)}) deductions read are more than the adjustments left after the SE tax, health insurance and retirement plan deductions (${fmt(carried)}) — one of the Schedule 1 lines misread`,
+    );
+    return refuse();
+  }
 
   let inputs: FederalInputs = { ...base, carried };
   let check = federal(fed, status, inputs);
@@ -1967,6 +1987,11 @@ function buildModel(
     }
     // A real estate professional's rentals are nonpassive only with the
     // status switched on; off, the losses go through Form 8582's allowance.
+    // What the client saved into a SEP, an IRA or an HSA, and a sole
+    // proprietor's health insurance deduction: things DeCypher set up or
+    // caught, so off on the before (the tax team's call, 2026-10-05).
+    if (!s.retirement) fi = { ...fi, sep: 0, carried: Math.max(0, fi.carried - ira - hsa) };
+    if (shape === "soleProp" && !s.healthInsurance) fi = { ...fi, sehiPaid: null };
     // Without the rental expenses every property nets its rents: profits
     // are the rents and there are no losses (earlier years' suspended
     // losses still come off on Form 8582).
@@ -1990,6 +2015,11 @@ function buildModel(
         fi.w2,
         mode === "exclusion" && s.pte && electing ? k1 : 0,
       );
+      // A state that doesn't allow the HSA deduction adds it back
+      // (California's Schedule CA): with the HSA off, so is the add-back.
+      if (!s.retirement && hsa > 0 && stateAdjustments > 0) {
+        si = { ...si, carriedAdjustment: si.carriedAdjustment - Math.min(hsa, stateAdjustments) };
+      }
       if (s.noKids) {
         // The state's dependent exemptions go; an exemption deduction carried
         // as read loses the dependents' share; and a state deduction that was
@@ -2088,6 +2118,9 @@ function buildModel(
         stateDeduction,
         dependents: Math.max(dependents, children),
         childCareCredit,
+        sep,
+        ira,
+        hsa,
       },
     },
   };
@@ -2194,6 +2227,8 @@ function fillNumbers(
   out.capitalGainLongTerm = after.capitalGainLongTerm;
   out.qbiLossCarryforward = fi.qbi ? null : after.qbiLossCarryforward;
   out.sepDeduction = fi.sep > 0 ? fi.sep : null;
+  out.iraDeduction = s.retirement ? after.iraDeduction : null;
+  out.hsaDeduction = s.retirement ? after.hsaDeduction : null;
   // Schedule A travels with the return; the before's total is re-figured
   // at its income, and the standard deduction wins when it's larger.
   if (fi.itemized) {
@@ -2518,8 +2553,23 @@ export function deriveBefore(
   if (stateCard && facts.stateDeduction !== null && stateCard.deduction.kind === "standard" && facts.stateDeduction > stateCard.deduction.amount[m.status]) {
     notes.push(`${stateCard.name} itemized deductions (${fmt(facts.stateDeduction)}) carried over unchanged — the state keeps the property tax and mortgage interest without the federal cap`);
   }
-  if (n(after.sepDeduction) > 0) {
-    notes.push(`The ${fmt(n(after.sepDeduction))} retirement plan deduction (SEP, SIMPLE or qualified plan) carried over unchanged, taken off the business's QBI and the health insurance cap`);
+  // The tax team's call (2026-10-05): retirement and HSA contributions and a
+  // sole proprietor's health insurance deduction are DeCypher's to claim.
+  {
+    const off: string[] = [];
+    if (facts.sep > 0) off.push(`the ${fmt(facts.sep)} SEP or solo 401(k) deduction`);
+    if (facts.ira > 0) off.push(`the ${fmt(facts.ira)} IRA deduction`);
+    if (facts.hsa > 0) off.push(`the ${fmt(facts.hsa)} HSA deduction`);
+    if (m.shape === "soleProp" && m.after.fed.sehi > 0) off.push(`the ${fmt(m.after.fed.sehi)} self-employed health insurance deduction`);
+    if (off.length) {
+      notes.push(
+        `Not claimed on the before, as contributions and deductions DeCypher set up or caught: ${off.join(", ")}${
+          facts.hsa > 0 && facts.stateAdjustments > 0 && stateCard
+            ? `. ${stateCard.name}'s add-back of the HSA goes with it (${fmt(Math.min(facts.hsa, facts.stateAdjustments))} of its +${fmt(facts.stateAdjustments)} adjustment)`
+            : ""
+        }`,
+      );
+    }
   }
   if (m.shape === "scorp" && facts.ownershipPct < 1) {
     notes.push(`The shareholder owns ${Math.round(facts.ownershipPct * 1000) / 10}% of the corporation, so the K-1 on each side is that share of the ordinary income`);
@@ -2535,7 +2585,7 @@ export function deriveBefore(
             : "the advance is exactly used"
       }`,
     );
-    if (b.fed.sehi !== m.after.fed.sehi) {
+    if (b.fed.sehi !== m.after.fed.sehi && m.shape !== "soleProp") {
       notes.push(`SE health insurance deduction ${fmt(m.after.fed.sehi)} → ${fmt(b.fed.sehi)} (${m.shape === "scorp" ? "no wages to run the premiums through" : "capped by the business's profit"})`);
     }
   }
@@ -2545,10 +2595,17 @@ export function deriveBefore(
   if (n(after.childTaxCredit) > 0 && b.fed.childTaxCredit !== m.after.fed.childTaxCredit) {
     notes.push(`Child tax credit ${fmt(m.after.fed.childTaxCredit)} → ${fmt(b.fed.childTaxCredit)} as it phases out on the higher income`);
   }
-  if (facts.carried > 0) {
-    notes.push(
-      `Adjustments to income other than the SE, health insurance and retirement plan deductions (${fmt(facts.carried)}: student loan interest, an IRA, an HSA or similar) carried over unchanged, as a before print keeps them`,
-    );
+  {
+    // What's left of the "other" adjustments once the IRA and HSA come out:
+    // student loan interest, educator expenses and the like stay as filed.
+    const kept = Math.max(0, facts.carried - facts.ira - facts.hsa);
+    if (kept > 0) {
+      notes.push(
+        `Other adjustments to income (${fmt(kept)}: student loan interest, educator expenses or similar) carried over unchanged, as a before print keeps them${
+          facts.ira + facts.hsa === 0 ? ". If any of it is an IRA or HSA deduction, read Schedule 1 lines 20 and 13 so the before can leave it off" : ""
+        }`,
+      );
+    }
   }
   if (facts.seTaxNote) notes.push(facts.seTaxNote);
   if (facts.otherPayments > 0) {
@@ -2685,6 +2742,28 @@ export function attributeStrategies(
     note: `${fmt(rental?.expenses ?? 0)} of rental property expenses (mortgage interest, depreciation, repairs, taxes) deducted on Schedule E against ${fmt(rental?.rents ?? 0)} of rents`,
     skip: !rental || rental.expenses <= 0,
   };
+  // What the client saved into a SEP, an IRA or an HSA (Schedule 1 lines
+  // 16, 20, 13), and a sole proprietor's health insurance deduction.
+  const personal = [
+    facts.sep > 0 ? `${fmt(facts.sep)} into a SEP or solo 401(k)` : "",
+    facts.ira > 0 ? `${fmt(facts.ira)} into an IRA` : "",
+    facts.hsa > 0 ? `${fmt(facts.hsa)} into an HSA` : "",
+  ].filter(Boolean);
+  const personalTotal = facts.sep + facts.ira + facts.hsa;
+  const retirementLabel =
+    facts.hsa > 0 && facts.sep + facts.ira > 0 ? "Retirement and HSA contributions" : facts.hsa > 0 ? "HSA contributions" : "Retirement contributions";
+  const retirementStep: Step = {
+    key: "retirement",
+    label: retirementLabel,
+    note: `${personal.join(", ")}, deducted on Schedule 1`,
+    skip: personalTotal <= 0,
+  };
+  const healthStep: Step = {
+    key: "healthInsurance",
+    label: "Self-employed health insurance",
+    note: `${fmt(m.after.fed.sehi)} of health insurance premiums deducted on Schedule 1 (Form 7206)`,
+    skip: m.after.fed.sehi <= 0,
+  };
   const steps: Step[] =
     m.shape === "soleProp"
       ? [
@@ -2701,6 +2780,8 @@ export function attributeStrategies(
             skip: facts.homeOffice <= 0,
           },
           rentalStep,
+          retirementStep,
+          healthStep,
           repsStep,
         ]
       : m.shape === "partnership"
@@ -2720,6 +2801,7 @@ export function attributeStrategies(
                   : `${fmt(facts.guaranteedPayments)} of guaranteed payments deducted by the partnership`,
               skip: facts.guaranteedPayments <= 0,
             },
+            retirementStep,
             rentalStep,
             repsStep,
           ]
@@ -2738,9 +2820,9 @@ export function attributeStrategies(
           },
           {
             key: "retirement",
-            label: "Solo 401(k)",
-            note: `${fmt(facts.deferral)} deferred from the owner's wages and ${fmt(facts.pension)} contributed by the corporation`,
-            skip: facts.deferral + facts.pension <= 0,
+            label: personalTotal > 0 ? "Solo 401(k) and other retirement contributions" : "Solo 401(k)",
+            note: `${fmt(facts.deferral)} deferred from the owner's wages and ${fmt(facts.pension)} contributed by the corporation${personal.length ? `; ${personal.join(", ")} on Schedule 1` : ""}`,
+            skip: facts.deferral + facts.pension + personalTotal <= 0,
           },
           {
             key: "pte",
@@ -2756,9 +2838,21 @@ export function attributeStrategies(
           repsStep,
         ];
 
-  const scenario: Scenario = { ...ALL_OFF };
+  // The before doesn't claim the dependents (the team's call, 2026-10-05):
+  // the walk starts without them and they come back as its first step,
+  // worth what they are at the before's income, so every strategy after
+  // them keeps the value it had.
+  const kids = kidsValue(m);
+  const kidsFirst = kids.value?.inBefore ?? null;
+  const scenario: Scenario = { ...ALL_OFF, noKids: kidsFirst !== null };
   let previous = m.run(scenario).total;
   const attribution: RecapAnalysis["attribution"] = [];
+  if (kids.value && kidsFirst) {
+    scenario.noKids = false;
+    const now = m.run(scenario).total;
+    attribution.push({ key: "kids", label: kidsLabel(kids.value.dependents), savings: previous - now, note: kidsFirst.note });
+    previous = now;
+  }
   const threshold = m.card.federal.qbi.threshold[m.status];
   let overThreshold = false;
   for (const step of steps) {
@@ -2767,7 +2861,12 @@ export function attributeStrategies(
     const run = m.run(scenario);
     const now = run.total;
     if (run.fed.taxableBeforeQbi > threshold && !has(after.qbiIncome)) overThreshold = true;
-    attribution.push({ label: step.label, savings: previous - now, note: typeof step.note === "function" ? step.note(previous) : step.note });
+    attribution.push({
+      key: step.key === "healthInsurance" && facts.partnerPremiums <= 0 ? "guaranteedPayments" : step.key,
+      label: step.label,
+      savings: previous - now,
+      note: typeof step.note === "function" ? step.note(previous) : step.note,
+    });
     previous = now;
   }
   // The recap's headline is before − after as READ; the engine's after
@@ -2811,19 +2910,23 @@ export function attributeStrategies(
     };
   }
 
-  const kids = kidsValue(m);
   if (kids.note) notes.push(kids.note);
 
   return { version: DERIVE_VERSION, attribution, scorpSavings, kids: kids.value, notes };
 }
 
+/** The kids' line in the strategy split. */
+const kidsLabel = (count: number) =>
+  count === 1 ? "Claiming your dependent" : count > 1 ? `Claiming your ${count} dependents` : "Claiming your dependents";
+
 /**
  * What the dependents are worth: the before and the after each re-run
- * without them, everything else as filed. Not a strategy — the kids are on
- * both sides — so it sits beside the savings, never inside them. Null when
- * the return has none, when they change nothing at this income, or when the
- * return has a premium tax credit that depends on household size (the
- * poverty line for a smaller household isn't on the tables).
+ * without them, everything else as filed. The recap's before is the one
+ * without them (`inBefore`, the before side's share added to its federal
+ * and state rows) and they're the first step of the strategy split. Null
+ * when the return has none, when they change nothing at this income, or
+ * when the return has a premium tax credit that depends on household size
+ * (the poverty line for a smaller household isn't on the tables).
  */
 function kidsValue(m: Model): { value: RecapAnalysis["kids"]; note: string | null } {
   const { facts } = m;
@@ -2845,24 +2948,37 @@ function kidsValue(m: Model): { value: RecapAnalysis["kids"]; note: string | nul
       note: `The ${count === 1 ? "dependent" : `${count} dependents`} on the return don't change the tax at this income: the child tax credit has phased out${headOfHousehold ? "" : " and there's no filing status riding on them"}`,
     };
   }
-  // The pieces, from the after side: the two credits, what head of
-  // household is worth federally, and the state's share.
-  const w = sides[1].with;
-  const wo = sides[1].without;
-  const ctc = w.fed.childTaxCredit - wo.fed.childTaxCredit;
-  const care = w.fed.credits - wo.fed.credits;
+  // The pieces on one side: the two credits, what head of household is
+  // worth federally, and the state's share.
   const stateTax = (x: Outcome) => (x.st ? x.st.netTax : 0);
-  const stateDiff = stateTax(wo) - stateTax(w);
-  const filing = after - stateDiff - ctc - care;
   const stateName = m.card.state?.name ?? "State";
-  const parts: string[] = [];
-  if (ctc > 0) parts.push(`Child tax credit ${fmt(ctc)}`);
-  if (care > 0) parts.push(`Child and dependent care credit ${fmt(care)}`);
-  if (headOfHousehold && filing > 0) parts.push(`Head of household instead of single ${fmt(filing)}`);
-  else if (filing > 0) parts.push(`Other federal ${fmt(filing)}`);
-  if (stateDiff > 0) parts.push(`${stateName} tax ${fmt(stateDiff)}`);
+  const pieces = ({ with: w, without: wo }: (typeof sides)[number], worth: number) => {
+    const ctc = w.fed.childTaxCredit - wo.fed.childTaxCredit;
+    const care = w.fed.credits - wo.fed.credits;
+    const stateDiff = stateTax(wo) - stateTax(w);
+    const filing = worth - stateDiff - ctc - care;
+    const parts: string[] = [];
+    if (ctc > 0) parts.push(`Child tax credit ${fmt(ctc)}`);
+    if (care > 0) parts.push(`Child and dependent care credit ${fmt(care)}`);
+    if (headOfHousehold && filing > 0) parts.push(`Head of household instead of single ${fmt(filing)}`);
+    else if (filing > 0) parts.push(`Other federal ${fmt(filing)}`);
+    if (stateDiff > 0) parts.push(`${stateName} tax ${fmt(stateDiff)}`);
+    return parts.join(" · ");
+  };
+  // The before's share by the recap's own rows, so the before column can
+  // carry it: federal (net of refundable credits) and state.
+  const row = (x: Outcome) => sideSummary(x.numbers, x.entityNumbers);
+  const bw = row(sides[0].with);
+  const bwo = row(sides[0].without);
+  const federal = bwo.federalTaxes - bw.federalTaxes;
   return {
-    value: { dependents: count, before: Math.max(0, before), after: Math.max(0, after), note: parts.join(" · ") },
+    value: {
+      dependents: count,
+      before: Math.max(0, before),
+      after: Math.max(0, after),
+      note: pieces(sides[1], after),
+      inBefore: before > 0 ? { federal, state: before - federal, note: pieces(sides[0], before) } : null,
+    },
     note: null,
   };
 }

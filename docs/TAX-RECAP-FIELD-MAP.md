@@ -64,7 +64,9 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | Prior years' unallowed passive losses | Form 8582 line 1c + 2c (Carpenter: 9,847) | — | — |
 | Real estate professional rentals | Schedule E line 43 — nonzero when REPS is claimed (Carpenter: −79,519) | — | — |
 | Net long-term capital gain | Schedule D line 15 (Carpenter: 19 of the 46 on line 7) | — | — |
-| SEP, SIMPLE and qualified plans | Schedule 1 line 16 — reduces QBI and the health insurance cap (Carpenter: 3,000) | — | — |
+| SEP, SIMPLE and qualified plans | Schedule 1 line 16 — reduces QBI and the health insurance cap; off on the before (Carpenter: 3,000) | — | — |
+| IRA deduction | Schedule 1 line 20 — off on the before (Carpenter: 2,500) | — | — |
+| HSA deduction | Schedule 1 line 13, not a payroll HSA — off on the before, with a state's add-back of it | — | — |
 | Itemized deductions | Schedule A line 17, read whenever the print has a Schedule A (Carpenter: 45,683; Singh: 23,598 under the standard deduction) | — | — |
 | State and local taxes paid / deducted | Schedule A lines 5d / 5e (Carpenter: 19,963 / 19,963) | — | — |
 | Medical expenses | Schedule A line 1 (both: 0) | — | — |
@@ -374,3 +376,18 @@ Verified by hand in `npm run recap:check`: Carpenter $3,700 after (child tax cre
 The question to the tax team: on the zero-write-off before, do rental property costs (Schedule E: mortgage interest, depreciation, repairs, property tax, insurance) count as write-offs found, like Schedule C expenses? **Answer: yes.** The engine now zeroes them: a scenario switch `rentalExpenses` in `derive.ts`, off on the before, so every property nets its rents (Schedule E line 23a, new field `rentalRents`; line 23e, `rentalExpenses`, has to agree with the properties' net or the engine refuses). Earlier years' suspended losses still come off on Form 8582. The split gets a step "Bookkeeping: rental expenses", ahead of real estate professional status, so the REPS answer ($133,342 without it, everything else as filed) is unchanged.
 
 Carpenter now matches the team's Canva on every income line ($102,009 of other income, $723,688 of gross income). The engine's before is $211,483 against the Canva's $203,879. The $7,604 between them is the QBI deduction their software gave the rentals on the before (about $21,725 at the 35% bracket). Over the threshold that deduction is capped at 2.5% of the properties' original cost (UBIA), which no line of the after return prints, so the engine takes it as $0 and says so in a note, with how much is at stake (up to $20,359 of deduction, about $7,126 of tax). Modeling it would need the property cost from ProSeries' Form 8995-A on a before print, typed in by the reviewer.
+
+## Retirement, HSA and health insurance on the before (decided 2026-10-05)
+
+The tax team's rule: what the client saves into a SEP or solo 401(k), an IRA or an HSA (Schedule 1 lines 16, 20 and 13), and a sole proprietor's self-employed health insurance deduction (line 17), are things DeCypher set up or caught, so the before doesn't claim them. The CPA's before prints kept them; the engine now leaves them off (engine v9). In `derive.ts` the `retirement` scenario switch covers the SEP, IRA and HSA for every shape (for an S corporation it already covered the solo 401(k)), and `healthInsurance` now covers the sole proprietor too (it already covered a partnership's guaranteed payments; an S corporation's runs through the salary). Each shows as its own line in the savings split: "Retirement contributions" (or "Retirement and HSA contributions") and "Self-employed health insurance". A state that adds the HSA back (California's Schedule CA) loses that add-back with it. Other adjustments, such as student loan interest, still carry over as filed. Payroll HSAs (W-2 box 12 code W) aren't on Schedule 1 and aren't touched.
+
+The child credits come off the before through the dependents (engine v8, built by another session the same day): the before claims no dependents at all, so no child tax credit, no childcare credit and no head of household, and they come back as the first line of the split, "Claiming your dependents".
+
+Effect on the samples, checked by hand in `npm run recap:check`:
+
+| Return | Before (as derived) | Savings as derived | Headline (dependents off the before) |
+|---|---|---|---|
+| Carpenter | 214,426 (was 211,483) | 118,007 | 119,207 |
+| Mahony | federal 15,228, New Jersey 3,029 (print 15,150 / 2,979) | 12,045 (print-based 11,917) | 12,045 |
+
+Carpenter's adjustments drop to the half SE tax alone (17,506), AGI 706,182, taxable 670,462, tax 173,733. Mahony loses the  health insurance deduction: AGI 64,174, QBI 9,685, tax 4,409; New Jersey's medical deduction falls from 1,464 to 607 and its tax rises by 50. The proof script marks those lines "convention" beside the CPA print's figures. A test with a ,000 Schedule 1 HSA on Inha's return, added back by California, has to come out at Inha's real before exactly, and does.

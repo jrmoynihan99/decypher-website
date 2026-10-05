@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import CipherRain from "@/components/effects/CipherRain";
 import NeuralWeb from "@/components/effects/NeuralWeb";
-import { Eyebrow } from "@/components/estimator/fields";
 import { MoneyFlow } from "@/components/portal/widgets/ui";
 import RecapHero from "@/components/recap/RecapHero";
 import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
-import { useSpotlight } from "@/hooks/useSpotlight";
 import { prefersReducedMotion } from "@/lib/decrypt";
-import { computeRecap, type EntityKind, type RecapSide } from "@/lib/tax-recap/compute";
-import type { RecapDoc } from "@/lib/tax-recap/schema";
+import ShareVideo from "@/components/recap/ShareVideo";
+import { centsPerDollar } from "@/lib/decyphered/buildRecap";
+import { computeRecap, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
+import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
 
 /**
@@ -25,13 +25,30 @@ import { money } from "@/lib/widget-format";
  * it is one design from the seal down. `sealed={false}` (the page's `?open`)
  * renders it all open.
  *
- * Same beats as the Canva deck it replaces (agenda, before, after, the
- * result, at filing, strategy, next steps). Every figure is derived by
+ * The order is a sandwich: what the year would have cost before DeCypher,
+ * the savings, then what it cost after. The before and the after are the
+ * same full-screen layout, red then teal, with the same bar on the same
+ * scale, so the drop reads without arithmetic. Then where the savings came
+ * from, what's due at filing (owed, paid, the result: a smaller version of
+ * the same beat), strategy and next steps. Every figure is derived by
  * computeRecap from the reviewed numbers; nothing is typed in here. The
  * handout is the PDF route, not the browser's print.
  */
 
-export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; sealed?: boolean }) {
+type Section = { id?: string; label: string; title: string; sub?: string; stage?: boolean; body: React.ReactNode };
+
+/** The DeCyphered video, when the recap has one matching its numbers (page.tsx decides). */
+export type RecapShare = { variants: VideoVariant[]; qrSvg: string };
+
+export default function RecapView({
+  recap,
+  sealed = true,
+  share = null,
+}: {
+  recap: RecapDoc;
+  sealed?: boolean;
+  share?: RecapShare | null;
+}) {
   const [open, setOpen] = useState(!sealed);
   const c = computeRecap(recap);
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
@@ -46,70 +63,64 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
   const scorpSavings = recap.analysis?.scorpSavings?.amount ?? 0;
   const totalSavings = c.savings + scorpSavings;
   const attribution = recap.analysis?.attribution ?? [];
-  // What the dependents are worth on each return. Beside the savings, never
-  // in them: the kids are on both sides.
+  // The before doesn't claim the dependents (engine v8 on): they're the
+  // strategy split's first line. A recap saved earlier claims them on both
+  // sides, so they're shown beside the total instead, never added to it.
   const kids = recap.analysis?.kids ?? null;
+  const kidsOut = !!kids?.inBefore;
+  const kidsBeside = kids && !kids.inBefore && kids.after > 0 ? kids : null;
 
-  const sections: { label: string; title: string; sub?: string; body: React.ReactNode }[] = [
+  const owed = c.filing.federal.owed + c.filing.state.owed + (c.filing.entity?.owed ?? 0);
+  const paid = c.filing.federal.paid + c.filing.state.paid + (c.filing.entity?.paid ?? 0);
+  const refund = c.filing.total < 0;
+
+  const sections: Section[] = [
     {
-      label: "before & after",
-      title: `Two versions of ${recap.taxYear}.`,
-      sub: "Income only on the left. Your books done and every strategy applied on the right.",
-      body: (
-        <div className="grid gap-5 md:grid-cols-2">
-          <Reveal>
-            <Panel>
-              <Eyebrow>Before DeCypher</Eyebrow>
-              <PanelTitle sub="No write-offs, no strategies">Income only</PanelTitle>
-              <Ledger side={c.before} stateLabel={stateLabel} entityKind={c.entityKind} totalTone="neg" totalLabel="Total taxes owed" />
-            </Panel>
-          </Reveal>
-          <Reveal delay={0.12}>
-            <Panel className="border-teal/30">
-              <Eyebrow>After DeCypher</Eyebrow>
-              <PanelTitle sub={c.scorp ? "Your final returns" : "Your final return"}>Bookkeeping + strategies</PanelTitle>
-              <Ledger side={c.after} stateLabel={stateLabel} entityKind={c.entityKind} totalTone="pos" totalLabel="New total taxes owed" />
-              <div className="mt-3 flex items-baseline justify-between gap-4 border-t border-white/10 pt-3 text-[13px]">
-                <span className="text-muted">Before DeCypher</span>
-                <span className="font-mono tabular-nums text-danger">{money(c.before.totalTaxes)}</span>
-              </div>
-            </Panel>
-          </Reveal>
-        </div>
-      ),
+      label: "before decypher",
+      title: `What ${recap.taxYear} would have cost.`,
+      sub: `Your income with nothing taken off it: no write-offs, no strategies${kidsOut ? ", no dependents claimed" : ""}.`,
+      stage: true,
+      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" stateLabel={stateLabel} entityKind={c.entityKind} />,
     },
     {
-      label: "the result",
+      label: "the difference",
       title: "Total tax savings",
       sub:
         scorpSavings > 0
-          ? `The difference between what ${recap.taxYear} would have cost on income alone and what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
-          : `The difference between what ${recap.taxYear} would have cost on income alone and what it cost with your books done and every strategy applied.`,
+          ? `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
+          : `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied.`,
       body: (
         <>
           <Reveal className="text-center">
-            <div className="font-display text-[clamp(64px,10vw,124px)] font-bold leading-none tracking-[-0.045em] text-teal tabular-nums">
+            <div className="font-display text-[clamp(64px,11vw,136px)] font-bold leading-none tracking-[-0.045em] text-teal tabular-nums">
               <CountUp value={totalSavings} />
             </div>
           </Reveal>
           {scorpSavings > 0 ? (
-            <Reveal delay={0.1} className="mt-12 grid gap-4 sm:grid-cols-3">
-              <StatTile label="Bookkeeping + strategies" value={money(c.savings)} />
-              <StatTile label="S-corp: self-employment tax avoided" value={money(scorpSavings)} />
-              <StatTile label="Total tax savings" value={money(totalSavings)} tone="pos" />
+            <Reveal
+              delay={0.1}
+              className="mx-auto mt-8 flex max-w-[720px] flex-wrap items-baseline justify-center gap-x-3 gap-y-1.5 text-center text-[14.5px] text-mist"
+            >
+              <span>
+                <span className="font-mono tabular-nums text-fog">{money(c.savings)}</span> between your two returns
+              </span>
+              <span className="text-faint">+</span>
+              <span>
+                <span className="font-mono tabular-nums text-fog">{money(scorpSavings)}</span> of self-employment tax your S
+                corporation avoided
+              </span>
             </Reveal>
           ) : null}
-          <Reveal delay={0.15} className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-4 ${scorpSavings > 0 ? "mt-4" : "mt-12"}`}>
-            <StatTile label="Deductions found" value={signed(c.breakdown.deductionsFound)} />
-            {c.entityKind === "scorp" ? (
-              <StatTile label="S-corp state tax & PTET saved" value={signed(c.breakdown.entitySaved)} />
-            ) : (
-              <StatTile label="Self-employment tax saved" value={signed(c.breakdown.seTaxSaved)} />
-            )}
-            <StatTile label="Federal income tax saved" value={signed(c.breakdown.incomeTaxSaved)} />
-            <StatTile label={`${stateLabel} tax saved`} value={signed(c.breakdown.stateSaved + c.breakdown.penaltiesSaved)} />
-          </Reveal>
         </>
+      ),
+    },
+    {
+      label: "after decypher",
+      title: "What it cost with DeCypher.",
+      sub: `Your books done and every strategy applied: the ${c.scorp ? "returns" : "return"} you’re filing.`,
+      stage: true,
+      body: (
+        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} stateLabel={stateLabel} entityKind={c.entityKind} />
       ),
     },
     ...(attribution.length
@@ -117,34 +128,38 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
           {
             label: "where it came from",
             title: "Savings by strategy",
-            sub: "Each strategy was switched on in this order and the whole return re-run, so the pieces add up to the total. A deduction is worth more at a higher tax bracket, which is why the order matters.",
+            sub: "Each one switched on in this order and the whole return re-run, so the lines add up to your savings. A deduction is worth more at a higher tax bracket, which is why the order matters.",
             body: (
               <Reveal>
                 <Panel>
                   {attribution.map((a, i) => (
-                    <div key={i} className="flex items-baseline justify-between gap-4 border-t border-white/[0.06] py-3.5 first:border-t-0 first:pt-0">
-                      <div className="min-w-0">
-                        <div className="text-[15.5px] text-fog">{a.label}</div>
-                        {a.note ? <div className="mt-0.5 text-[12.5px] leading-snug text-dusk">{a.note}</div> : null}
-                      </div>
-                      <span className={`flex-none font-mono text-[15px] tabular-nums ${a.savings >= 0 ? "text-teal" : "text-danger"}`}>
-                        {a.savings < 0 ? "−" : ""}
-                        {money(Math.abs(a.savings))}
-                      </span>
-                    </div>
+                    <StrategyLine key={i} label={a.label} note={a.note} value={a.savings} />
                   ))}
-                  <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-white/15 pt-3.5">
-                    <span className="font-display text-[15px] font-semibold text-mist">Bookkeeping + strategies</span>
-                    <span className="font-mono text-[19px] font-semibold tabular-nums text-teal">{money(c.savings)}</span>
-                  </div>
                   {recap.analysis?.scorpSavings ? (
-                    <div className="flex items-baseline justify-between gap-4 border-t border-white/[0.06] py-3.5">
-                      <div className="min-w-0">
-                        <div className="text-[15.5px] text-fog">S corporation: self-employment tax avoided</div>
-                        <div className="mt-0.5 text-[12.5px] leading-snug text-dusk">{recap.analysis.scorpSavings.note}</div>
+                    <>
+                      <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-white/15 pt-3.5">
+                        <span className="font-display text-[15px] font-semibold text-mist">Between your two returns</span>
+                        <span className="font-mono text-[16px] font-semibold tabular-nums text-fog">{money(c.savings)}</span>
                       </div>
-                      <span className="flex-none font-mono text-[15px] tabular-nums text-teal">{money(recap.analysis.scorpSavings.amount)}</span>
-                    </div>
+                      <StrategyLine
+                        label="S corporation: self-employment tax avoided"
+                        note={recap.analysis.scorpSavings.note}
+                        value={recap.analysis.scorpSavings.amount}
+                      />
+                    </>
+                  ) : null}
+                  <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-white/15 pt-3.5">
+                    <span className="font-display text-[15px] font-semibold text-mist">Total tax savings</span>
+                    <span className="font-mono text-[19px] font-semibold tabular-nums text-teal">{money(totalSavings)}</span>
+                  </div>
+                  {kidsBeside ? (
+                    <p className="mb-0 mt-5 border-t border-white/[0.06] pt-4 text-[13px] leading-relaxed text-dusk">
+                      Not in your total: your {kidsBeside.dependents === 1 ? "dependent" : "dependents"} took{" "}
+                      <span className="font-mono tabular-nums text-mist">{money(kidsBeside.after)}</span>
+                      {" "}off this return.
+                      They&rsquo;re claimed on both versions of {recap.taxYear}, so they aren&rsquo;t part of your savings.
+                      {kidsBeside.note ? ` ${kidsBeside.note}.` : ""}
+                    </p>
                   ) : null}
                 </Panel>
               </Reveal>
@@ -152,44 +167,37 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
           },
         ]
       : []),
-    ...(kids
-      ? [
-          {
-            label: "your kids",
-            title: "What your kids saved you",
-            sub: `Your return figured again without your ${kids.dependents === 1 ? "dependent" : "dependents"}, everything else the same. They lower your tax on both versions of ${recap.taxYear}, so this sits beside your savings, not inside them. The amount moves with income: credits shrink as income rises, while a better filing status is worth more at higher rates.`,
-            body: (
-              <Reveal>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <StatTile label="With DeCypher" value={money(kids.after)} tone="pos" />
-                  <StatTile label="Before DeCypher" value={money(kids.before)} />
-                </div>
-                {kids.note ? (
-                  <p className="mx-auto mt-5 max-w-[680px] text-center text-[13px] leading-relaxed text-dusk">{kids.note}</p>
-                ) : null}
-              </Reveal>
-            ),
-          },
-        ]
-      : []),
     {
       label: "at filing",
-      title: "Taxes due or refund",
-      sub: "Owed is the tax on the return. Paid is what was already sent in through withholding and estimated payments. What’s left is due at filing, or comes back as a refund.",
+      title: refund ? "Your refund" : "Taxes due at filing",
+      sub: "Owed is the tax on the return for the whole year. Paid is what already went in through withholding and estimated payments. What’s left is due when you file, or comes back to you.",
       body: (
-        <Reveal>
-          <Panel>
-            <div className="space-y-2">
-              <FilingRow label="Federal" line={c.filing.federal} />
-              <FilingRow label={stateLabel} line={c.filing.state} />
-              {c.filing.entity ? <FilingRow label={c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"} line={c.filing.entity} /> : null}
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-4 border-t-2 border-white/15 pt-4">
-              <span className="font-display text-[15px] font-semibold text-mist">Total</span>
-              <Due value={c.filing.total} large />
-            </div>
-          </Panel>
-        </Reveal>
+        <>
+          <Reveal className="grid items-center gap-2 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:gap-4">
+            <Figure label={`Owed for ${recap.taxYear}`} value={owed} />
+            <Op>−</Op>
+            <Figure label="Already paid" value={paid} tone="pos" delay={600} />
+            <Op>=</Op>
+            <Figure
+              label={refund ? "Refund" : "Due at filing"}
+              value={Math.abs(c.filing.total)}
+              tone={refund ? "pos" : "neg"}
+              delay={1200}
+              strong
+            />
+          </Reveal>
+          <Reveal delay={0.1} className="mt-5">
+            <Panel className="!py-5">
+              <div className="space-y-2">
+                <FilingRow label="Federal" line={c.filing.federal} />
+                <FilingRow label={stateLabel} line={c.filing.state} />
+                {c.filing.entity ? (
+                  <FilingRow label={c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"} line={c.filing.entity} />
+                ) : null}
+              </div>
+            </Panel>
+          </Reveal>
+        </>
       ),
     },
     ...(recap.strategies.length
@@ -264,6 +272,17 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
           },
         ]
       : []),
+    ...(share
+      ? [
+          {
+            id: "share",
+            label: "your decyphered",
+            title: "Post your DeCyphered.",
+            sub: `Your ${recap.taxYear} as a video for your Instagram story. Tag @we.decypher when you post it and we’ll send you a $50 Visa gift card.`,
+            body: <ShareVideo token={recap.token} taxYear={recap.taxYear} variants={share.variants} qrSvg={share.qrSvg} />,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -288,14 +307,11 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
           initiallyOpen={!sealed}
           onOpen={() => setOpen(true)}
         >
-          <div className="mx-auto grid max-w-[760px] gap-px overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.06] text-left sm:grid-cols-3">
-            <Stat label="Before DeCypher" value={money(c.before.totalTaxes)} tone="neg" />
-            <Stat label="After DeCypher" value={money(c.after.totalTaxes)} />
-            <div className="bg-night/90 px-5 py-5">
-              <div className="font-mono text-[10.5px] uppercase tracking-[1.6px] text-teal">Total tax savings</div>
-              <div className="mt-2 font-display text-[34px] font-bold leading-none tracking-[-1px] tabular-nums text-teal">
-                <CountUp value={totalSavings} />
-              </div>
+          {/* only the before up here: the after is the payoff further down */}
+          <div className="mx-auto w-fit min-w-[260px] rounded-[20px] border border-white/10 bg-night/90 px-9 py-5 text-center">
+            <div className="font-mono text-[10.5px] uppercase tracking-[1.6px] text-muted">Before DeCypher</div>
+            <div className="mt-2 font-display text-[40px] font-bold leading-none tracking-[-1px] tabular-nums text-danger">
+              {money(c.before.totalTaxes)}
             </div>
           </div>
         </RecapHero>
@@ -331,9 +347,13 @@ export default function RecapView({ recap, sealed = true }: { recap: RecapDoc; s
             </section>
 
             {sections.map((s, i) => (
-              <section key={s.label} className="relative px-5 py-20 sm:py-24">
+              <section
+                key={s.label}
+                id={s.id}
+                className={`relative px-5 ${s.stage ? "flex min-h-svh flex-col justify-center py-24 sm:py-28" : "py-20 sm:py-24"}`}
+              >
                 <SectionHeading eyebrow={`[ 0${i + 1} · ${s.label} ]`} title={s.title} sub={s.sub} />
-                <div className="mx-auto mt-12 max-w-[1040px] sm:mt-14">{s.body}</div>
+                <div className={`mx-auto mt-12 w-full sm:mt-14 ${s.stage ? "max-w-[1120px]" : "max-w-[1040px]"}`}>{s.body}</div>
               </section>
             ))}
 
@@ -396,49 +416,156 @@ function Panel({ className = "", children }: { className?: string; children: Rea
   );
 }
 
-function PanelTitle({ sub, children }: { sub?: string; children: React.ReactNode }) {
+/** True once the element has scrolled into view; stays true. */
+function useSeen<T extends Element>(threshold = 0.4) {
+  const ref = useRef<T>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([en]) => {
+        if (!en.isIntersecting) return;
+        io.disconnect();
+        setSeen(true);
+      },
+      { threshold },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [threshold]);
+  return [ref, seen] as const;
+}
+
+/**
+ * One side of the sandwich, full screen: the year's total as the hero
+ * figure, the cents-per-dollar bar, and the ledger as open rows, income
+ * on the left and taxes on the right. The before and the after are this
+ * same layout so the eye compares them without trying.
+ */
+function Stage({
+  side,
+  scale,
+  tone,
+  was,
+  stateLabel,
+  entityKind,
+}: {
+  side: RecapSide;
+  /** The bar's one scale on both sides: the before return's total income. */
+  scale: number;
+  tone: "neg" | "pos";
+  /** The after only: the before side, for the "was" line and the bar's ghost. */
+  was?: RecapSide;
+  stateLabel: string;
+  entityKind: EntityKind;
+}) {
+  const dash = (v: number) => (v === 0 ? "—" : signed(v));
   return (
     <>
-      <h3 className="mt-3 font-display text-[24px] font-bold leading-tight tracking-[-0.5px] text-fog">{children}</h3>
-      {sub ? <p className="mt-1 text-[13px] text-muted">{sub}</p> : null}
+      <Reveal className="text-center">
+        <div
+          className={`font-display text-[clamp(60px,11vw,136px)] font-bold leading-none tracking-[-0.045em] tabular-nums ${
+            tone === "neg" ? "text-danger" : "text-teal"
+          }`}
+        >
+          <CountUp value={side.totalTaxes} />
+        </div>
+        <div className="mt-5 font-mono text-[11px] uppercase tracking-[0.2em] text-muted">
+          Total taxes owed
+          {was !== undefined ? (
+            <>
+              <span className="mx-2 text-faint">·</span>
+              was <span className="text-mist line-through decoration-danger/80">{money(was.totalTaxes)}</span>
+            </>
+          ) : null}
+        </div>
+      </Reveal>
+      {scale > 0 && side.totalTaxes >= 0 ? (
+        <Reveal delay={0.1}>
+          <TaxShare taxes={side.totalTaxes} scale={scale} tone={tone} was={was?.totalTaxes} />
+        </Reveal>
+      ) : null}
+      <Reveal delay={0.15} className="mx-auto mt-14 grid max-w-[880px] gap-x-16 gap-y-10 md:grid-cols-2">
+        <div>
+          <ColumnHead>Income on the return</ColumnHead>
+          <div>
+            <Row label="W-2 income" value={dash(side.w2Income)} />
+            <Row label={entityKind ? "Business net income (K-1)" : "Business net income"} value={money(side.businessNetIncome)} tone="brand" />
+            <Row label="Other income (loss)" value={dash(side.otherIncome)} />
+            <Row label="Gross income" value={money(side.grossIncome)} total />
+          </div>
+        </div>
+        <div>
+          <ColumnHead>Taxes</ColumnHead>
+          <div>
+            <Row label="Federal taxes" value={money(side.federalTaxes)} />
+            <Row label={`${stateLabel} taxes`} value={dash(side.stateTaxes)} />
+            {entityKind === "scorp" ? <Row label={`${stateLabel} S-corp tax & PTET`} value={dash(side.entityTaxes)} /> : null}
+            {entityKind === "partnership" ? <Row label={`${stateLabel} LLC tax & fee`} value={dash(side.entityTaxes)} /> : null}
+            <Row label="Penalties" value={dash(side.penalties)} />
+            <Row label="Total taxes owed" value={money(side.totalTaxes)} total tone={tone} />
+          </div>
+        </div>
+      </Reveal>
     </>
   );
 }
 
-/** A stat with the site's cursor spotlight (useSpotlight), as on the home page's proof grid. */
-function StatTile({ label, value, tone = "plain" }: { label: string; value: string; tone?: "plain" | "pos" }) {
-  const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLDivElement>();
+/**
+ * Cents of every dollar brought in that went to tax, as a meter on one
+ * fixed scale: the BEFORE return's total income, on both sides, so the
+ * after's bar is shorter by exactly the savings. The same figure, rounded
+ * the same way, as the DeCyphered video prints (lib/decyphered
+ * centsPerDollar). The before's fill grows in; the after's starts at the
+ * before's width and falls back to its own, leaving the before hatched
+ * behind it.
+ */
+function TaxShare({ taxes, scale, tone, was }: { taxes: number; scale: number; tone: "neg" | "pos"; was?: number }) {
+  const [ref, seen] = useSeen<HTMLDivElement>();
+  const exact = (v: number) => Math.max(0, Math.min(100, (v / scale) * 100));
+  const cents = centsPerDollar(taxes, scale) ?? 0;
+  const before = was !== undefined ? centsPerDollar(was, scale) : null;
+  const from = was !== undefined ? exact(was) : 0;
   return (
-    <div
-      ref={ref}
-      onMouseMove={onMouseMove}
-      onMouseLeave={onMouseLeave}
-      className="group relative overflow-hidden rounded-[18px] border border-white/10 bg-panel/85 px-5 py-6 transition-[translate,border-color,box-shadow] duration-[450ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_26px_80px_-26px_rgba(255,45,120,.55)] md:bg-white/[0.045] md:backdrop-blur-xl"
-    >
+    <div ref={ref} className="mx-auto mt-14 max-w-[880px]">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <p className="m-0 text-[15.5px] text-mist">
+          <span className="font-display text-[24px] font-bold text-fog">{cents}¢</span> of every dollar you brought in
+          {before !== null ? <span className="text-muted">{`, down from ${before}¢`}</span> : null}
+        </p>
+        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted">{money(scale)} brought in</span>
+      </div>
       <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-        style={{ background: "radial-gradient(340px circle at var(--mx, 50%) var(--my, 0%), rgba(255,45,120,.16), transparent 68%)" }}
-      />
-      <div className="relative">
-        <div className={`font-display text-[28px] font-bold leading-none tracking-[-0.02em] tabular-nums ${tone === "pos" ? "text-teal" : "text-fog"}`}>
-          {value}
-        </div>
-        <div className="mt-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted">{label}</div>
+        role="img"
+        aria-label={`${cents} cents of every dollar of income went to taxes${before !== null ? `, down from ${before} cents` : ""}`}
+        className={`relative mt-3 h-3 overflow-hidden rounded-full ${tone === "neg" ? "bg-danger/15" : "bg-teal/15"}`}
+      >
+        {before !== null ? (
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: `${from}%`,
+              background:
+                "repeating-linear-gradient(135deg, color-mix(in srgb, var(--color-danger) 45%, transparent) 0 4px, transparent 4px 8px)",
+            }}
+          />
+        ) : null}
+        <div
+          aria-hidden
+          className={`absolute inset-y-0 left-0 rounded-full transition-[width] delay-300 duration-[1400ms] ease-[cubic-bezier(.2,.7,.2,1)] motion-reduce:transition-none ${
+            tone === "neg" ? "bg-danger" : "bg-teal"
+          }`}
+          style={{ width: `${seen ? exact(taxes) : from}%` }}
+        />
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, tone = "plain" }: { label: string; value: string; tone?: "plain" | "neg" }) {
-  return (
-    <div className="bg-night/90 px-5 py-5">
-      <div className="font-mono text-[10.5px] uppercase tracking-[1.6px] text-muted">{label}</div>
-      <div className={`mt-2 font-display text-[34px] font-bold leading-none tracking-[-1px] tabular-nums ${tone === "neg" ? "text-danger" : "text-fog"}`}>
-        {value}
-      </div>
-    </div>
-  );
+function ColumnHead({ children }: { children: React.ReactNode }) {
+  return <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.2em] text-faint">{children}</div>;
 }
 
 function Pill({ label, value, tone = "plain" }: { label: string; value: string; tone?: "plain" | "pos" | "neg" }) {
@@ -470,8 +597,8 @@ function Row({
     : "text-mist";
   return (
     <div
-      className={`flex items-baseline justify-between gap-4 text-[14px] ${
-        total ? "mt-2 border-t-2 border-white/15 pt-3" : "border-t border-white/[0.06] py-2.5 first:border-t-0"
+      className={`flex items-baseline justify-between gap-4 text-[15px] ${
+        total ? "mt-2 border-t-2 border-white/15 pt-3" : "border-t border-white/[0.07] py-2.5 first:border-t-0"
       }`}
     >
       <span className={total ? "font-display text-[15px] font-semibold text-mist" : "text-muted"}>{label}</span>
@@ -480,39 +607,60 @@ function Row({
   );
 }
 
-function Ledger({
-  side,
-  stateLabel,
-  entityKind,
-  totalTone,
-  totalLabel,
-}: {
-  side: RecapSide;
-  stateLabel: string;
-  entityKind: EntityKind;
-  totalTone: "neg" | "pos";
-  totalLabel: string;
-}) {
-  const dash = (v: number) => (v === 0 ? "—" : signed(v));
+/** One line of the savings split: the strategy, what it was, what it saved. */
+function StrategyLine({ label, note, value }: { label: string; note: string; value: number }) {
   return (
-    <div className="mt-5">
-      <Row label="W-2 income" value={dash(side.w2Income)} />
-      <Row label={entityKind ? "Business net income (K-1)" : "Business net income"} value={money(side.businessNetIncome)} tone="brand" />
-      <Row label="Other income (loss)" value={dash(side.otherIncome)} />
-      <Row label="Gross income" value={money(side.grossIncome)} total />
-      <div className="mt-4">
-        <Row label="Federal taxes" value={money(side.federalTaxes)} />
-        <Row label={`${stateLabel} taxes`} value={dash(side.stateTaxes)} />
-        {entityKind === "scorp" ? <Row label={`${stateLabel} S-corp tax & PTET`} value={dash(side.entityTaxes)} /> : null}
-        {entityKind === "partnership" ? <Row label={`${stateLabel} LLC tax & fee`} value={dash(side.entityTaxes)} /> : null}
-        <Row label="Penalties" value={dash(side.penalties)} />
-        <Row label={totalLabel} value={money(side.totalTaxes)} total tone={totalTone} />
+    <div className="flex items-baseline justify-between gap-4 border-t border-white/[0.06] py-3.5 first:border-t-0 first:pt-0">
+      <div className="min-w-0">
+        <div className="text-[15.5px] text-fog">{label}</div>
+        {note ? <div className="mt-0.5 text-[12.5px] leading-snug text-dusk">{note}</div> : null}
       </div>
+      <span className={`flex-none font-mono text-[15px] tabular-nums ${value >= 0 ? "text-teal" : "text-danger"}`}>
+        {value < 0 ? "−" : ""}
+        {money(Math.abs(value))}
+      </span>
     </div>
   );
 }
 
-function FilingRow({ label, line }: { label: string; line: { owed: number; paid: number; due: number } }) {
+/** One figure of owed − paid = due, counting up in turn. */
+function Figure({
+  label,
+  value,
+  tone = "plain",
+  delay = 0,
+  strong = false,
+}: {
+  label: string;
+  value: number;
+  tone?: "plain" | "pos" | "neg";
+  delay?: number;
+  strong?: boolean;
+}) {
+  const color = tone === "pos" ? "text-teal" : tone === "neg" ? "text-danger" : "text-fog";
+  return (
+    <div
+      className={`rounded-[18px] border bg-panel/85 px-6 py-6 text-center md:bg-white/[0.045] md:backdrop-blur-xl ${
+        strong ? (tone === "pos" ? "border-teal/40" : "border-danger/40") : "border-white/10"
+      }`}
+    >
+      <div className={`font-display font-bold leading-none tracking-[-0.02em] tabular-nums ${color} ${strong ? "text-[38px]" : "text-[32px]"}`}>
+        <CountUp value={value} delay={delay} />
+      </div>
+      <div className="mt-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted">{label}</div>
+    </div>
+  );
+}
+
+function Op({ children }: { children: React.ReactNode }) {
+  return (
+    <span aria-hidden className="text-center font-display text-[26px] font-semibold leading-none text-faint">
+      {children}
+    </span>
+  );
+}
+
+function FilingRow({ label, line }: { label: string; line: FilingLine }) {
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[14px] border border-white/[0.08] px-4 py-3 sm:grid-cols-[130px_1fr_auto]">
       <span className="font-display text-[15px] font-semibold text-fog">{label}</span>
@@ -526,31 +674,35 @@ function FilingRow({ label, line }: { label: string; line: { owed: number; paid:
   );
 }
 
-function Due({ value, large = false }: { value: number; large?: boolean }) {
+function Due({ value }: { value: number }) {
   const refund = value < 0;
   return (
-    <span className={`font-mono tabular-nums ${refund ? "text-teal" : "text-danger"} ${large ? "text-[22px] font-semibold" : "text-[15px] font-semibold"}`}>
+    <span className={`font-mono text-[15px] font-semibold tabular-nums ${refund ? "text-teal" : "text-danger"}`}>
       {money(Math.abs(value))}
       <span className="ml-1.5 font-body text-[11px] font-medium uppercase tracking-[1px] opacity-80">{refund ? "refund" : "due"}</span>
     </span>
   );
 }
 
-/** Rolls up from zero the first time it scrolls into view — the reveal the Canva version couldn't do. */
-function CountUp({ value }: { value: number }) {
+/**
+ * Rolls up from zero the first time it scrolls into view — the reveal the
+ * Canva version couldn't do. `delay` holds it back further, for figures
+ * that land one after another.
+ */
+function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [shown, setShown] = useState(0);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     // reduced motion: still waits for the scroll, but lands without the beat
-    const delay = prefersReducedMotion() ? 0 : 250;
+    const wait = prefersReducedMotion() ? 0 : 250 + delay;
     let timer = 0;
     const io = new IntersectionObserver(
       ([en]) => {
         if (!en.isIntersecting) return;
         io.disconnect();
-        timer = window.setTimeout(() => setShown(value), delay);
+        timer = window.setTimeout(() => setShown(value), wait);
       },
       { threshold: 0.4 },
     );
@@ -559,7 +711,7 @@ function CountUp({ value }: { value: number }) {
       io.disconnect();
       clearTimeout(timer);
     };
-  }, [value]);
+  }, [value, delay]);
   return (
     <span ref={ref}>
       <MoneyFlow value={shown} />

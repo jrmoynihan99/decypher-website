@@ -204,6 +204,32 @@ const PAIRINGS = [
     }),
     // Canva: 12,293 with the print's penalties; 376 less with the after's carried
     savings: 11917,
+    // The tax team's call (2026-10-05): the $857 self-employed health
+    // insurance deduction is DeCypher's, so the before doesn't claim it and
+    // parts from the CPA's print. By hand: AGI 63,317 + 857 = 64,174;
+    // taxable before QBI 48,424, QBI income-limited at 20% = 9,685; taxable
+    // 38,739, tax from the $50 row at 38,725 = 4,409 (+78); the advance is
+    // still repaid in full (948, over 400% either way). New Jersey: the SEHI
+    // leaves its medical deduction (1,464 → 607), +857 of taxable income at
+    // 5.525% → +50 by its table (2,230 → 2,280). Savings +128.
+    convention: {
+      before: {
+        agi: 64174,
+        qbiDeduction: 9685,
+        taxableIncome: 38739,
+        incomeTax: 4409,
+        federalTotalTax: 15228,
+        federalAmountOwed: 15452,
+        sehiDeduction: null,
+        sehiPaid: null,
+        stateMedical: 607,
+        stateTaxOnIncome: 2280,
+        stateTotalTax: 3029,
+        stateAmountOwed: 3029,
+        stateTotalDue: 3057,
+      },
+      savings: 12045,
+    },
   },
 
   /* ── Wilson / LaLaNation89 Inc. 2025, head of household, CA 540 + CA 100S ──
@@ -332,7 +358,9 @@ const PAIRINGS = [
     // child-care credit; California stays $0 under the PTE credit. Before
     // (no salary, no PTE): federal 259,757 vs 255,105 = 4,652, California
     // 82,712 vs 76,243 = 6,469.
-    kids: { after: 5095, before: 11121 },
+    // The client's before doesn't claim the dependent: those two figures go
+    // onto its federal and state rows.
+    kids: { after: 5095, before: 11121, inBefore: { federal: 4652, state: 6469 } },
   },
 
   /* ── Singh & Saini / YouTwoTV LLC 2025, married filing jointly, CA 540 + CA 568 ──
@@ -649,13 +677,18 @@ for (const p of PAIRINGS) {
     continue;
   }
   console.log("  " + "line".padEnd(26) + "derived".padStart(10) + "CPA print".padStart(11) + "  ");
+  // A line the engine's convention moves off the CPA's print on purpose
+  // (`convention.before`, with its by-hand working beside the pairing).
+  const convention = p.convention?.before ?? {};
   for (const key of Object.keys(p.before)) {
-    const want = p.before[key];
+    const moved = key in convention;
+    const want = moved ? convention[key] : p.before[key];
     const got = r.before[key];
     const ok = want === got;
     if (!ok) failed++;
     console.log(
-      "  " + key.padEnd(26) + money(got).padStart(10) + money(want).padStart(11) + (ok ? "  ok" : "  MISMATCH"),
+      "  " + key.padEnd(26) + money(got).padStart(10) + money(want).padStart(11) + (ok ? "  ok" : "  MISMATCH") +
+        (moved ? `  (convention; print ${money(p.before[key])})` : ""),
     );
   }
   if (p.entityBefore) {
@@ -677,21 +710,33 @@ for (const p of PAIRINGS) {
     entityBefore: r.entityBefore,
     entityAfter: entity,
   }).savings;
-  const ok = savings === p.savings;
+  const wantSavings = p.convention?.savings ?? p.savings;
+  const ok = savings === wantSavings;
   if (!ok) failed++;
-  console.log(`  savings ${money(savings)} vs recap ${money(p.savings)} ${ok ? "ok" : "MISMATCH"}`);
+  console.log(
+    `  savings ${money(savings)} vs ${p.convention ? `expected ${money(wantSavings)} (recap ${money(p.savings)} before the convention)` : `recap ${money(p.savings)}`} ${ok ? "ok" : "MISMATCH"}`,
+  );
   console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
 
-  // The strategy split has to add up to the headline exactly.
+  // The strategy split has to add up to the headline exactly — the
+  // client's headline, whose before doesn't claim the dependents.
   const analysis = attributeStrategies(p.after, p.meta, undefined, entity);
   if (!analysis) {
     failed++;
     console.log("  attribution: NONE (engine refused)");
   } else {
+    const headline = computeRecap({
+      before: r.before,
+      after: p.after,
+      priorYearIncome: null,
+      entityBefore: r.entityBefore,
+      entityAfter: entity,
+      analysis,
+    }).savings;
     const sum = analysis.attribution.reduce((s, a) => s + a.savings, 0);
-    const sumOk = sum === savings;
+    const sumOk = sum === headline && headline === savings + (analysis.kids?.inBefore ? analysis.kids.before : 0);
     if (!sumOk) failed++;
-    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"}):`);
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
     for (const a of analysis.attribution) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
     if (p.scorpSavings !== undefined) {
       const got = analysis.scorpSavings?.amount ?? null;
@@ -701,7 +746,13 @@ for (const p of PAIRINGS) {
     }
     // What the dependents are worth: only on a return that claims them.
     const kids = analysis.kids;
-    const kidsOk = p.kids === undefined ? kids === null : kids !== null && kids.after === p.kids.after && kids.before === p.kids.before;
+    const kidsOk =
+      p.kids === undefined
+        ? kids === null
+        : kids !== null &&
+          kids.after === p.kids.after &&
+          kids.before === p.kids.before &&
+          (!p.kids.inBefore || (kids.inBefore?.federal === p.kids.inBefore.federal && kids.inBefore?.state === p.kids.inBefore.state));
     if (!kidsOk) failed++;
     console.log(
       `  kids: ${kids ? `after ${money(kids.after)}, before ${money(kids.before)} (${kids.note})` : "none"}${
@@ -723,6 +774,36 @@ for (const p of PAIRINGS) {
   const ok = r.ok && r.before.agi === 139588 && r.derived.notes.some((s) => /carried over unchanged/.test(s));
   if (!ok) failed++;
   console.log(`  ${ok ? "ok" : "WRONG"}  $10,000 SEP carried: before AGI ${r.ok ? money(r.before.agi) : "refused: " + r.reasons.join(" | ")}`);
+}
+
+/* ── An HSA on Schedule 1 is DeCypher's (the tax team's call, 2026-10-05) ──
+   Inha's after with a $4,000 HSA deduction (line 13), which California adds
+   back on Schedule CA. After: AGI 68,396, QBI income-limited at 20% of
+   52,646 = 10,529, taxable 42,117, tax from the $50 row at 42,125 = 4,817,
+   total 15,824; California's AGI is unchanged by the add-back, so its tax
+   is too. The before leaves the HSA off and its add-back with it: it has to
+   be Inha's before exactly, 41,287 federal and 9,667 California.          */
+{
+  console.log("\nHSA on Schedule 1, added back by California");
+  const r = deriveBefore(
+    {
+      ...inha.after,
+      agi: 68396,
+      qbiDeduction: 10529,
+      taxableIncome: 42117,
+      incomeTax: 4817,
+      federalTotalTax: 15824,
+      federalAmountOwed: 6224,
+      hsaDeduction: 4000,
+      stateAdjustments: 4000,
+    },
+    inha.meta,
+  );
+  const ok = r.ok && r.before.federalTotalTax === 41287 && r.before.stateTotalTax === 9667 && r.before.agi === 149588;
+  if (!ok) failed++;
+  console.log(
+    `  ${ok ? "ok" : "WRONG"}  before federal ${r.ok ? money(r.before.federalTotalTax) : "refused: " + r.reasons.join(" | ")}${r.ok ? `, California ${money(r.before.stateTotalTax)}, AGI ${money(r.before.agi)}` : ""} (want 41,287 / 9,667 / 149,588)`,
+  );
 }
 
 /* ── Weinstein 2024: W-2 plus a Schedule C written down to $0, CA 540 ──────
@@ -818,8 +899,10 @@ for (const p of PAIRINGS) {
     console.log(`  savings ${money(savings)} vs by hand $41,086 ${ok ? "ok" : "MISMATCH"}`);
     console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
     const analysis = attributeStrategies(after, meta);
+    // No dependents, so the client's headline is the savings above.
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
-    const sumOk = sum === savings;
+    const sumOk = sum === savings && headline === savings;
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"}):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
@@ -884,6 +967,7 @@ for (const p of PAIRINGS) {
     dependentCount: 2,
     qbiDeduction: 62079,
     sepDeduction: 3000,
+    iraDeduction: 2500, // Schedule 1 line 20 (the page shows it on line 20, not student loan interest)
     itemizedDeductions: 45683,
     saltPaid: 19963,
     saltDeducted: 19963,
@@ -915,22 +999,30 @@ for (const p of PAIRINGS) {
     rentalLosses: null,
     rentalReps: null,
     totalIncome: 723688,
-    agi: 697774,
+    // The tax team's call (2026-10-05): the SEP (3,000), IRA (2,500) and
+    // health insurance (2,908) deductions are DeCypher's, so off on the
+    // before: adjustments are the half SE tax alone, 17,506.
+    agi: 706182,
     qbiDeduction: null,
-    sepDeduction: 3000,
+    sepDeduction: null,
+    iraDeduction: null,
     itemizedDeductions: 35720,
     saltDeducted: 10000,
-    taxableIncome: 662054,
-    incomeTax: 170790,
+    // 706,182 − 35,720. Tax: 114,462 + 35% × (670,306 − 501,050) = 59,239.60
+    // → 173,702 on the ordinary slice + 31 on the $156 at 20% = 173,733.
+    taxableIncome: 670462,
+    incomeTax: 173733,
     seTax: 35011,
     otherTaxes: 41893,
     childTaxCredit: null,
     childCareCredit: 1200,
     niit: 3876,
-    federalTotalTax: 211483,
+    // 173,733 + 41,893 − 1,200 (the before as derived still claims the kids;
+    // the recap's before adds their 1,200 back, see the headline below).
+    federalTotalTax: 214426,
     federalPayments: 95156,
-    federalAmountOwed: 116327,
-    sehiDeduction: 2908,
+    federalAmountOwed: 119270,
+    sehiDeduction: null,
   };
   const r = deriveBefore(after, meta);
   if (!r.ok) {
@@ -946,21 +1038,31 @@ for (const p of PAIRINGS) {
     }
     // before 171,556; after 96,419
     const savings = computeRecap({ before: r.before, after, priorYearIncome: null }).savings;
-    // 211,483 − 96,419. The team's Canva: 107,460 (its before has the QBI
-    // deduction on the rentals the return can't show the property cost for).
-    const ok = savings === 115064;
+    // 214,426 − 96,419. The team's Canva: 107,460 (its before keeps the SEP,
+    // IRA and health insurance, and has the QBI deduction on the rentals the
+    // return can't show the property cost for).
+    const ok = savings === 118007;
     if (!ok) failed++;
-    console.log(`  savings ${money(savings)} vs by hand $115,064 (team's Canva $107,460) ${ok ? "ok" : "MISMATCH"}`);
+    console.log(`  savings ${money(savings)} vs by hand $118,007 (team's Canva $107,460) ${ok ? "ok" : "MISMATCH"}`);
+    // By hand, at that point in the walk (Schedule C write-offs and home
+    // office on; SEP, IRA, health insurance and REPS off): the rentals go
+    // from +101,796 of passive income to a suspended loss. AGI 627,560 →
+    // 525,764; the SALT cap rises off its 10,000 floor (itemized 35,720 →
+    // 45,683); taxable 591,840 → 480,081 less 11,494 of QBI inside the
+    // phase-in range = 468,587; tax 146,207 → 104,047 (42,160) and NIIT
+    // 3,876 → 8 (3,868): 46,028.
     const rentalStep = attributeStrategies(after, meta)?.attribution.find((a) => /rental expenses/i.test(a.label));
-    const stepOk = rentalStep?.savings === 47819;
+    const stepOk = rentalStep?.savings === 46028;
     if (!stepOk) failed++;
-    console.log(`  rental expenses step ${money(rentalStep?.savings)} vs 47,819 ${stepOk ? "ok" : "MISMATCH"}`);
+    console.log(`  rental expenses step ${money(rentalStep?.savings)} vs by hand 46,028 ${stepOk ? "ok" : "MISMATCH"}`);
     console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
     const analysis = attributeStrategies(after, meta);
+    // The client's headline: the before without the two kids, 1,200 more.
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
-    const sumOk = sum === savings;
+    const sumOk = sum === headline && headline === 119207;
     if (!sumOk) failed++;
-    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"}):`);
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}, by hand $119,207):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}  ${a.note}`);
     // The question the return was sent in with: what the year would have
     // cost without real estate professional status, everything else as

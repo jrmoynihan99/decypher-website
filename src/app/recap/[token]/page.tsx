@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import RecapView from "@/components/recap/RecapView";
+import { shareFor } from "@/lib/tax-recap/share";
 import { getRecapByToken } from "@/lib/tax-recap/store";
 
 /**
@@ -20,5 +21,5 @@ export default async function RecapPage({
   if (!recap || recap.revoked) notFound();
   // `?open` skips the seal (RecapGate): for checking numbers from the portal,
   // and for anyone printing the page. The client's link never carries it.
-  return <RecapView recap={recap} sealed={open === undefined} />;
+  return <RecapView recap={recap} sealed={open === undefined} share={await shareFor(recap)} />;
 }

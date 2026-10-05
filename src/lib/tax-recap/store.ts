@@ -10,11 +10,14 @@ import {
   sanitizeNextSteps,
   sanitizeNumbers,
   sanitizeStrategies,
+  sanitizeVideo,
   type RecapDoc,
   type RecapInput,
+  type RecapVideo,
 } from "./schema";
 import { computeRecap } from "./compute";
 import type { ProofPairing } from "./derive";
+import { deleteVideos } from "./video-store";
 
 /**
  * Tax recaps, in Firestore.
@@ -74,6 +77,7 @@ function toDoc(id: string, d: FirebaseFirestore.DocumentData): RecapDoc {
     },
     derivedBefore: sanitizeDerivedBefore(d.derivedBefore),
     analysis: sanitizeAnalysis(d.analysis),
+    video: sanitizeVideo(d.video),
     createdAt: iso(d.createdAt),
     createdBy: typeof d.createdBy === "string" ? d.createdBy : "",
     updatedAt: iso(d.updatedAt),
@@ -163,6 +167,17 @@ export async function deleteRecap(id: string): Promise<void> {
   const snap = await r.get();
   if (!snap.exists) throw new TaxRecapStoreError("Recap not found");
   await r.delete();
+  // the DeCyphered videos go with it; a recap that never had one has nothing to delete
+  await deleteVideos(id).catch((e) => console.error(`[tax-recap] couldn't delete videos for ${id}:`, e));
+}
+
+/** Record the video the builder just uploaded. Doesn't touch anything else on the recap. */
+export async function setRecapVideo(id: string, video: RecapVideo): Promise<void> {
+  if (!isConfigured()) throw new TaxRecapStoreError("Firebase is not configured");
+  const r = ref(id);
+  const snap = await r.get();
+  if (!snap.exists) throw new TaxRecapStoreError("Recap not found");
+  await r.update({ video });
 }
 
 /** The public page's lookup. Returns revoked recaps too — the page decides. */

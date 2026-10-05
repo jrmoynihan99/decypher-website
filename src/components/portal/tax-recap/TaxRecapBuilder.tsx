@@ -51,6 +51,8 @@ import {
   type ReturnNumbers,
 } from "@/lib/tax-recap/schema";
 import { analyzePdf, preparePdf, type PdfAnalysis } from "./pdf-prepare";
+import { VideoStatus, useVideoMaker } from "./VideoMaker";
+import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 
 /**
  * The recap builder: the client's return(s) in, a shareable page out.
@@ -295,6 +297,8 @@ export default function TaxRecapBuilder({
     initial?.nextSteps.length ? initial.nextSteps : DEFAULT_NEXT_STEPS,
   );
 
+  // The client's video: remade in this tab after every save whose numbers changed.
+  const video = useVideoMaker(!!initial && videoIsCurrent(initial));
   const [saved, setSaved] = useState<{ id: string; token: string } | null>(
     initial ? { id: initial.id, token: initial.token } : null,
   );
@@ -875,8 +879,9 @@ export default function TaxRecapBuilder({
         priorYearIncome: priorYearIncome.trim()
           ? asMoney(priorYearIncome)
           : null,
+        analysis,
       }),
-    [parsed, priorYearIncome],
+    [parsed, priorYearIncome, analysis],
   );
   const warnings = useMemo(
     () =>
@@ -982,6 +987,8 @@ export default function TaxRecapBuilder({
         throw new Error(data.message ?? "Couldn't save");
       const isNew = !saved;
       setSaved({ id: data.recap.id, token: data.recap.token });
+      // the server skips it when the numbers didn't change
+      void video.make(data.recap.id);
       // The list below is server-rendered, so it only learns about this recap
       // when the route re-renders. Without this you save and nothing appears.
       router.refresh();
@@ -1104,6 +1111,9 @@ export default function TaxRecapBuilder({
             the recap; revoke it from the list below if it goes to the wrong
             person.
           </Note>
+          <div className="mt-3 border-t border-teal/20 pt-3">
+            <VideoStatus state={video.state} token={saved.token} onMake={() => void video.make(saved.id)} />
+          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-edge pt-5">
@@ -1579,13 +1589,24 @@ export default function TaxRecapBuilder({
               <Kpi
                 label={
                   scorpSavings > 0
-                    ? "Bookkeeping + strategies"
+                    ? "Before − after"
                     : "Total tax savings"
                 }
                 value={money(computed.savings)}
                 tone={computed.savings >= 0 ? "pos" : "neg"}
               />
             </KpiRow>
+            {computed.breakdown.kids > 0 ? (
+              <Note className="!mt-2">
+                Before DeCypher doesn&rsquo;t claim the{" "}
+                {analysis?.kids?.dependents === 1
+                  ? "dependent"
+                  : "dependents"}
+                : {money(computed.breakdown.kids)} more than the before column
+                below, which claims them the way the CPA&rsquo;s print does.
+                They come back as the first line of the strategy split.
+              </Note>
+            ) : null}
             {scorpSavings > 0 ? (
               <div className="mt-3">
                 <KpiRow cols={2}>
@@ -1606,6 +1627,13 @@ export default function TaxRecapBuilder({
               <div>
                 <Mono className="text-dusk">Savings breakdown (exact)</Mono>
                 <div className="mt-1">
+                  {computed.breakdown.kids > 0 ? (
+                    <LineRow
+                      label="Dependents claimed (not on the before)"
+                      value={money(computed.breakdown.kids)}
+                      size="sm"
+                    />
+                  ) : null}
                   <LineRow
                     label="Deductions found"
                     value={money(computed.breakdown.deductionsFound)}
@@ -1697,7 +1725,7 @@ export default function TaxRecapBuilder({
                     />
                   ))}
                   <LineRow
-                    label="Bookkeeping + strategies"
+                    label={analysis.scorpSavings ? "Before − after" : "Total tax savings"}
                     value={money(computed.savings)}
                     size="sm"
                     total
@@ -1722,27 +1750,28 @@ export default function TaxRecapBuilder({
 
             {analysis?.kids ? (
               <div className="mt-6">
-                <Mono className="text-dusk">
-                  What the kids saved (beside the savings, not part of them)
-                </Mono>
+                <Mono className="text-dusk">What the dependents are worth</Mono>
                 <div className="mt-1">
                   <StrategyRow
-                    label={`After: ${analysis.kids.dependents === 1 ? "1 dependent" : `${analysis.kids.dependents} dependents`} on the return`}
-                    note={analysis.kids.note}
-                    value={analysis.kids.after}
+                    label={`Before: ${analysis.kids.dependents === 1 ? "1 dependent" : `${analysis.kids.dependents} dependents`} at the before's income`}
+                    note={analysis.kids.inBefore?.note ?? ""}
+                    value={analysis.kids.before}
                   />
                   <StrategyRow
-                    label="Before: the same kids on the before return"
-                    note=""
-                    value={analysis.kids.before}
+                    label="After: the same dependents on the return as filed"
+                    note={analysis.kids.note}
+                    value={analysis.kids.after}
                   />
                 </div>
                 <Note className="!mt-2">
                   Each side re-run without the dependents, everything else as
                   filed: no child tax credit, no child-care credit, single
-                  instead of head of household. The kids are on both returns,
-                  so this is never added to the savings. It shows on the
-                  client&rsquo;s recap as its own section.
+                  instead of head of household.{" "}
+                  {analysis.kids.inBefore
+                    ? "The client’s before doesn’t claim them, so the before figure is the first line of the strategy split and part of the savings."
+                    : Number(analysis.version) >= 8
+                      ? "They’re worth nothing at the before’s income, so the before is unchanged and the client’s recap shows them beside the savings."
+                      : "Saved before the before stopped claiming them: they sit beside the savings, not in them. Recompute the before column to bring this recap up to date."}
                 </Note>
               </div>
             ) : null}
@@ -1961,6 +1990,11 @@ export default function TaxRecapBuilder({
                 </span>
               ) : null}
             </div>
+            {saved ? (
+              <div className="mt-3">
+                <VideoStatus state={video.state} token={saved.token} onMake={() => void video.make(saved.id)} />
+              </div>
+            ) : null}
 
             {saved && link ? (
               <div className="mt-4 rounded-[16px] border border-teal/40 bg-teal/[0.06] px-4 py-3.5">
