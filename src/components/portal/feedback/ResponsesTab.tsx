@@ -204,23 +204,55 @@ function DateCell({ iso }: { iso: string | null }) {
   );
 }
 
-function ClientCell({ x, open, onToggle }: { x: FeedbackResponse; open: boolean; onToggle: () => void }) {
+/**
+ * The pinned name column: opens the row, and carries the row's delete so it's
+ * always on screen however far the table is scrolled. Delete shows on test
+ * responses for everyone and on real ones for admins (the server enforces
+ * the same rule).
+ */
+function ClientCell({
+  x,
+  open,
+  onToggle,
+  onDelete,
+}: {
+  x: FeedbackResponse;
+  open: boolean;
+  onToggle: () => void;
+  /** Null when this person may not delete this response. */
+  onDelete: (() => void) | null;
+}) {
   return (
     <Cell className={`sticky z-[2] ${pinClient}`}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="group/who flex max-w-[200px] cursor-pointer flex-col items-start gap-px border-0 bg-transparent p-0 text-left"
-      >
-        <b className="flex max-w-[200px] items-center font-body text-[13.5px] font-semibold text-fog group-hover/who:text-magenta">
-          <span className="truncate">{x.client_name || x.team.brand_name || "Unnamed client"}</span>
-          <span aria-hidden className={`ml-1.5 text-dusk transition-transform duration-200 ${open ? "rotate-90" : ""}`}>
-            ›
-          </span>
-        </b>
-        <span className="font-mono text-[10.5px] text-dusk">{x.client_id || "no client ID"}</span>
-      </button>
+      <div className="flex items-start justify-between gap-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="group/who flex min-w-0 max-w-[200px] cursor-pointer flex-col items-start gap-px border-0 bg-transparent p-0 text-left"
+        >
+          <b className="flex max-w-[180px] items-center font-body text-[13.5px] font-semibold text-fog group-hover/who:text-magenta">
+            <span className="truncate">{x.client_name || x.team.brand_name || "Unnamed client"}</span>
+            <span aria-hidden className={`ml-1.5 text-dusk transition-transform duration-200 ${open ? "rotate-90" : ""}`}>
+              ›
+            </span>
+          </b>
+          <span className="font-mono text-[10.5px] text-dusk">{x.client_id || "no client ID"}</span>
+        </button>
+        {onDelete ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete ${x.client_name || "this"} response`}
+            title={x.is_test ? "Delete this test response" : "Delete this response"}
+            className="flex-none cursor-pointer rounded-[8px] border-0 bg-transparent p-1.5 text-dusk transition-colors hover:bg-danger/10 hover:text-danger"
+          >
+            <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        ) : null}
+      </div>
       {x.recap_id ? (
         <Link
           href={`/portal/tax-recap?edit=${encodeURIComponent(x.recap_id)}`}
@@ -319,7 +351,7 @@ function OnboardingTable(p: TableProps) {
                   <Fragment key={x.id}>
                     <tr className="group/row" data-open={open}>
                       <DateCell iso={x.submitted_at} />
-                      <ClientCell x={x} open={open} onToggle={() => p.onToggleOpen(x.id)} />
+                      <ClientCell x={x} open={open} onToggle={() => p.onToggleOpen(x.id)} onDelete={canDelete(x, p) ? () => p.onDelete(x.id) : null} />
                       <Cell className={sec}>
                         <ScoreChip v={x.csat_overall} />
                       </Cell>
@@ -436,7 +468,7 @@ function ServiceTable(p: TableProps) {
                   <Fragment key={x.id}>
                     <tr className="group/row" data-open={open}>
                       <DateCell iso={x.submitted_at} />
-                      <ClientCell x={x} open={open} onToggle={() => p.onToggleOpen(x.id)} />
+                      <ClientCell x={x} open={open} onToggle={() => p.onToggleOpen(x.id)} onDelete={canDelete(x, p) ? () => p.onDelete(x.id) : null} />
                       <Cell>
                         {bk ? <Pill>BK {x.bookkeeping_period}</Pill> : null}
                         {tx ? <Pill>Tax {x.tax_year}</Pill> : null}
@@ -614,8 +646,10 @@ function Meta({ x, p, children }: { x: FeedbackResponse; p: TableProps; children
  * Test responses can go by anyone; a client's real one only by an admin (the
  * server enforces it too — it feeds the per-person scorecard).
  */
+const canDelete = (x: FeedbackResponse, p: Pick<TableProps, "canDeleteReal">) => x.is_test || p.canDeleteReal;
+
 function DeleteResponse({ x, p }: { x: FeedbackResponse; p: TableProps }) {
-  if (!x.is_test && !p.canDeleteReal) return null;
+  if (!canDelete(x, p)) return null;
   return (
     <div className="mt-3.5">
       <ToolButton danger onClick={() => p.onDelete(x.id)}>

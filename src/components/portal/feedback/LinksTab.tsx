@@ -18,15 +18,11 @@ import { ToolButton } from "./bits";
 /**
  * Send a link: every way into the survey, in one place.
  *
- *   For one client  a ready-to-send link, built here, for a survey that goes
- *                   out by hand rather than from a TaxDome automation
+ *   Shareable       one plain link per survey — send it to anyone; they type
+ *                   their name on the first screen
+ *   For one client  the same link with their name (and team) filled in
  *   TaxDome         the templates the automations fill in
- *   Preview         try a survey yourself; the answers save as test data
- *
- * A link has to name the client to count. A bare one is read as staff trying
- * the survey (lib/feedback/links `preview`), and its answers save as test
- * data — the trap a hand-typed `/feedback?s=tax` falls into, and why the
- * builder won't hand out a link without a name.
+ *   Preview         try a survey yourself; `preview=1` saves as test data
  *
  * Plain URL parameters, not stored short links: they're what TaxDome and the
  * tax recap already use, they need no lookup, and a link keeps working
@@ -66,6 +62,31 @@ export default function LinksTab({
 
   return (
     <div className="space-y-5">
+      <Panel title="Shareable links">
+        <p className="m-0 mb-4 text-[13px] leading-relaxed text-muted">
+          One link per survey. Send it to any client by email or text: they type their name on the first screen, and their
+          answers come in as a real response.
+        </p>
+        <div className="space-y-3">
+          {SURVEY_KINDS.map((k) => {
+            const href = `${base}${k === "onb" ? "" : `?s=${k}`}`;
+            return (
+              <div key={k}>
+                <div className="mb-1.5 text-[13px] font-medium text-fog">{SURVEY_KIND_LABELS[k]}</div>
+                <div className="flex items-stretch gap-2">
+                  <code className={codeCls}>{href}</code>
+                  <ToolButton onClick={() => onCopy(href, `${SURVEY_KIND_LABELS[k]} link`)}>Copy</ToolButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="m-0 mt-3.5 text-[12.5px] leading-relaxed text-dusk">
+          These don’t carry a client ID, so nothing stops the same person answering twice, and the team is filled in on the
+          Responses tab afterwards. For one client with their name and team already on it, use the link below.
+        </p>
+      </Panel>
+
       <OneClient base={base} settings={settings} onCopy={onCopy} />
 
       <Panel title="Links for TaxDome">
@@ -114,15 +135,15 @@ export default function LinksTab({
 
       <Panel title="Preview the survey">
         <p className="m-0 mb-3 text-[13px] leading-relaxed text-muted">
-          Opens the survey with nobody on the link, so the answers save as test data (they show with a{" "}
-          <span className="font-mono text-[12px]">test</span> flag on Responses and clear with “Clear test data”). Don’t send
-          these to clients: use a link from the top of this tab.
+          For trying the survey yourself: these carry <span className="font-mono text-[12px]">preview=1</span>, so the
+          answers save as test data (they show with a <span className="font-mono text-[12px]">test</span> flag on Responses
+          and clear with “Clear test data”). Don’t send these to clients.
         </p>
         <div className="flex flex-wrap gap-2">
           {SURVEY_KINDS.map((k) => (
             <a
               key={k}
-              href={`${FEEDBACK_PATH}${k === "onb" ? "" : `?s=${k}`}`}
+              href={`${FEEDBACK_PATH}?${k === "onb" ? "" : `s=${k}&`}preview=1`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-full border border-edge-mid px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-magenta"
@@ -137,7 +158,7 @@ export default function LinksTab({
   );
 }
 
-/** The builder: one client, one survey, one link to paste into an email or a text. */
+/** The builder: one client, one survey, their name and team already on the link. */
 function OneClient({
   base,
   settings,
@@ -158,7 +179,6 @@ function OneClient({
   const roles = LINK_ROLES.filter((lr) => sections.includes(lr.team));
   const wantsBq = kind === "bk" || kind === "both";
   const wantsTy = kind === "tax" || kind === "both";
-  const named = name.trim().length >= 2;
 
   // Only the roles this survey asks about ride on the link (feedbackHref
   // drops the period and year that don't apply on its own).
@@ -175,8 +195,8 @@ function OneClient({
   return (
     <Panel title="A link for one client">
       <p className="m-0 mb-4 text-[13px] leading-relaxed text-muted">
-        For a survey you’re sending by hand. Fill in the client and who worked with them, then copy the link into your email
-        or message.
+        The shareable link with this client’s name and team already on it: they skip typing their name, and the response
+        lands with the team filled in. Everything here is optional.
       </p>
 
       <Segmented<SurveyKind>
@@ -258,17 +278,8 @@ function OneClient({
       ))}
 
       <div className="mt-5 flex items-stretch gap-2">
-        {named ? (
-          <code className={codeCls}>{href}</code>
-        ) : (
-          <div className="min-w-0 flex-1 rounded-[10px] border border-dashed border-edge-mid px-3 py-2.5 text-[13px] text-dusk">
-            Add the client’s name to make the link. Without one, the survey treats it as a preview and saves the answers as
-            test data.
-          </div>
-        )}
-        <ToolButton disabled={!named} onClick={() => onCopy(href, "Link")}>
-          Copy link
-        </ToolButton>
+        <code className={codeCls}>{href}</code>
+        <ToolButton onClick={() => onCopy(href, "Link")}>Copy link</ToolButton>
       </div>
     </Panel>
   );

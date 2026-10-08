@@ -49,7 +49,7 @@ const WEB_MASK = "linear-gradient(to bottom, transparent 0, #000 140px, #000 cal
  *   passive   everyone else → thanks
  *   already   the server says this client answered this round already
  *
- * A link that names nobody is a staff preview: answers save flagged as test
+ * A link with preview=1 is a staff preview: answers save flagged as test
  * data, and a slim bar lets staff switch which survey they're trying.
  */
 
