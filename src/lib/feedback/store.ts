@@ -62,7 +62,11 @@ const SETTINGS_DOC = "settings";
 const LIST_LIMIT = 5000;
 
 export class FeedbackStoreError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** The HTTP status a route should answer with. */
+    readonly status = 400,
+  ) {
     super(message);
     this.name = "FeedbackStoreError";
   }
@@ -371,18 +375,32 @@ export async function updateResponseTeam(
   return toResponse(id, after.data() ?? {});
 }
 
-/** One test response and its follow-ups. A real response can't be deleted from here. */
-export async function deleteTestResponse(id: string): Promise<void> {
-  if (!isConfigured()) throw new FeedbackStoreError("Firebase is not configured");
+/**
+ * One response and its follow-ups, for good. A test response can go by anyone
+ * with the tab; a real one only when `allowReal` (the route passes admin):
+ * real answers feed the per-person scorecard, so whoever a bad review is
+ * about mustn't be able to make it disappear. Returns who it was, for the
+ * route's audit line.
+ */
+export async function deleteResponse(
+  id: string,
+  { allowReal }: { allowReal: boolean },
+): Promise<{ client_name: string; is_test: boolean }> {
+  if (!isConfigured()) throw new FeedbackStoreError("Firebase is not configured", 500);
   const ref = idRef(RESPONSES, id);
   const snap = await ref.get();
-  if (!snap.exists) throw new FeedbackStoreError("Response not found");
-  if (snap.data()?.is_test !== true) throw new FeedbackStoreError("Only test responses can be deleted");
+  if (!snap.exists) throw new FeedbackStoreError("Response not found", 404);
+  const d = snap.data() ?? {};
+  const is_test = d.is_test === true;
+  if (!is_test && !allowReal) {
+    throw new FeedbackStoreError("Only admins can delete a client’s response", 403);
+  }
   const tasks = await adminDb().collection(TASKS).where("survey_id", "==", id).get();
   const batch = adminDb().batch();
   batch.delete(ref);
   for (const t of tasks.docs) batch.delete(t.ref);
   await batch.commit();
+  return { client_name: typeof d.client_name === "string" ? d.client_name : "", is_test };
 }
 
 /** Every test response and every test follow-up. */

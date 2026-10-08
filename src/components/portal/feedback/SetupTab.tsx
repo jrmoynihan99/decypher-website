@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Panel } from "@/components/portal/widgets/ui";
-import { FEEDBACK_PATH, SURVEY_KIND_LABELS, type SurveyKind } from "@/lib/feedback/links";
 import {
   GOOGLE_REVIEW_URL,
   LINK_ROLES,
@@ -16,22 +15,13 @@ import {
 import { ToolButton } from "./bits";
 
 /**
- * Team & setup: the names in each role's dropdown, the link templates for the
- * TaxDome automations, preview links, and the rules in words.
+ * Team & setup: the names in each role's dropdown, the founder copied on
+ * follow-ups, and the rules in words. The links live on Send a link.
  *
  * Removing a name from a list keeps it on the clients it's already on — the
  * Responses dropdown shows it as "(not in list)" — because a person leaving
  * shouldn't rewrite who worked with whom.
  */
-
-const TD_LINKS: [SurveyKind, string, string, string][] = [
-  ["onb", "Onboarding", "when onboarding moves to Done", ""],
-  ["bk", "Bookkeeping check-in", "2–3 months after onboarding", "&bq=QUARTER"],
-  ["tax", "Tax season", "1–2 weeks after returns are delivered", "&ty=TAX_YEAR"],
-  ["both", "Both sections", "when both are fresh", "&bq=QUARTER&ty=TAX_YEAR"],
-];
-
-const noopSubscribe = () => () => {};
 
 const inputCls =
   "w-full rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-body text-[13.5px] text-fog outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-faint focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]";
@@ -39,91 +29,18 @@ const inputCls =
 export default function SetupTab({
   settings,
   onChange,
-  onCopy,
   flash,
 }: {
   settings: FeedbackSettings;
   /** `debounce` for typing; lists save at once. */
   onChange: (next: FeedbackSettings, debounce?: boolean) => void;
-  onCopy: (text: string, label: string) => void;
   flash: (msg: string) => void;
 }) {
-  // The origin is only knowable in the browser; the server render shows the path alone.
-  const origin = useSyncExternalStore(noopSubscribe, () => window.location.origin, () => "");
-  const base = settings.baseUrl ? settings.baseUrl.replace(/[?#].*$/, "") : `${origin}${FEEDBACK_PATH}`;
-  const tdLink = (k: SurveyKind, extra: string) =>
-    `${base}?name=CLIENT_NAME&cid=CLIENT_ID${k === "onb" ? "" : `&s=${k}`}${extra}`;
-
   return (
     <div className="space-y-5">
       <ListsPanel settings={settings} onChange={onChange} flash={flash} />
 
-      <Panel title="Links for TaxDome">
-        <p className="m-0 mb-4 text-[13px] leading-relaxed text-muted">
-          Paste these into the TaxDome automations. Swap the capitals for TaxDome’s client name and client ID fields, and set
-          the quarter or tax year each time it runs.
-        </p>
-        <div className="space-y-3.5">
-          {TD_LINKS.map(([k, label, when, extra]) => {
-            const href = tdLink(k, extra);
-            return (
-              <div key={k}>
-                <div className="mb-1.5 text-[13px] font-medium text-fog">
-                  {label} <span className="font-normal text-dusk">· {when}</span>
-                </div>
-                <div className="flex items-stretch gap-2">
-                  <code className="min-w-0 flex-1 break-all rounded-[10px] border border-edge bg-panel-2 px-3 py-2.5 font-mono text-[12px] text-mist">
-                    {href}
-                  </code>
-                  <ToolButton onClick={() => onCopy(href, "Link")}>Copy</ToolButton>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <p className="m-0 mt-3.5 text-[12.5px] leading-relaxed text-dusk">
-          The client ID stops a second answer for the same round and joins the response to their record. Without{" "}
-          <b className="text-mist">bq</b> the period defaults to the current quarter; without <b className="text-mist">ty</b>{" "}
-          the tax year defaults to last year. If the name is left out, the survey asks for it. Links from a client’s tax
-          recap carry the recap instead of a client ID, and fill in their name and tax year.
-        </p>
-        <label className="mt-4 block max-w-[560px]">
-          <span className="mb-1.5 block font-mono text-[10.5px] font-bold uppercase tracking-[1.2px] text-mist">
-            Survey page URL
-          </span>
-          <input
-            type="url"
-            value={settings.baseUrl}
-            placeholder={`${origin}${FEEDBACK_PATH}`}
-            onChange={(e) => onChange({ ...settings, baseUrl: e.target.value }, true)}
-            className={inputCls}
-          />
-          <span className="mt-1.5 block text-[12px] text-dusk">Where the survey lives. Blank uses this site’s {FEEDBACK_PATH}.</span>
-        </label>
-      </Panel>
-
-      <Panel title="Preview the survey">
-        <p className="m-0 mb-3 text-[13px] leading-relaxed text-muted">
-          Opens the survey with nobody on the link, so the answers save as test data (they show with a{" "}
-          <span className="font-mono text-[12px]">test</span> flag here and clear with “Clear test data”).
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {(["onb", "bk", "tax", "both"] as SurveyKind[]).map((k) => (
-            <a
-              key={k}
-              href={`${FEEDBACK_PATH}${k === "onb" ? "" : `?s=${k}`}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-full border border-edge-mid px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-magenta"
-            >
-              {SURVEY_KIND_LABELS[k]}
-              <span className="font-mono text-[10px] text-magenta">↗</span>
-            </a>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="Links & rules">
+      <Panel title="Follow-ups & rules">
         <label className="block max-w-[560px]">
           <span className="mb-1.5 block font-mono text-[10.5px] font-bold uppercase tracking-[1.2px] text-mist">
             Founder on at-risk follow-ups
@@ -153,7 +70,8 @@ export default function SetupTab({
           <p className="m-0">
             The review ask shows only when every team answered is CSAT ≥ {THRESHOLDS.promoterCsat} and NPS ≥{" "}
             {THRESHOLDS.promoterNps}. A team is <b className="text-mist">at risk</b> at CSAT ≤ {THRESHOLDS.atRiskCsat} or NPS ≤{" "}
-            {THRESHOLDS.atRiskNps} (onboarding also at confidence ≤ 3) and creates a follow-up, plus a ping in Slack.
+            {THRESHOLDS.atRiskNps} (onboarding also at confidence ≤ 3) and creates a follow-up. Every real response is posted
+            to the client feedback channel in Slack, at-risk ones flagged; test responses aren’t.
           </p>
           <p className="m-0">
             Each client’s team carries forward: set the bookkeeping lead at onboarding and their later bookkeeping responses

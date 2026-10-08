@@ -11,7 +11,7 @@ export const metadata = { title: "Client Feedback — DeCypher Portal" };
  * The survey itself is public, at /feedback; this is where its answers land.
  */
 export default async function ClientFeedbackPage() {
-  await requirePermission("client-feedback");
+  const session = await requirePermission("client-feedback");
   const [responses, tasks, settings] = await Promise.all([listResponses(), listTasks(), getSettings()]);
 
   return (
@@ -25,7 +25,12 @@ export default async function ClientFeedbackPage() {
       </p>
 
       <div className="mt-7">
-        <ClientFeedback initialResponses={responses} initialTasks={tasks} initialSettings={settings} />
+        <ClientFeedback
+          initialResponses={responses}
+          initialTasks={tasks}
+          initialSettings={settings}
+          isAdmin={session.role === "admin"}
+        />
       </div>
     </>
   );
