@@ -44,7 +44,8 @@ export default function ResponsesTab({
   onToggleOpen,
   saveTeam,
   saving,
-  onDeleteTest,
+  canDeleteReal,
+  onDelete,
   onGoSetup,
 }: {
   rows: FeedbackResponse[];
@@ -56,7 +57,9 @@ export default function ResponsesTab({
   onToggleOpen: (id: string) => void;
   saveTeam: SaveTeam;
   saving: (id: string, field: string) => boolean;
-  onDeleteTest: (id: string) => void;
+  /** Admin: real responses get a delete button too, not only test ones. */
+  canDeleteReal: boolean;
+  onDelete: (id: string) => void;
   onGoSetup: () => void;
 }) {
   if (!rows.length) return <EmptyResponses anyAtAll={anyAtAll} />;
@@ -64,7 +67,7 @@ export default function ResponsesTab({
   const onb = rows.filter((x) => x.survey === "onboarding");
   const svc = rows.filter((x) => x.survey === "service");
   const listsEmpty = TEAM_ROLES.every((k) => !settings.lists[k].length);
-  const shared = { settings, openId, onToggleOpen, saveTeam, saving, onDeleteTest };
+  const shared = { settings, openId, onToggleOpen, saveTeam, saving, canDeleteReal, onDelete };
 
   return (
     <div className="space-y-3">
@@ -126,7 +129,8 @@ type TableProps = {
   onToggleOpen: (id: string) => void;
   saveTeam: SaveTeam;
   saving: (id: string, field: string) => boolean;
-  onDeleteTest: (id: string) => void;
+  canDeleteReal: boolean;
+  onDelete: (id: string) => void;
 };
 
 /* ─────────────────────────────── table chrome ─────────────────────────────── */
@@ -606,14 +610,19 @@ function Meta({ x, p, children }: { x: FeedbackResponse; p: TableProps; children
   );
 }
 
-function DeleteTest({ x, p }: { x: FeedbackResponse; p: TableProps }) {
-  return x.is_test ? (
+/**
+ * Test responses can go by anyone; a client's real one only by an admin (the
+ * server enforces it too — it feeds the per-person scorecard).
+ */
+function DeleteResponse({ x, p }: { x: FeedbackResponse; p: TableProps }) {
+  if (!x.is_test && !p.canDeleteReal) return null;
+  return (
     <div className="mt-3.5">
-      <ToolButton danger onClick={() => p.onDeleteTest(x.id)}>
-        Delete this test response
+      <ToolButton danger onClick={() => p.onDelete(x.id)}>
+        {x.is_test ? "Delete this test response" : "Delete this response"}
       </ToolButton>
     </div>
-  ) : null;
+  );
 }
 
 const lock = (s: string) => (
@@ -673,7 +682,7 @@ function OnboardingDetail({ x, p }: { x: FeedbackResponse; p: TableProps }) {
             ...commonTimeline(x),
           ]}
         />
-        <DeleteTest x={x} p={p} />
+        <DeleteResponse x={x} p={p} />
       </Section>
     </>
   );
@@ -722,7 +731,7 @@ function ServiceDetail({ x, p }: { x: FeedbackResponse; p: TableProps }) {
             ]}
           />
         </Meta>
-        <DeleteTest x={x} p={p} />
+        <DeleteResponse x={x} p={p} />
       </Section>
     </>
   );

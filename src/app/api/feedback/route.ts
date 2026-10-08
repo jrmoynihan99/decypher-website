@@ -15,7 +15,7 @@ import {
   type FeedbackTask,
 } from "@/lib/feedback/schema";
 import { getSettings, submitResponse, type SubmitOutcome } from "@/lib/feedback/store";
-import { postFeedbackAlertToSlack } from "@/lib/slack";
+import { postFeedbackToSlack } from "@/lib/slack";
 
 /**
  * The survey's send. Public and unauthenticated — the survey is a public link
@@ -29,7 +29,7 @@ import { postFeedbackAlertToSlack } from "@/lib/slack";
  *           → 400 { ok:false, message }        malformed or incomplete
  *
  * Record first, then Slack: the response and its follow-ups are written in
- * one transaction (lib/feedback/store), and the #feedback ping for an at-risk
+ * one transaction (lib/feedback/store), and the #client-feedback post for a
  * real response is a best-effort doorbell after it. A Slack failure logs; it
  * never fails the client's send.
  *
@@ -89,20 +89,23 @@ export async function POST(req: Request) {
       : bad("That survey id is taken", 409);
   }
 
+  // Every real response goes to #client-feedback, as every application goes to
+  // #recruiting; a replayed send already went once. Awaited so the function
+  // isn't frozen mid-post, but a Slack failure only logs.
   const r = outcome.response;
-  if (!outcome.replay && !r.is_test && r.at_risk_flag) {
+  if (!outcome.replay && !r.is_test) {
     try {
-      await postFeedbackAlertToSlack(alertFor(r, outcome.tasks));
+      await postFeedbackToSlack(slackSummary(r, outcome.tasks));
     } catch (e) {
-      console.error("[feedback] at-risk Slack alert failed:", e);
+      console.error("[feedback] Slack post failed:", e);
     }
   }
 
   return NextResponse.json({ ok: true, survey_id: r.id, at_risk_flag: r.at_risk_flag });
 }
 
-/** The Slack alert's display strings, from the saved response and its follow-ups. */
-function alertFor(r: FeedbackResponse, tasks: FeedbackTask[]) {
+/** The Slack post's display strings, from the saved response and its follow-ups. */
+function slackSummary(r: FeedbackResponse, tasks: FeedbackTask[]) {
   const dash = (v: number | null) => (v == null ? "–" : String(v));
   return {
     clientName: r.client_name,
@@ -111,24 +114,22 @@ function alertFor(r: FeedbackResponse, tasks: FeedbackTask[]) {
     round:
       [r.bookkeeping_period, r.tax_year ? `tax year ${r.tax_year}` : null].filter(Boolean).join(" · ") || null,
     fromRecap: !!r.recap_id,
-    teams: r.teams
-      .filter((t) => teamFlags(r, t).atRisk)
-      .map((t) => {
-        const s = teamScores(r, t);
-        const confidence =
-          t === "onboarding" && r.confidence_score != null && r.confidence_score <= 3
-            ? ` · confidence ${r.confidence_score}/5`
-            : "";
-        const people = LINK_ROLES.filter((lr) => lr.team === t && r.team[lr.role])
-          .map((lr) => `${ROLE_LABELS_SHORT[lr.role]} ${r.team[lr.role]}`)
-          .join(", ");
-        return {
-          label: TEAMS[t].label,
-          scores: `CSAT ${dash(s.csat)}/5 · NPS ${dash(s.nps)}/10${confidence}`,
-          people: people || null,
-          reason: s.reason || null,
-        };
-      }),
+    segment: r.at_risk_flag ? ("at_risk" as const) : r.review_prompt_shown ? ("promoter" as const) : ("passive" as const),
+    teams: r.teams.map((t) => {
+      const s = teamScores(r, t);
+      const confidence =
+        t === "onboarding" && r.confidence_score != null ? ` · confidence ${r.confidence_score}/5` : "";
+      const people = LINK_ROLES.filter((lr) => lr.team === t && r.team[lr.role])
+        .map((lr) => `${ROLE_LABELS_SHORT[lr.role]} ${r.team[lr.role]}`)
+        .join(", ");
+      return {
+        label: TEAMS[t].label,
+        scores: `CSAT ${dash(s.csat)}/5 · NPS ${dash(s.nps)}/10${confidence}`,
+        atRisk: teamFlags(r, t).atRisk,
+        people: people || null,
+        reason: s.reason || null,
+      };
+    }),
     assignees: [...new Set(tasks.flatMap((t) => t.assignees))],
     due: tasks[0]?.due_date ?? null,
   };

@@ -9,7 +9,8 @@
  *   Stats              distributions, by-owner splits, the reasons
  *   Monthly scorecard  the advisor's core numbers by month and by person
  *   Follow-ups         the tasks at-risk responses created
- *   Team & setup       dropdown lists, TaxDome link templates, the rules
+ *   Send a link        a link for one client, the TaxDome templates, previews
+ *   Team & setup       dropdown lists, the founder on follow-ups, the rules
  *
  * Everything is computed in the browser from the rows the page loaded (see
  * lib/feedback/analytics) — a few hundred submissions, so filters are instant.
@@ -53,9 +54,10 @@ import ResponsesTab, { EmptyResponses } from "./ResponsesTab";
 import StatsTab from "./StatsTab";
 import ScorecardTab, { type ScorecardState } from "./ScorecardTab";
 import FollowupsTab from "./FollowupsTab";
+import LinksTab from "./LinksTab";
 import SetupTab from "./SetupTab";
 
-type Tab = "responses" | "stats" | "scorecard" | "followups" | "setup";
+type Tab = "responses" | "stats" | "scorecard" | "followups" | "links" | "setup";
 
 const SETTINGS_DEBOUNCE_MS = 600;
 
@@ -76,10 +78,13 @@ export default function ClientFeedback({
   initialResponses,
   initialTasks,
   initialSettings,
+  isAdmin,
 }: {
   initialResponses: FeedbackResponse[];
   initialTasks: FeedbackTask[];
   initialSettings: FeedbackSettings;
+  /** Admins can delete a client's real response; everyone can delete test ones. */
+  isAdmin: boolean;
 }) {
   const [responses, setResponses] = useState(initialResponses);
   const [tasks, setTasks] = useState(initialTasks);
@@ -167,16 +172,22 @@ export default function ClientFeedback({
     }
   }, [mark]);
 
-  const deleteTest = useCallback(
+  /** One response and its follow-ups. The server decides who may (admins, for a real one). */
+  const deleteOne = useCallback(
     async (id: string) => {
-      if (!window.confirm("Delete this test response? This can’t be undone.")) return;
+      const r = responsesRef.current.find((x) => x.id === id);
+      if (!r) return;
+      const ask = r.is_test
+        ? "Delete this test response? This can’t be undone."
+        : `Delete ${r.client_name || "this client"}’s response and its follow-ups? It comes out of every stat and the scorecard, and it can’t be undone.`;
+      if (!window.confirm(ask)) return;
       setError(null);
       try {
         await call(`/api/portal/feedback/responses/${encodeURIComponent(id)}`, { method: "DELETE" });
-        setResponses((rows) => rows.filter((r) => r.id !== id));
+        setResponses((rows) => rows.filter((x) => x.id !== id));
         setTasks((ts) => ts.filter((t) => t.survey_id !== id));
         setOpenId(null);
-        flash("Test response deleted");
+        flash(r.is_test ? "Test response deleted" : "Response deleted");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn’t delete");
       }
@@ -340,6 +351,7 @@ export default function ClientFeedback({
               { value: "stats", label: "Stats" },
               { value: "scorecard", label: "Monthly scorecard" },
               { value: "followups", label: <Count label="Follow-ups" n={openTasks || null} /> },
+              { value: "links", label: "Send a link" },
               { value: "setup", label: "Team & setup" },
             ]}
           />
@@ -445,7 +457,8 @@ export default function ClientFeedback({
             onToggleOpen={(id) => setOpenId((o) => (o === id ? null : id))}
             saveTeam={(id, patch) => void saveTeam(id, patch)}
             saving={busy}
-            onDeleteTest={(id) => void deleteTest(id)}
+            canDeleteReal={isAdmin}
+            onDelete={(id) => void deleteOne(id)}
             onGoSetup={() => setTab("setup")}
           />
         ) : tab === "stats" ? (
@@ -470,8 +483,10 @@ export default function ClientFeedback({
             saving={(id) => busy(id, "status")}
             onToggle={(t) => void toggleTask(t)}
           />
+        ) : tab === "links" ? (
+          <LinksTab settings={settings} onChange={updateSettings} onCopy={(text, label) => void copy(text, label)} />
         ) : (
-          <SetupTab settings={settings} onChange={updateSettings} onCopy={(text, label) => void copy(text, label)} flash={flash} />
+          <SetupTab settings={settings} onChange={updateSettings} flash={flash} />
         )}
       </section>
 

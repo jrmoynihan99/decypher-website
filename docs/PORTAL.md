@@ -358,8 +358,9 @@ opens the collections to the browser.
 
 **Client Feedback** (`/portal/client-feedback`, key `client-feedback`) is the
 backend of the public survey at `/feedback`: onboarding, bookkeeping, tax, or
-both. Links go out from TaxDome automations (templates on the Team & setup
-tab) and from every tax recap. The recap's survey choices are rewritten at
+both. Links go out from TaxDome automations, from every tax recap, and by
+hand — the **Send a link** tab builds a link for one client and holds the
+TaxDome templates. The recap's survey choices are rewritten at
 render time by `recapSurveyHref` in `src/lib/feedback/links.ts`, which also
 maps the old Airtable form URLs, so recaps sent before the move land on the
 new survey. That file documents the URL parameters; TaxDome depends on them,
@@ -369,9 +370,14 @@ so add, never rename.
   worked with them, package, segment) is editable. Flags, the review ask and
   test-vs-real are all re-derived on the server.
 - A bare `/feedback` link (no name, client ID, recap or team) is a staff
-  preview: saved as test data, cleared with **Clear test data**.
-- Each unhappy team answer creates a follow-up and, if
-  `SLACK_FEEDBACK_WEBHOOK_URL` is set, a Slack ping (skipped when unset).
+  preview: saved as test data, cleared with **Clear test data**. So a link
+  sent by hand must name the client — use the builder.
+- Each unhappy team answer creates a follow-up. Every real response posts to
+  `SLACK_FEEDBACK_WEBHOOK_URL` (#client-feedback, its own webhook in the same
+  Slack app, like #recruiting), at-risk ones flagged; skipped when unset.
+- Deleting a response takes its follow-ups with it. Test responses: anyone
+  with the tab. A client's real response: admins only, because it feeds the
+  per-person scorecard. The server logs every delete with who did it.
 - Ship it with `npm run portal:grant -- client-feedback` after deploying.
 
 ## Data model

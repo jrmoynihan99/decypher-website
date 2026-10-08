@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guard } from "../../_guard";
 import { sanitizeTeamPatch } from "@/lib/feedback/schema";
-import { FeedbackStoreError, deleteTestResponse, updateResponseTeam } from "@/lib/feedback/store";
+import { FeedbackStoreError, deleteResponse, updateResponseTeam } from "@/lib/feedback/store";
 
 /**
  * One response.
@@ -13,8 +13,9 @@ import { FeedbackStoreError, deleteTestResponse, updateResponseTeam } from "@/li
  *   is locked.
  *
  * DELETE → { ok }
- *   Test responses only, with their follow-ups. A real response can't be
- *   deleted from the portal.
+ *   The response and its follow-ups. Test responses: anyone with the tab.
+ *   A client's real response: admins only (403 otherwise) — it feeds the
+ *   per-person scorecard. Every delete is logged with who did it.
  */
 
 const badId = (id: string) => !id || id.length > 200 || id.includes("/");
@@ -41,7 +42,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ ok: true, response });
   } catch (e) {
     if (e instanceof FeedbackStoreError) {
-      return NextResponse.json({ ok: false, message: e.message }, { status: 400 });
+      return NextResponse.json({ ok: false, message: e.message }, { status: e.status });
     }
     console.error("[feedback] team update failed:", e);
     return NextResponse.json({ ok: false, message: "Couldn’t save" }, { status: 500 });
@@ -55,11 +56,14 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (badId(id)) return NextResponse.json({ ok: false, message: "Bad response id" }, { status: 400 });
 
   try {
-    await deleteTestResponse(id);
+    const gone = await deleteResponse(id, { allowReal: session.role === "admin" });
+    console.log(
+      `[feedback] ${session.email} deleted ${gone.is_test ? "test" : "REAL"} response ${id} (${gone.client_name || "no name"})`,
+    );
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof FeedbackStoreError) {
-      return NextResponse.json({ ok: false, message: e.message }, { status: 400 });
+      return NextResponse.json({ ok: false, message: e.message }, { status: e.status });
     }
     console.error("[feedback] delete failed:", e);
     return NextResponse.json({ ok: false, message: "Couldn’t delete" }, { status: 500 });

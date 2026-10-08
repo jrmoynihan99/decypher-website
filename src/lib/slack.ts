@@ -6,7 +6,9 @@ import { EstimateInputs, EstimateResult, fmt } from "./tax";
 /**
  * Slack notifications, via Incoming Webhooks. Each webhook is bound to one
  * channel: leads go to SLACK_WEBHOOK_URL (#leads), applications to
- * SLACK_RECRUITING_WEBHOOK_URL (#recruiting). Same app in Slack, two hooks.
+ * SLACK_RECRUITING_WEBHOOK_URL (#recruiting), won deals to
+ * SLACK_ONBOARDING_WEBHOOK_URL, client feedback to SLACK_FEEDBACK_WEBHOOK_URL
+ * (#client-feedback). Same app in Slack, one hook per channel.
  *
  * A webhook URL is a bearer credential — anyone holding it can post into that
  * channel as this app — so these are server-only and never reach the browser.
@@ -302,9 +304,12 @@ export async function postClosedDealToSlack(deal: {
 }
 
 /**
- * An at-risk client feedback response to SLACK_FEEDBACK_WEBHOOK_URL — the
- * nudge that a follow-up was just created. Real responses only; the submit
- * route doesn't call this for staff previews.
+ * A client feedback response to SLACK_FEEDBACK_WEBHOOK_URL (#client-feedback).
+ * Every real response, like #recruiting gets every application: a doorbell
+ * with the scores per team, the client's own words, and a button into the
+ * portal's Client Feedback tab, which is the record. At-risk ones lead with
+ * the flag and say who got the follow-up. The submit route never calls this
+ * for a staff preview.
  *
  * Takes display-ready strings, like postClosedDealToSlack, so this module
  * stays ignorant of the survey's field names. Nearly everything here is
@@ -312,7 +317,7 @@ export async function postClosedDealToSlack(deal: {
  * the team names ride in on the survey link's query string — so every one is
  * escaped before it reaches mrkdwn.
  */
-export async function postFeedbackAlertToSlack(alert: {
+export async function postFeedbackToSlack(fb: {
   clientName: string;
   clientId: string | null;
   /** "Onboarding", "Bookkeeping + tax"… */
@@ -320,8 +325,11 @@ export async function postFeedbackAlertToSlack(alert: {
   /** The round, e.g. "2026-Q4 · tax year 2025". */
   round: string | null;
   fromRecap: boolean;
-  /** One per at-risk team. */
-  teams: { label: string; scores: string; people: string | null; reason: string | null }[];
+  /** at_risk: any team unhappy · promoter: shown the review ask · passive: neither. */
+  segment: "at_risk" | "promoter" | "passive";
+  /** One per team the client answered for. */
+  teams: { label: string; scores: string; atRisk: boolean; people: string | null; reason: string | null }[];
+  /** Who the follow-ups went to, when there are any. */
   assignees: string[];
   due: string | null;
 }): Promise<SlackOutcome> {
@@ -334,13 +342,20 @@ export async function postFeedbackAlertToSlack(alert: {
   // Section text caps at 3,000 characters; a client's essay doesn't need to fit.
   const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
+  const lead =
+    fb.segment === "at_risk"
+      ? "⚠️ At-risk feedback"
+      : fb.segment === "promoter"
+        ? "🌟 Happy client"
+        : "💬 New feedback";
+
   const heading: Record<string, unknown> = {
     type: "section",
     text: {
       type: "mrkdwn",
       text: [
-        `*${esc(alert.survey)}*${alert.round ? ` · ${esc(alert.round)}` : ""}${alert.fromRecap ? " · from their tax recap" : ""}`,
-        alert.clientId ? `Client ID ${esc(alert.clientId)}` : null,
+        `*${esc(fb.survey)}*${fb.round ? ` · ${esc(fb.round)}` : ""}${fb.fromRecap ? " · from their tax recap" : ""}`,
+        fb.clientId ? `Client ID ${esc(fb.clientId)}` : null,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -354,43 +369,42 @@ export async function postFeedbackAlertToSlack(alert: {
     };
   }
 
+  const footer =
+    fb.segment === "at_risk"
+      ? `Follow-up created for ${esc(fb.assignees.join(", ") || "the team")}${fb.due ? `, due ${esc(fb.due)}` : ""}`
+      : fb.segment === "promoter"
+        ? "Shown the Google review ask"
+        : "No follow-up needed";
+
   const blocks: unknown[] = [
     {
       // plain_text header — rendered literally, so the name is safe unescaped.
       // Headers cap at 150 characters.
       type: "header",
-      text: { type: "plain_text", text: clip(`⚠️ At-risk feedback: ${alert.clientName}`, 150), emoji: true },
+      text: { type: "plain_text", text: clip(`${lead}: ${fb.clientName}`, 150), emoji: true },
     },
     heading,
-    ...alert.teams.map((t) => ({
+    ...fb.teams.map((t) => ({
       type: "section",
       text: {
         type: "mrkdwn",
         text: [
-          `*${esc(t.label)}* · ${esc(t.scores)}`,
+          `*${esc(t.label)}* · ${esc(t.scores)}${t.atRisk ? " · *at risk*" : ""}`,
           t.people ? `Team: ${esc(t.people)}` : null,
-          `> ${esc(clip(t.reason?.replace(/\s+/g, " ").trim() || "No reason given", 600))}`,
+          t.reason ? `> ${esc(clip(t.reason.replace(/\s+/g, " ").trim(), 600))}` : null,
         ]
           .filter(Boolean)
           .join("\n"),
       },
     })),
-    {
-      type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: `Follow-up created for ${esc(alert.assignees.join(", ") || "the team")}${alert.due ? `, due ${esc(alert.due)}` : ""}`,
-        },
-      ],
-    },
+    { type: "context", elements: [{ type: "mrkdwn", text: footer }] },
   ];
 
   return postToChannel(
     process.env.SLACK_FEEDBACK_WEBHOOK_URL,
     "SLACK_FEEDBACK_WEBHOOK_URL",
     // Fallback text is mrkdwn — escape the name here too.
-    `At-risk feedback: ${esc(alert.clientName)} — ${esc(alert.teams.map((t) => t.label).join(", "))}`,
+    `${lead.replace(/^\S+ /, "")}: ${esc(fb.clientName)} — ${esc(fb.survey)}`,
     blocks,
   );
 }
