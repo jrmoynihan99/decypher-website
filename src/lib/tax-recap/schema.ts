@@ -33,6 +33,42 @@ export type ReturnField = {
 
 export const RETURN_FIELDS = [
   { key: "w2Income", label: "W-2 wages", source: "Form 1040 line 1z", group: "income" },
+  /* ── whose W-2s, and who paid them: what the before does with wages depends on it ── */
+  {
+    key: "w2Taxpayer",
+    label: "W-2 wages, taxpayer",
+    source: "Box 1 of every W-2 for the first person named on the 1040, added up (W-2 copies in the print, or a state wage schedule such as Massachusetts Schedule INC)",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "w2Spouse",
+    label: "W-2 wages, spouse",
+    source: "Box 1 of every W-2 for the spouse, added up",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "w2TaxpayerEntity",
+    label: "W-2 wages from the business, taxpayer",
+    source: "The part of the taxpayer's W-2 wages paid by the client's own S corporation or partnership (the business on Schedule E page 2) — the officer's pay, or a salary inside the entity's line 8",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "w2SpouseEntity",
+    label: "W-2 wages from the business, spouse",
+    source: "The part of the spouse's W-2 wages paid by the client's own S corporation or partnership — a spouse on the business's payroll",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "dependentOfAnother",
+    label: "Claimed as someone's dependent",
+    source: "Form 1040 line 12a, 'Someone can claim: You as a dependent' — 1 when checked; the standard deduction is then limited to earned income plus a small amount",
+    group: "income",
+    optional: true,
+  },
   {
     key: "businessNetIncome",
     label: "Business net income",
@@ -129,6 +165,20 @@ export const RETURN_FIELDS = [
     key: "dependentCount",
     label: "Dependents",
     source: "Form 1040 dependents listed (count)",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "qualifyingChildren",
+    label: "Children for the child tax credit",
+    source: "Schedule 8812 line 4: qualifying children under 17 with a Social Security number",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "otherDependents",
+    label: "Other dependents (credit for other dependents)",
+    source: "Schedule 8812 line 6: dependents 17 and over, or without the required Social Security number",
     group: "income",
     optional: true,
   },
@@ -364,7 +414,7 @@ export const RETURN_FIELDS = [
   {
     key: "stateSourceIncome",
     label: "State-source income",
-    source: "Nonresident returns only: Schedule CA (540NR) line 10, column E",
+    source: "Nonresident returns only: Schedule CA (540NR) line 10, column E; Maryland Form 505NR line 8 (Maryland income)",
     group: "state",
     optional: true,
   },
@@ -485,7 +535,14 @@ export const RETURN_FIELDS = [
   {
     key: "stateExemptions",
     label: "State exemption amount",
-    source: "NJ-1040 line 13 (total exemption amount)",
+    source: "NJ-1040 line 13 (total exemption amount); Massachusetts Form 1 line 2g",
+    group: "state",
+    optional: true,
+  },
+  {
+    key: "stateWageDeduction",
+    label: "State deduction for Social Security / Medicare paid",
+    source: "Massachusetts Form 1 lines 11a + 11b (FICA, railroad or government retirement contributions, up to $2,000 per person)",
     group: "state",
     optional: true,
   },
@@ -590,6 +647,7 @@ export const ENTITY_FIELDS = [
   { key: "totalDeductions", label: "Total deductions", source: "Form 1120-S line 21 / Form 1065 line 22", group: "deductions" },
   { key: "ordinaryIncome", label: "Ordinary business income", source: "Form 1120-S line 22 / Form 1065 line 23", group: "income" },
   { key: "k1Ordinary", label: "Owner's ordinary income (K-1)", source: "Schedule K-1 box 1 (1120-S or 1065) for the owner on this 1040", group: "shareholder" },
+  { key: "k1Section179", label: "Owner's section 179 deduction (K-1)", source: "Schedule K-1 box 11 (1120-S) or box 12 (1065), as a positive number — Schedule E nets it off the ordinary income (column (j)); zeroed on the before with the other write-offs", group: "shareholder", optional: true },
   { key: "k1Guaranteed", label: "Owner's guaranteed payments (K-1)", source: "Schedule K-1 (Form 1065) box 4c for that partner", group: "shareholder", optional: true },
   { key: "ownershipPct", label: "Owner's ownership %", source: "Schedule K-1 item G (1120-S) or item J, profit (1065)", group: "shareholder", optional: true },
   { key: "k1Ordinary2", label: "Spouse's ordinary income (K-1)", source: "Schedule K-1 box 1 for the spouse, when both spouses are partners on the same 1040", group: "shareholder", optional: true },

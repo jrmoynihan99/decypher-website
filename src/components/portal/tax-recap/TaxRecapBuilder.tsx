@@ -18,11 +18,13 @@ import {
 import { money } from "@/lib/widget-format";
 import { computeRecap, validateAll } from "@/lib/tax-recap/compute";
 import {
+  DERIVE_VERSION,
   attributeStrategies,
   deriveBefore,
   type DeriveMeta,
+  type Mismatch,
 } from "@/lib/tax-recap/derive";
-import type { ReturnKind } from "@/lib/tax-recap/pages";
+import { entityEins, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
 import type { TableSet } from "@/lib/tax-recap/tables";
 import {
   DEFAULT_NEXT_STEPS,
@@ -235,6 +237,46 @@ const kindLabel = (k: ReturnKind | null, form: EntityForm | null = null) =>
 /** The origin never changes while the page is open; nothing to subscribe to. */
 const subscribeNever = () => () => {};
 
+/**
+ * Under a refusal: it's on record for engineering, and the redacted copies
+ * can be kept with it. Both returns go in one press; each reports its own
+ * outcome.
+ */
+function KeepLine({
+  failure,
+  onKeep,
+  hasEntity,
+}: {
+  failure: { id: string; kept: Partial<Record<Kind, "keeping" | "kept" | "failed">> };
+  onKeep: () => void;
+  hasEntity: boolean;
+}) {
+  const states = Object.values(failure.kept);
+  const started = states.length > 0;
+  const done = started && states.every((s) => s === "kept");
+  const failed = states.some((s) => s === "failed");
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-[12px] text-dusk">
+      <span>
+        Recorded for engineering (
+        <Link href="/portal/tax-recap/failures" className="text-mist underline-offset-2 hover:underline">
+          refused returns
+        </Link>
+        ): the numbers, the reader&rsquo;s notes and the reasons — no PDF.
+      </span>
+      {!started ? (
+        <button type="button" onClick={onKeep} className={btnGhost}>
+          Keep the redacted return{hasEntity ? "s" : ""} with it (14 days)
+        </button>
+      ) : (
+        <span className={failed ? "text-danger" : done ? "text-teal" : ""}>
+          {failed ? "Couldn't keep the copy — try again later" : done ? "Kept for 14 days" : "Keeping…"}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function TaxRecapBuilder({
   initial,
   tables,
@@ -247,6 +289,8 @@ export default function TaxRecapBuilder({
   const [stage, setStage] = useState<Stage>(initial ? "review" : "upload");
   /** The before drop zone, shown only once a derivation was refused and staff chose a print. */
   const [showBefore, setShowBefore] = useState(false);
+  /** Every line in the review grid, blank ones included — on by default when the engine asked for a line to be typed. */
+  const [showAllLines, setShowAllLines] = useState(false);
 
   const [clientName, setClientName] = useState(initial?.clientName ?? "");
   const [taxYear, setTaxYear] = useState(
@@ -321,6 +365,88 @@ export default function TaxRecapBuilder({
     sides.after.status === "reading" ||
     sides.entity.status === "reading";
 
+  /**
+   * A refusal is recorded the moment it happens (lib/tax-recap/failures-store):
+   * what the engine was handed and what it said, no PDF. The redacted
+   * copies that went to the reader are held here in memory so staff can
+   * choose to keep them with the record for a fortnight.
+   */
+  const [failure, setFailure] = useState<{
+    id: string;
+    kept: Partial<Record<Kind, "keeping" | "kept" | "failed">>;
+  } | null>(null);
+  const preparedRef = useRef<Partial<Record<Kind, { data: Blob; name: string; pages: number }>>>({});
+  const readInfoRef = useRef<Partial<Record<Kind, { warnings: string[]; total: number; sent: number }>>>({});
+
+  const recordFailure = async (
+    stage: "derive" | "rederive",
+    meta: DeriveMeta,
+    aNum: ReturnNumbers,
+    eNum: EntityNumbers | null,
+    result: { reasons: string[]; mismatches: Mismatch[] },
+    afterExtract: ReturnExtract | null,
+    entityExtract: EntityExtract | null,
+  ) => {
+    setFailure(null);
+    const info = readInfoRef.current;
+    try {
+      const res = await fetch("/api/portal/tax-recap/failures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage,
+          clientName: clientName.trim() || displayName(afterExtract?.taxpayerName ?? ""),
+          engineVersion: DERIVE_VERSION,
+          meta,
+          reasons: result.reasons,
+          mismatches: result.mismatches,
+          after: aNum,
+          entity: eNum,
+          extraction: { after: afterExtract, entity: entityExtract },
+          warnings: { after: info.after?.warnings ?? [], entity: info.entity?.warnings ?? [] },
+          pages: {
+            after: info.after ? { total: info.after.total, sent: info.after.sent } : null,
+            entity: info.entity ? { total: info.entity.total, sent: info.entity.sent } : null,
+          },
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string };
+      if (res.ok && data.ok && data.id) setFailure({ id: data.id, kept: {} });
+    } catch {
+      /* recording a failure must never get in the reviewer's way */
+    }
+  };
+
+  /** Keep the redacted copies that went to the reader with the recorded failure. */
+  const keepReturns = async () => {
+    if (!failure) return;
+    const id = failure.id;
+    for (const kind of ["after", "entity"] as const) {
+      const p = preparedRef.current[kind];
+      if (!p) continue;
+      setFailure((f) => (f && f.id === id ? { ...f, kept: { ...f.kept, [kind]: "keeping" } } : f));
+      try {
+        const total = Math.ceil(p.data.size / CHUNK);
+        for (let i = 0; i < total; i += PER_REQUEST) {
+          const part = new FormData();
+          part.append("kind", kind);
+          part.append("total", String(total));
+          part.append("size", String(p.data.size));
+          part.append("name", p.name);
+          part.append("pages", String(p.pages));
+          for (let j = i; j < Math.min(total, i + PER_REQUEST); j++) {
+            part.append(`chunk-${j}`, p.data.slice(j * CHUNK, (j + 1) * CHUNK), String(j));
+          }
+          const r = await fetch(`/api/portal/tax-recap/failures/${id}/file`, { method: "POST", body: part });
+          if (!r.ok) throw new Error("upload failed");
+        }
+        setFailure((f) => (f && f.id === id ? { ...f, kept: { ...f.kept, [kind]: "kept" } } : f));
+      } catch {
+        setFailure((f) => (f && f.id === id ? { ...f, kept: { ...f.kept, [kind]: "failed" } } : f));
+      }
+    }
+  };
+
   /* ─────────────────────────────── upload ─────────────────────────────── */
 
   /**
@@ -382,11 +508,17 @@ export default function TaxRecapBuilder({
   const pickBefore = (file: File | null) =>
     setSides((s) => ({ ...s, before: { ...idleSide(), file } }));
 
-  /** Read one return: prepare it here, send it, and hand back what came out. */
+  /**
+   * Read one return: prepare it here, send it, and hand back what came out.
+   * `w2Pages` (the 1040 only) is which of its pages list W-2s the client's
+   * own business issued, found by EIN in the unredacted text: the reader
+   * is told the pages, never the number.
+   */
   const readOne = async (
     kind: Kind,
     source: { file: File; analysis: PdfAnalysis | null },
     extraTokens: string[],
+    w2Pages: EntityW2Page[] | null = null,
   ) => {
     const say = (message: string) =>
       setSides((s) => ({
@@ -411,6 +543,7 @@ export default function TaxRecapBuilder({
         [kind]: prepared,
       };
     }
+    preparedRef.current[kind] = { data: prepared.data, name: source.file.name, pages: prepared.sentPages };
     setSides((s) => ({
       ...s,
       [kind]: {
@@ -442,6 +575,36 @@ export default function TaxRecapBuilder({
     // Page numbers the model cites are positions in the trimmed copy; this
     // maps them back so the reviewer sees the page of the real return.
     fd.append("pageMap", JSON.stringify(prepared.pageMap));
+
+    // Which W-2s the business issued, by page position in the copy being
+    // sent (a page the trim dropped can't be pointed at) and, on a wage
+    // schedule, by the amounts printed on the row — the one thing on a
+    // painted-over row the model can still match.
+    const w2Hints: string[] = [];
+    const w2Found: number[] = [];
+    const business = "the client's own business (the S corporation or partnership whose K-1 is on Schedule E page 2)";
+    for (const p of w2Pages ?? []) {
+      const sent = prepared.pageMap.indexOf(p.page) + 1;
+      if (!sent) continue;
+      w2Found.push(p.page);
+      if (p.copy) {
+        w2Hints.push(
+          `The W-2 on page ${sent} of this PDF was issued by ${business}: report its box 1 wages under w2TaxpayerEntity or w2SpouseEntity (whichever person it names) as well as inside w2Taxpayer / w2Spouse.`,
+        );
+        continue;
+      }
+      const list = (rows: EntityW2Page["rows"]) => rows.map((r) => `[${r.amounts.join(" · ")}]`).join(" and ");
+      const ours = p.rows.filter((r) => r.ours);
+      const theirs = p.rows.filter((r) => !r.ours);
+      w2Hints.push(
+        `On page ${sent} of this PDF, the W-2 row${ours.length > 1 ? "s" : ""} printed with the amounts ${list(ours)} ${ours.length > 1 ? "were" : "was"} issued by ${business}: report ${ours.length > 1 ? "each such row's" : "that row's"} wages under w2TaxpayerEntity or w2SpouseEntity by whose row it is (the taxpayer's has an amount in the taxpayer column, the spouse's in the spouse column), as well as inside w2Taxpayer / w2Spouse.${
+          theirs.length
+            ? ` The row${theirs.length > 1 ? "s" : ""} with the amounts ${list(theirs)} ${theirs.length > 1 ? "are" : "is"} from another employer: count ${theirs.length > 1 ? "them" : "it"} in w2Taxpayer / w2Spouse only.`
+            : ""
+        }`,
+      );
+    }
+    if (w2Hints.length) fd.append("hints", w2Hints.join("\n"));
 
     if (prepared.sentBytes > DIRECT_MAX) {
       // Still too big for one request (Vercel's body cap) — a scan can't be
@@ -493,6 +656,15 @@ export default function TaxRecapBuilder({
       throw new Error(data.message ?? `Couldn't read ${what}`);
     }
     const warnings = [...(data.warnings ?? [])];
+    if (w2Found.length) {
+      warnings.push(
+        `The business's W-2s on page${w2Found.length > 1 ? "s" : ""} ${w2Found.join(", ")} were picked out here in the browser by their EIN; the reader was told the page and the amounts on the row, never the number — check the "W-2 wages from the business" lines against the print`,
+      );
+    } else if (w2Pages) {
+      warnings.push(
+        "No W-2 from the business was found in the print (no W-2 copies, and no state wage schedule listing employers), so the reader couldn't fill the \"W-2 wages from the business\" lines; if the engine asks, type them",
+      );
+    }
     if (prepared.garbledPages.length) {
       const g = prepared.garbledPages;
       warnings.push(
@@ -510,6 +682,7 @@ export default function TaxRecapBuilder({
           : "The identity fields couldn't be painted out on this print, so the pages were sent as printed",
       );
     }
+    readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
     return {
       extract: data.extract,
       warnings,
@@ -590,7 +763,16 @@ export default function TaxRecapBuilder({
         return sides.after.extract;
       }
       try {
-        const r = await readOne("after", sorted.after, tokens);
+        // The business's EIN, from the 1040's Schedule E and the entity's
+        // own print, picks out the W-2s it issued; both texts are the
+        // unredacted ones, which never leave the browser.
+        const afterTexts = sorted.after.analysis?.texts ?? [];
+        const entityTexts = sorted.entity?.analysis?.texts ?? [];
+        const eins = entityEins(afterTexts, entityTexts);
+        // An empty list (business known, no W-2 of its found) is reported
+        // too, so the reviewer knows why the lines are blank.
+        const w2Pages = eins.length ? entityW2Pages(afterTexts, eins) : null;
+        const r = await readOne("after", sorted.after, tokens, w2Pages);
         const ex = r.extract as ReturnExtract;
         // The name is painted out before the model sees the page, so the
         // one read locally off the 1040 fills the client field.
@@ -743,6 +925,7 @@ export default function TaxRecapBuilder({
           problems: result.reasons,
         },
       }));
+      void recordFailure("derive", metaOf(a, entityForm), aNum, eNum, result, a, ent);
       return;
     }
     setSides((s) => ({
@@ -786,6 +969,8 @@ export default function TaxRecapBuilder({
     setClientName(displayName(a.taxpayerName || ""));
     setTaxYear(String(a.taxYear ?? new Date().getFullYear() - 1));
     setStateCode(a.stateCode || "");
+    // The line the engine asked for is almost always a blank, optional one.
+    setShowAllLines(true);
     setStage("review");
   };
 
@@ -808,6 +993,7 @@ export default function TaxRecapBuilder({
     const result = deriveBefore(aNum, meta, tables, eNum);
     if (!result.ok) {
       setRederiveError(result.reasons);
+      void recordFailure("rederive", meta, aNum, eNum, result, a, sides.entity.entity);
       return;
     }
     setRederiveError(null);
@@ -925,7 +1111,6 @@ export default function TaxRecapBuilder({
    * lines) stay out of the grid while blank on both sides, so a plain
    * return reads as the short list it always was.
    */
-  const [showAllLines, setShowAllLines] = useState(false);
   const visibleFields = RETURN_FIELDS.filter(
     (f) =>
       showAllLines ||
@@ -1236,6 +1421,7 @@ export default function TaxRecapBuilder({
                       Add a before print instead
                     </button>
                   ) : null}
+                  {failure ? <KeepLine failure={failure} onKeep={keepReturns} hasEntity={!!sides.entity.entity} /> : null}
                   <span className="text-[12px] text-dusk">
                     A state or year that&rsquo;s missing is added on the{" "}
                     <Link
@@ -1310,7 +1496,10 @@ export default function TaxRecapBuilder({
                   </Chip>
                 );
               })}
-              {sides.before.derived && sides.after.extract ? (
+              {sides.after.extract && !sides.before.extract ? (
+                // Derived, or refused and being typed: either way the after
+                // column is the source, and a corrected cell (or a W-2 line
+                // the engine asked for) should flow through.
                 <button
                   type="button"
                   onClick={rederive}
@@ -1405,6 +1594,29 @@ export default function TaxRecapBuilder({
                 : ""}
               . Fix anything that&rsquo;s wrong and the recap below updates.
             </p>
+            {sides.after.extract && !sides.before.extract && !sides.before.derived ? (
+              // The engine refused and staff chose to type: the before is
+              // empty until the after column answers what it asked.
+              <div className="flex flex-wrap items-center gap-3 border-b border-ember/30 bg-ember/[0.06] px-4 py-3">
+                <span className="text-[12.5px] leading-snug text-mist">
+                  The before column is empty: the engine refused (the reasons are under &ldquo;Things to look at&rdquo;). Every line is shown — type what it asked for in the{" "}
+                  <span className="text-fog">after</span> column, then recompute. Or type the before column by hand.
+                </span>
+                <button type="button" onClick={rederive} className={btnGhost}>
+                  Recompute the before column
+                </button>
+                {rederiveError ? (
+                  <ul className="w-full space-y-1 text-[12.5px] text-mist">
+                    {rederiveError.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="flex-none text-ember">·</span>
+                        <span>{r}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 items-end gap-3 border-b border-edge px-4 py-2.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
               <Mono className="hidden text-dusk sm:block">
                 {hasEntity ? "Form 1040 line" : "Line"}

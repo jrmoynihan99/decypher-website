@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { gate } from "../_gate";
 import {
   DIRECT_UPLOAD_MAX_BYTES,
+  HINTS_MAX,
   TaxRecapExtractError,
   extractEntityReturn,
   extractReturn,
@@ -22,6 +23,10 @@ import {
  *   pageTexts  optional JSON string[] — per-page text pulled by pdfjs in the
  *              browser, used to verify every extracted number against the
  *              page it was cited from
+ *   hints      optional plain text for the reader: what the browser worked
+ *              out from the unredacted print (which pages' W-2s the client's
+ *              own business issued, by EIN) that the painted-over copy can't
+ *              show
  *
  * One PDF per request rather than both at once: Vercel caps a request body
  * at ~4.5MB and even a text-based client copy can be a couple of MB. The
@@ -90,6 +95,9 @@ export async function POST(req: Request) {
     }
   }
 
+  const rawHints = form.get("hints");
+  const hints = typeof rawHints === "string" && rawHints.trim() ? rawHints.trim().slice(0, HINTS_MAX) : null;
+
   // Either the bytes came in this request, or they were staged in pieces.
   let bytes: Buffer;
   let staged: string | null = null;
@@ -126,7 +134,7 @@ export async function POST(req: Request) {
     const result =
       kind === "entity"
         ? await extractEntityReturn(bytes, pageTexts, pageMap)
-        : await extractReturn(bytes, kind, pageTexts, pageMap);
+        : await extractReturn(bytes, kind, pageTexts, pageMap, hints);
     return NextResponse.json({
       ok: true,
       kind,
