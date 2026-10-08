@@ -326,6 +326,26 @@ the tab is the tax team.
 - **Shipping.** Nothing to grant: it rides the `receipts` key staff already
   hold. A new hire gets it from the Staff page like any other tab.
 
+## Tax Strategy records
+
+Six tools behind `tax-strategy` (`TaxStrategyWorkbench.tsx`). Two keep the
+team's client records, behind `/api/portal/tax-strategy/*` and its `_gate.ts`:
+
+- **S-Corp Analyzer** → `scorpClients/{id}` (`src/lib/tax-strategy/scorp*.ts`).
+  Every saved salary gets a check six months out; a tweak drafts a note for the
+  client. Whole-record PUTs, last write wins.
+- **Accountable Plan Builder** → `accountablePlans/{id}`
+  (`src/lib/tax-strategy/accountable-plan*.ts`). The full wizard state under
+  `state`; the summary beside it is recomputed server-side on every write. The
+  reimbursement tracker is built in the browser by `src/lib/xlsx-lite.ts`
+  (no dependency). The plan in progress also autosaves to the browser as a
+  draft.
+
+Both lists stay hidden until someone asks — the tab is screen-shared on calls.
+Ported from the client team's standalone HTML tools; their maths and wording
+are kept verbatim, so diff against a new version of theirs before changing
+either.
+
 ## Inbox tabs
 
 **Leads** (`/portal/leads`) reads `leadMagnetLeads` via `listLeads()` in
@@ -335,6 +355,24 @@ Both show the same fields and qualification flags their Slack messages carry
 (#leads / #recruiting) — the portal is the copy that can't scroll away. Reads
 are capped at the newest 200 and go through the Admin SDK server-side; nothing
 opens the collections to the browser.
+
+**Client Feedback** (`/portal/client-feedback`, key `client-feedback`) is the
+backend of the public survey at `/feedback`: onboarding, bookkeeping, tax, or
+both. Links go out from TaxDome automations (templates on the Team & setup
+tab) and from every tax recap. The recap's survey choices are rewritten at
+render time by `recapSurveyHref` in `src/lib/feedback/links.ts`, which also
+maps the old Airtable form URLs, so recaps sent before the move land on the
+new survey. That file documents the URL parameters; TaxDome depends on them,
+so add, never rename.
+
+- What the client said is locked once submitted; only the `team` map (who
+  worked with them, package, segment) is editable. Flags, the review ask and
+  test-vs-real are all re-derived on the server.
+- A bare `/feedback` link (no name, client ID, recap or team) is a staff
+  preview: saved as test data, cleared with **Clear test data**.
+- Each unhappy team answer creates a follow-up and, if
+  `SLACK_FEEDBACK_WEBHOOK_URL` is set, a Slack ping (skipped when unset).
+- Ship it with `npm run portal:grant -- client-feedback` after deploying.
 
 ## Data model
 
@@ -352,3 +390,17 @@ defaults.
 `strategies`, `nextSteps`, `extraction` (`{before, after}` raw reads with
 page + verified per value), `savings` (denormalised), `createdAt/By`,
 `updatedAt/By`. Schema in `src/lib/tax-recap/schema.ts`.
+
+`scorpClients/{id}` — one S-Corp Analyzer client: calculator inputs, decided
+`salary`, `salarySetOn` / `nextCheckOn` / `lastCheckOn`, `history[]`,
+`clientNotice`, `createdAt/By`, `updatedAt/By` (epoch ms; names, not uids).
+
+`accountablePlans/{id}` — `state` (every wizard answer) plus a derived
+summary (`estimatedAnnualBenefit`, `homeOfficeAnnual`, `vehicles`, signature
+fields…), `createdAt/ByName`, `savedAt/ByName`.
+
+`feedbackResponses/{surveyId}` · `feedbackTasks/{taskId}` ·
+`feedbackConfig/settings` — survey answers (locked) plus the editable `team`
+map, `dedupe_key` (client ID or `recap:<id>`), `recap_id`, `is_test`; the
+follow-ups at-risk answers create; the dropdown lists, founder and survey
+URL. Schema in `src/lib/feedback/schema.ts`.

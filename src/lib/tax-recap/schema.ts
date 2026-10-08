@@ -11,6 +11,11 @@
  * the review grid shows staff under each number, so the two can't drift.
  */
 
+// Relative, not "@/": `npm run recap:check` loads this file under plain node
+// (scripts/lib/resolve-ts.mjs), which doesn't know the alias.
+import { feedbackHref } from "../feedback/links";
+import { PRODUCTION_ORIGIN } from "../site-url";
+
 export type FieldGroup = "income" | "federal" | "credits" | "business" | "coverage" | "state";
 
 /**
@@ -656,8 +661,9 @@ export type ReturnExtract = {
 
 /**
  * One thing the client does next. A step is a plain line, a link, or a line
- * with a couple of choices under it (the survey: one form for tax-only
- * clients, another for bookkeeping + tax).
+ * with a couple of choices under it (the survey: one for tax-only clients,
+ * another for bookkeeping + tax). Survey links, in-house or the legacy
+ * Airtable forms, are personalised at render time — see recapSurveyHref.
  */
 export type RecapNextStep = {
   label: string;
@@ -783,8 +789,16 @@ export const DEFAULT_STRATEGIES = [
 ];
 
 export const ROAST_CALL_URL = "https://calendly.com/decypher-onboarding/decypher-roast";
-export const SURVEY_TAX_ONLY_URL = "https://airtable.com/appMShCmmffsGuMbk/pagI4VCy5uheBp8l6/form";
-export const SURVEY_BOOKKEEPING_TAX_URL = "https://airtable.com/appMShCmmffsGuMbk/pagobOu1R1lH1vmwx/form";
+/**
+ * The in-house feedback survey (lib/feedback/links). Stored bare: the recap
+ * page and PDF fill in the client's name, tax year and recap id when they
+ * render it (recapSurveyHref), so a renamed client or a re-saved year never
+ * leaves a stale name baked into the link. The host only has to be absolute
+ * for sanitizeNextSteps — the rewrite matches on the path, and the page
+ * links relative to wherever it's served.
+ */
+export const SURVEY_TAX_ONLY_URL = feedbackHref({ kind: "tax", origin: PRODUCTION_ORIGIN });
+export const SURVEY_BOOKKEEPING_TAX_URL = feedbackHref({ kind: "both", origin: PRODUCTION_ORIGIN });
 
 export const DEFAULT_NEXT_STEPS: RecapNextStep[] = [
   { label: "Sign the return", href: null },

@@ -1,10 +1,13 @@
 "use client";
 
 /**
- * The Tax Strategy tab: five tools behind one permission.
+ * The Tax Strategy tab: six tools behind one permission.
  *
  * Every tool here is client-facing: the tab gets screen-shared on a call, so
  * the copy inside speaks to the creator ("your numbers"), never about them.
+ * Two also keep the team's client records (the S-Corp Analyzer's saved
+ * salaries, the Accountable Plan Builder's saved plans); those lists stay
+ * hidden until someone asks for them, for the same screen-share reason.
  *
  * The tab opens on a launcher rather than a tool, because "tax strategy" is a
  * category, not a question — you arrive knowing which question you're
@@ -25,6 +28,7 @@ import ShelterEngine from "@/components/portal/widgets/ShelterEngine";
 import ScorpAnalyzer from "@/components/portal/widgets/ScorpAnalyzer";
 import DealDesk from "@/components/portal/widgets/DealDesk";
 import MoneyAllocator from "@/components/portal/widgets/MoneyAllocator";
+import AccountablePlanBuilder from "@/components/portal/widgets/AccountablePlanBuilder";
 
 /** `icon` is an SVG path `d` on a 24×24 stroke grid, as in nav-items. */
 const TOOLS = [
@@ -50,10 +54,19 @@ const TOOLS = [
     id: "scorp",
     name: "S-Corp Analyzer",
     blurb:
-      "What an S-corp election is worth in self-employment tax — and how defensible the salary behind that number is.",
+      "What an S-corp election is worth in self-employment tax, how defensible the salary behind that number is, and the six-month salary check that keeps it that way.",
     tag: "Entity",
     icon: "M3 21h18M5 21V8l7-5 7 5v13M10 21v-5h4v5",
     Component: ScorpAnalyzer,
+  },
+  {
+    id: "accountable-plan",
+    name: "Accountable Plan Builder",
+    blurb:
+      "Home office and vehicle reimbursements through your S corp: the method that gets the strongest defensible deduction, what it's worth, and the signed policy to match.",
+    tag: "Reimbursement",
+    icon: "M9 4h6M9 4a1 1 0 00-1 1v1h8V5a1 1 0 00-1-1M8 6H6a1 1 0 00-1 1v13a1 1 0 001 1h12a1 1 0 001-1V7a1 1 0 00-1-1h-2M9 13l2 2 4-4",
+    Component: AccountablePlanBuilder,
   },
   {
     id: "allocator",
@@ -237,9 +250,8 @@ export default function TaxStrategyWorkbench({
       </div>
 
       <p className="mt-2 max-w-xl text-sm text-muted">
-        Five tools for modelling strategies against your numbers, live on the
-        call. Nothing here is saved — the figures are for the conversation, not
-        your return.
+        Six tools for modelling strategies against your numbers, live on the
+        call. The figures are for the conversation, not your return.
       </p>
 
       {renameError ? (

@@ -2,6 +2,7 @@ import { PDFDocument, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type
 import QRCode from "qrcode";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
+import { recapSurveyHref } from "@/lib/feedback/links";
 import { computeRecap, type EntityKind, type RecapSide } from "./compute";
 import type { RecapDoc } from "./schema";
 import { US_STATES } from "./tables";
@@ -531,6 +532,17 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     page.drawText("What to do now", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
     y -= 30;
     const steps = recap.nextSteps.length ? recap.nextSteps : [];
+    // Survey links go to the in-house survey with the client filled in, on
+    // the same host as the recap link this PDF prints. The personalised URL
+    // is long, so the page shows the bare survey address and the link
+    // carries the rest.
+    const origin = new URL(recapUrl).origin;
+    const target = (href: string) => {
+      const out = recapSurveyHref(href, recap, origin);
+      if (out === href) return { href, shown: href };
+      const u = new URL(out);
+      return { href: out, shown: `${u.host}${u.pathname}` };
+    };
     for (const s of steps) {
       const options = s.options ?? [];
       const h = options.length ? 44 + options.length * 22 : s.href ? 52 : 40;
@@ -538,15 +550,17 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       page.drawCircle({ x: M + 18, y: y - 21, size: 3, color: C.magenta });
       page.drawText(s.label, { x: M + 32, y: y - 25, size: 13, font: ctx.bold, color: C.fog });
       if (s.href && !options.length) {
-        page.drawText(s.href, { x: M + 32, y: y - 42, size: 9, font: ctx.reg, color: C.teal });
-        link(ctx, page, M, y - h, W, h, s.href);
+        const t = target(s.href);
+        page.drawText(t.shown, { x: M + 32, y: y - 42, size: 9, font: ctx.reg, color: C.teal });
+        link(ctx, page, M, y - h, W, h, t.href);
       }
       options.forEach((o, i) => {
         const oy = y - 46 - i * 22;
+        const t = target(o.href);
         page.drawText(`${o.label}:`, { x: M + 32, y: oy, size: 10, font: ctx.bold, color: C.mist });
         const lw = ctx.bold.widthOfTextAtSize(`${o.label}:`, 10) + 8;
-        page.drawText(o.href, { x: M + 32 + lw, y: oy, size: 9, font: ctx.reg, color: C.teal });
-        link(ctx, page, M + 32, oy - 4, W - 48, 16, o.href);
+        page.drawText(t.shown, { x: M + 32 + lw, y: oy, size: 9, font: ctx.reg, color: C.teal });
+        link(ctx, page, M + 32, oy - 4, W - 48, 16, t.href);
       });
       y -= h + 12;
     }

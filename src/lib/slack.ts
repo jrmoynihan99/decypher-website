@@ -300,3 +300,97 @@ export async function postClosedDealToSlack(deal: {
     blocks,
   );
 }
+
+/**
+ * An at-risk client feedback response to SLACK_FEEDBACK_WEBHOOK_URL — the
+ * nudge that a follow-up was just created. Real responses only; the submit
+ * route doesn't call this for staff previews.
+ *
+ * Takes display-ready strings, like postClosedDealToSlack, so this module
+ * stays ignorant of the survey's field names. Nearly everything here is
+ * stranger-controlled — the client typed their name and their reasons, and
+ * the team names ride in on the survey link's query string — so every one is
+ * escaped before it reaches mrkdwn.
+ */
+export async function postFeedbackAlertToSlack(alert: {
+  clientName: string;
+  clientId: string | null;
+  /** "Onboarding", "Bookkeeping + tax"… */
+  survey: string;
+  /** The round, e.g. "2026-Q4 · tax year 2025". */
+  round: string | null;
+  fromRecap: boolean;
+  /** One per at-risk team. */
+  teams: { label: string; scores: string; people: string | null; reason: string | null }[];
+  assignees: string[];
+  due: string | null;
+}): Promise<SlackOutcome> {
+  const base =
+    process.env.SITE_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null);
+  const portal = base ? `${base.replace(/\/$/, "")}/portal/client-feedback` : null;
+  // Section text caps at 3,000 characters; a client's essay doesn't need to fit.
+  const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+  const heading: Record<string, unknown> = {
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: [
+        `*${esc(alert.survey)}*${alert.round ? ` · ${esc(alert.round)}` : ""}${alert.fromRecap ? " · from their tax recap" : ""}`,
+        alert.clientId ? `Client ID ${esc(alert.clientId)}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  };
+  if (portal) {
+    heading.accessory = {
+      type: "button",
+      text: { type: "plain_text", text: "View in portal" },
+      url: portal,
+    };
+  }
+
+  const blocks: unknown[] = [
+    {
+      // plain_text header — rendered literally, so the name is safe unescaped.
+      // Headers cap at 150 characters.
+      type: "header",
+      text: { type: "plain_text", text: clip(`⚠️ At-risk feedback: ${alert.clientName}`, 150), emoji: true },
+    },
+    heading,
+    ...alert.teams.map((t) => ({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: [
+          `*${esc(t.label)}* · ${esc(t.scores)}`,
+          t.people ? `Team: ${esc(t.people)}` : null,
+          `> ${esc(clip(t.reason?.replace(/\s+/g, " ").trim() || "No reason given", 600))}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    })),
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `Follow-up created for ${esc(alert.assignees.join(", ") || "the team")}${alert.due ? `, due ${esc(alert.due)}` : ""}`,
+        },
+      ],
+    },
+  ];
+
+  return postToChannel(
+    process.env.SLACK_FEEDBACK_WEBHOOK_URL,
+    "SLACK_FEEDBACK_WEBHOOK_URL",
+    // Fallback text is mrkdwn — escape the name here too.
+    `At-risk feedback: ${esc(alert.clientName)} — ${esc(alert.teams.map((t) => t.label).join(", "))}`,
+    blocks,
+  );
+}
