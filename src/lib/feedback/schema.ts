@@ -611,8 +611,9 @@ export function sanitizeSubmission(raw: unknown, now = new Date()): { ok: true; 
     link[lr.field] = line(teamIn[lr.role], LIMITS.person) || null;
   }
 
-  // A preview is a link with nobody on it. A link that names a client, a recap
-  // or a team member is a real one, whatever the page claims.
+  // Test data only when the link said preview=1 (the page passes it on) and
+  // names nobody: a link that names a client, a recap or a team member is a
+  // real one, whatever the page claims. A plain link is real too.
   const is_test = r.preview === true && !client_id && !recap_id && Object.values(link).every((v) => !v);
 
   const ansIn = (r.answers && typeof r.answers === "object" ? r.answers : {}) as Record<string, unknown>;

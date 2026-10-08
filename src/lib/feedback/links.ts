@@ -17,6 +17,10 @@
  *   otl osr ost  onboarding team lead / senior / staff
  *   bkl bks      bookkeeping lead / support
  *   ts tm tsr tst  tax strategist / manager / senior / staff
+ *   preview      =1 marks staff trying the survey: answers save as test data
+ *
+ * Every parameter is optional. A plain link (`/feedback?s=bk`) is a real
+ * survey anyone can be sent: the client types their name on the first screen.
  *
  * Isomorphic: the recap page (client) and the recap PDF (server) both build
  * these.
@@ -125,8 +129,8 @@ export type FeedbackLinkContext = {
   /** Every role, "" where the link doesn't name anyone. */
   team: Record<TeamRole, string>;
   /**
-   * A bare link (no name, client, recap or team) is staff trying the survey
-   * out, not a client: its answers save as test data.
+   * `preview=1`: staff trying the survey out, not a client — its answers save
+   * as test data. Only ever explicit: a plain link is a real survey.
    */
   preview: boolean;
 };
@@ -147,14 +151,6 @@ export function readFeedbackLink(
     const legacy = LEGACY_TEAM_PARAMS[param];
     team[role] = val(param, 80) || (legacy ? val(legacy, 80) : "");
   }
-  const named = [
-    "c",
-    "name",
-    "cid",
-    "rid",
-    ...Object.values(TEAM_PARAMS),
-    ...(Object.values(LEGACY_TEAM_PARAMS) as string[]),
-  ].some((k) => val(k) !== "");
   return {
     kind: parseSurveyKind(get("s")),
     name,
@@ -165,7 +161,7 @@ export function readFeedbackLink(
     ty: val("ty", 12) || defaultTaxYear(now),
     esc: val("esc", 80),
     team,
-    preview: !named,
+    preview: val("preview") === "1",
   };
 }
 
