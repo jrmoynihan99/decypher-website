@@ -71,6 +71,13 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | State and local taxes paid / deducted | Schedule A lines 5d / 5e (Carpenter: 19,963 / 19,963) | — | — |
 | Medical expenses | Schedule A line 1 (both: 0) | — | — |
 | State deduction taken | CA 540 line 18 — the state's own itemized deductions when they beat its standard deduction (Singh: 21,973) | — | — |
+| W-2 wages, taxpayer / spouse | Box 1 of each person's W-2s added up — from the W-2 copies, or a state wage schedule that lists each W-2 with whose it is (Massachusetts Schedule INC; Brandt: 15,000 / 57,000) | — | — |
+| W-2 wages from the business, taxpayer / spouse | The part of each person's W-2s the client's own S corporation or partnership paid. The browser finds those W-2s by EIN in the unredacted text and tells the reader which pages they are on; the reader never sees the EIN (Brandt: 15,000 the officer's, 57,000 the spouse's on the payroll) | — | — |
+| Claimed as someone's dependent | 1040 line 12a checkbox → the dependent's limited standard deduction (earned income + $450, at least $1,350 in 2025) | — | — |
+| Children / other dependents | Schedule 8812 lines 4 and 6: line 19 is 2,200 per child plus 500 per other dependent, phased out together (Brandt: 2 and 1 → 4,900) | — | — |
+| State Social Security / Medicare deduction | Massachusetts Form 1 lines 11a + 11b: 7.65% of each person's wages up to $2,000 per person (Brandt: 1,148 + 2,000) | — | — |
+| Owner's section 179 deduction (K-1) | Schedule K-1 (1120-S) box 11, which Schedule E column (j) nets off box 1 (Luciano: 67,578 − 4,126 = 63,452 on Schedule 1); zeroed on the before with the write-offs | — | — |
+| State-source income, Maryland | Form 505NR line 8 (the Maryland income); the 505NR scales the 15% deduction and the exemptions by its share of federal AGI, the resident tax by the share of taxable income, and adds the 2.25% special nonresident tax (Luciano: 564 + 270 = 834) | — | — |
 
 Notes on sources:
 

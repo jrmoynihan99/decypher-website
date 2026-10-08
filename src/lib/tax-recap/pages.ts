@@ -132,6 +132,10 @@ const STRONG: RegExp[] = [
   // Schedule D: the long-term net; Schedule A (and Schedule CA's Part II): the itemized total
   /net long-term capital gain or \(loss\)/i,
   /total itemized deductions/i,
+  // Schedule 8812: the children and other dependents behind line 19
+  /number of qualifying children under age 17/i,
+  // Form W-2 copies: whose wages, and (for the browser, not the model) whose employer
+  /wages, tips, other comp/i,
 ];
 
 /**
@@ -211,6 +215,16 @@ const STATE_NONRESIDENT: RegExp[] = [
   // and the PTE elective tax credit form itself
   /exemption credits\. enter the amount from line 11/i,
   /pass-through entity elective tax credit/i,
+  // Massachusetts Schedule INC: every W-2 with whose it is and its employer;
+  // Form 1 page 1 (the exemptions block, no closing total on it)
+  /schedule 62-?wh/i,
+  /taxpayer ss withheld/i,
+  /total exemptions\. add items 2a through 2f/i,
+  // Maryland 505 page 2 (the income columns, deduction and exemptions) and
+  // the 505NR (the nonresident proration and the special nonresident tax)
+  /deduction method/i,
+  /special nonresident tax/i,
+  /maryland income factor/i,
 ];
 
 /**
@@ -225,11 +239,15 @@ const STATE_NONRESIDENT: RegExp[] = [
  * and a payment voucher as line references. Every one of those pages is
  * required, and a whole-page exclude dropped all four.
  */
+/**
+ * The W-2 copies stay in (a joint return's wages are read per person, and
+ * the browser tells the business's W-2s from an outside employer's by
+ * their EIN — see `entityW2Pages`); the K-1 and 1099 copies still go.
+ */
 const EXCLUDE: RegExp[] = [
   /payment voucher|\b1040-ES\b|\b540-ES\b/i,
   /instructions for filing/i,
   /\bdear\b/i,
-  /wage and tax statement/i,
   /schedule k-?1\b/i,
   /\bform 1099-/i,
 ];
@@ -398,6 +416,123 @@ export function selectPages(
   if (kept.length < MIN_KEPT || !foundMust) return allPages(n, "too-few-matches");
 
   return { pages: kept, fallback: null };
+}
+
+/* ─────────────────────────── whose W-2s are the business's ─────────────────────────── */
+
+/**
+ * Employer identification numbers as the prints carry them: with the dash
+ * on federal forms, as nine bare digits on state forms. A nine-digit run
+ * can also be a Social Security number the way a state form prints it, so
+ * the SSNs found on the return (dashed or spaced, on the federal forms) are
+ * taken out.
+ */
+const EIN_LIKE = /\b\d{2}-\d{7}\b|\b\d{9}\b/g;
+const SSN_ANY = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
+/** The paid preparer's own number, labelled as such on every return and never the business's. */
+const FIRM_EIN = /firm.?s EIN\s*(\d{2}-?\d{7})/gi;
+
+const digits = (s: string) => s.replace(/\D/g, "");
+
+/**
+ * A garbled label font leaves control characters and symbols between the
+ * values on a row (see `isGarbledText`); the values themselves survive.
+ * Dropped before any matching here, so a wage schedule with a broken font
+ * reads as "333137065 5589 57000 4361 W2".
+ */
+const clean = (text: string) => normalize(text.replace(/[\x00-\x1f\x7f-\x9f]/g, " "));
+
+function einsOn(text: string, exclude: Set<string>): string[] {
+  const out = new Set<string>();
+  for (const m of text.match(EIN_LIKE) ?? []) {
+    const d = digits(m);
+    if (!exclude.has(d)) out.add(d);
+  }
+  return [...out];
+}
+
+/** Numbers that are never the business's: every SSN on the return and the preparer's firm EIN. */
+function notEntity(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const raw of texts) {
+    const t = clean(raw);
+    for (const m of t.match(SSN_ANY) ?? []) out.add(digits(m));
+    for (const m of t.matchAll(FIRM_EIN)) out.add(digits(m[1]));
+  }
+  return out;
+}
+
+/**
+ * The EIN of the client's own business, as nine digits: from the 1040's
+ * Schedule E page 2 (column (d) of the partnership and S corporation rows),
+ * or failing that the number the entity's own print repeats on most of its
+ * pages (its running header; the preparer's number appears once). Empty
+ * when neither names one.
+ */
+export function entityEins(individualTexts: string[], entityTexts: string[] = []): string[] {
+  const exclude = notEntity([...individualTexts, ...entityTexts]);
+  const out = new Set<string>();
+  for (const raw of individualTexts) {
+    const t = clean(raw);
+    if (!/income or loss from partnerships and s corporations/i.test(t)) continue;
+    for (const e of einsOn(t, exclude)) out.add(e);
+  }
+  if (!out.size && entityTexts.length) {
+    const counts = new Map<string, number>();
+    for (const raw of entityTexts) {
+      for (const e of einsOn(clean(raw), exclude)) counts.set(e, (counts.get(e) ?? 0) + 1);
+    }
+    const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (best && best[1] >= 2) out.add(best[0]);
+  }
+  return [...out];
+}
+
+/** A W-2 copy in the print: box 1's own label, or the form's title. */
+const W2_COPY = /wage and tax statement|wages, tips, other comp/i;
+/**
+ * One row of a state wage schedule (Massachusetts Schedule INC): the
+ * employer's number, a few amounts, and "W2" in the source column — all set
+ * in the data font, so the row survives a garbled label font.
+ */
+const W2_ROW = /\b(\d{2}-?\d{7})\b((?:\s+-?[\d,]+\.?){1,6})\s+W-?2\b/g;
+
+/** W-2s the business issued, on one page: a W-2 copy, or the rows of a wage schedule. */
+export type EntityW2Page = {
+  /** 1-indexed position in `pageTexts`. */
+  page: number;
+  /** True for a W-2 copy (one employer); false for a schedule listing several. */
+  copy: boolean;
+  /** Each W-2 row as printed — its amounts, and whether the business issued it. Empty for a copy. */
+  rows: { amounts: string[]; ours: boolean }[];
+};
+
+/**
+ * Which pages carry W-2s the business itself issued, and which rows on
+ * them. A W-2 copy counts when the employer number on it is the
+ * business's; a wage schedule's rows are judged one by one, so the hint
+ * can quote the amounts of the business's rows and the model, which sees
+ * only painted-over employer numbers, can still tell them apart.
+ */
+export function entityW2Pages(pageTexts: string[], eins: string[]): EntityW2Page[] {
+  const out: EntityW2Page[] = [];
+  if (!eins.length) return out;
+  const exclude = notEntity(pageTexts);
+  pageTexts.forEach((raw, i) => {
+    const t = clean(raw);
+    const rows = [...t.matchAll(W2_ROW)].map((m) => ({
+      amounts: m[2].trim().split(/\s+/).map((a) => a.replace(/\.$/, "")),
+      ours: eins.includes(digits(m[1])),
+    }));
+    if (rows.length) {
+      if (rows.some((r) => r.ours)) out.push({ page: i + 1, copy: false, rows });
+      return;
+    }
+    if (!W2_COPY.test(t)) return;
+    const found = einsOn(t, exclude);
+    if (found.length && found.every((e) => eins.includes(e))) out.push({ page: i + 1, copy: true, rows: [] });
+  });
+  return out;
 }
 
 /** How much of the document a selection drops, for the log line and the UI. */

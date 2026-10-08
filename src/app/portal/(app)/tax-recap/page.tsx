@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/firebase/session";
 import { getRecap, listRecaps } from "@/lib/tax-recap/store";
 import { loadTables } from "@/lib/tax-recap/tables-store";
+import { listFailures } from "@/lib/tax-recap/failures-store";
 import { Eyebrow } from "@/components/estimator/fields";
 import TaxRecapBuilder from "@/components/portal/tax-recap/TaxRecapBuilder";
 import RecapList from "@/components/portal/tax-recap/RecapList";
@@ -16,11 +17,13 @@ export default async function TaxRecapPage({
   // "receipts" is the Tax Recap tab's key — see lib/permissions for why.
   await requirePermission("receipts");
   const { edit } = await searchParams;
-  const [recaps, editing, tables] = await Promise.all([
+  const [recaps, editing, tables, failures] = await Promise.all([
     listRecaps(),
     edit && !edit.includes("/") ? getRecap(edit) : Promise.resolve(null),
     loadTables(),
+    listFailures(50).catch(() => []),
   ]);
+  const openFailures = failures.filter((f) => f.status === "open").length;
 
   return (
     <>
@@ -32,8 +35,17 @@ export default async function TaxRecapPage({
           Live
         </span>
         <Link
-          href="/portal/tax-recap/tables"
+          href="/portal/tax-recap/failures"
           className="ml-auto inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-mist"
+        >
+          <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M12 9v4M12 17h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+          </svg>
+          Refused returns{openFailures ? ` · ${openFailures}` : ""}
+        </Link>
+        <Link
+          href="/portal/tax-recap/tables"
+          className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-mist"
         >
           <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
             <path d="M3 5h18v14H3zM3 10h18M3 15h18M9 5v14" />

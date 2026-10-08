@@ -374,8 +374,9 @@ export function validateEntity(e: EntityNumbers, r: ReturnNumbers): Warning[] {
     add(`1120-S ordinary income ${fmt(e.ordinaryIncome)} ≠ total income − total deductions ${fmt(e.totalIncome - e.totalDeductions)}`);
   }
   // Every K-1 on this 1040 added up — ordinary income and, for a partner,
-  // the guaranteed payments — is what Schedule E reports.
-  const k1Total = n(e.k1Ordinary) + n(e.k1Ordinary2) + n(e.k1Guaranteed) + n(e.k1Guaranteed2);
+  // the guaranteed payments, less the section 179 deduction passed through
+  // (Schedule E column (j)) — is what Schedule E reports.
+  const k1Total = n(e.k1Ordinary) + n(e.k1Ordinary2) + n(e.k1Guaranteed) + n(e.k1Guaranteed2) - n(e.k1Section179);
   const reported = has(r.partnershipIncome) ? r.partnershipIncome : has(r.scorpIncome) ? r.scorpIncome : null;
   if (has(e.k1Ordinary) && reported !== null && off(k1Total, reported)) {
     add(`The K-1s' income ${fmt(k1Total)} isn't what the 1040 reports on Schedule E (${fmt(reported)})`);
@@ -383,8 +384,17 @@ export function validateEntity(e: EntityNumbers, r: ReturnNumbers): Warning[] {
   if (has(e.guaranteedPayments) && (has(e.k1Guaranteed) || has(e.k1Guaranteed2)) && off(e.guaranteedPayments, n(e.k1Guaranteed) + n(e.k1Guaranteed2))) {
     add(`Guaranteed payments on the 1065 (${fmt(e.guaranteedPayments)}) aren't the K-1s' box 4c added up (${fmt(n(e.k1Guaranteed) + n(e.k1Guaranteed2))}) — a partner who isn't on this 1040`);
   }
-  if (has(e.officerComp) && has(r.w2Income) && r.w2Income > e.officerComp + TOL) {
-    add(`W-2 wages on the 1040 (${fmt(r.w2Income)}) exceed the officer compensation on the 1120-S (${fmt(e.officerComp)})`);
+  // Wages beyond the officer's are fine once the W-2 lines say who paid
+  // them (a spouse on the payroll, an outside employer); unplaced, they're
+  // worth a look.
+  const entityW2 = n(r.w2TaxpayerEntity) + n(r.w2SpouseEntity);
+  if (has(e.officerComp) && has(r.w2Income) && r.w2Income > e.officerComp + TOL && entityW2 <= 0) {
+    add(
+      `W-2 wages on the 1040 (${fmt(r.w2Income)}) exceed the officer compensation on the 1120-S (${fmt(e.officerComp)}) and the W-2 lines don't say who paid the rest`,
+    );
+  }
+  if (has(r.w2Taxpayer) && has(r.w2Spouse) && has(r.w2Income) && off(r.w2Taxpayer + r.w2Spouse, r.w2Income)) {
+    add(`The taxpayer's and spouse's W-2 wages (${fmt(r.w2Taxpayer + r.w2Spouse)}) don't add up to line 1z (${fmt(r.w2Income)})`);
   }
   if (has(e.stateTotalTax) && has(e.stateTax) && n(e.pteTax) > 0 && !off(e.stateTotalTax, e.stateTax)) {
     add(

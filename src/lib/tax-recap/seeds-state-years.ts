@@ -69,6 +69,7 @@ export const CALIFORNIA_YEARS: Record<number, Partial<StateCard>> = {
       [[20839, 0.01], [49371, 0.02], [63644, 0.04], [78765, 0.06], [93037, 0.08], [474824, 0.093], [569790, 0.103], [949649, 0.113], [null, 0.123]],
     ),
     deduction: standard(5363, 10726, 10726),
+    dependentFiler: { standardDeduction: { minimum: 1250, earnedPlus: 400 }, noPersonalExemption: true },
     exemption: exemption("credit", 144, 446, ONE, {
       threshold: by(237035, 474075, 355558, 237035, 474075),
       step: by(2500, 2500, 2500, 1250, 2500),
@@ -84,6 +85,8 @@ export const CALIFORNIA_YEARS: Record<number, Partial<StateCard>> = {
       [[21527, 0.01], [51000, 0.02], [65744, 0.04], [81364, 0.06], [96107, 0.08], [490493, 0.093], [588593, 0.103], [980987, 0.113], [null, 0.123]],
     ),
     deduction: standard(5540, 11080, 11080),
+    // Checked on Chiu's 2024 540NR: $1,615 (earned income $1,165 + $450), no personal credit.
+    dependentFiler: { standardDeduction: { minimum: 1300, earnedPlus: 450 }, noPersonalExemption: true },
     exemption: exemption("credit", 149, 461, ONE, {
       threshold: by(244857, 489719, 367291, 244857, 489719),
       step: by(2500, 2500, 2500, 1250, 2500),

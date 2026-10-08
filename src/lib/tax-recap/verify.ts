@@ -71,7 +71,41 @@ const SUM_FIELDS = new Set<string>([
   "rentalLosses",
   "distributions",
   "stateTax",
+  "w2Taxpayer",
+  "w2Spouse",
+  "w2TaxpayerEntity",
+  "w2SpouseEntity",
+  "stateWageDeduction",
+  "stateBusinessIncome",
+  // two Schedules C added up; a state's due plus its penalty
+  "grossReceipts",
+  "totalExpenses",
+  "stateTotalDue",
 ]);
+
+/**
+ * Fields that are a whole column added up — Form 8962's twelve monthly
+ * premiums (lines 12–23) when the annual line 11 isn't used. Checked as a
+ * subset sum of the amounts printed on the cited page and its neighbours,
+ * each amount usable as often as it is printed (eight months at $1,866 and
+ * two at $1,313 is one such sum).
+ */
+const COLUMN_SUM_FIELDS = new Set<string>(["ptcPremiums", "ptcSlcsp"]);
+
+/** Is `value` some of the printed amounts added together? Bounded: the sums tracked never exceed the target. */
+function subsetSumOn(pageTexts: (string | undefined)[], value: number): boolean {
+  const target = Math.abs(Math.round(value));
+  if (target <= 0) return false;
+  const amounts = pageTexts.flatMap(amountsOn).filter((a) => a <= target);
+  if (amounts.length > 400) return false;
+  const reachable = new Uint8Array(target + 1);
+  reachable[0] = 1;
+  for (const a of amounts) {
+    for (let s = target; s >= a; s--) if (reachable[s - a]) reachable[s] = 1;
+    if (reachable[target]) return true;
+  }
+  return false;
+}
 
 /**
  * Stamp `verified` on each value. Off-by-one page citations are common
@@ -120,6 +154,12 @@ export function verifyFields<K extends string>(
       SUM_FIELDS.has(key) &&
       candidates.length &&
       sumOfTwoOn(candidates.map((p) => pageTexts[p - 1]), value)
+    ) {
+      out[key] = { value, page: cited, verified: true };
+    } else if (
+      COLUMN_SUM_FIELDS.has(key) &&
+      candidates.length &&
+      subsetSumOn(candidates.map((p) => pageTexts[p - 1]), value)
     ) {
       out[key] = { value, page: cited, verified: true };
     } else {

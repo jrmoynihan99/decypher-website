@@ -482,10 +482,355 @@ const PAIRINGS = [
   },
 ];
 
+/* ── Brandt / ArcArt Furniture LLC 2025, married filing jointly, MA Form 1 + MA 355S ──
+   AFTER only ("Adam & Abigail Brandt - 2025 1040 INDIVIDUAL TAX RETURN_FINAL" and
+   "ArcArt Furniture LLC - 2025 S-CORP 1120S TAX RETURN_FINAL"). No before print.
+   The return that broke the engine four ways at once (2026-10-08):
+    - two W-2s, both from the corporation: the owner's $15,000 of officer pay
+      and the spouse's $57,000 of salary inside line 8 — the engine assumed
+      the only W-2 was the officer's;
+    - line 19 is $4,900: two children at $2,200 and one other dependent at
+      $500 (the daughter is 19), which no count of children alone gives;
+    - an S corporation under the QBI threshold files Form 8995, whose QBI is
+      the K-1 itself ($180,200 → $36,040);
+    - Massachusetts deducts 7.65% of each person's wages up to $2,000
+      (lines 11a/11b: $1,148 and $2,000), so whose W-2 is whose matters.
+   Also: Form 8962 with monthly rows (10 months), a $2 NIIT on $61 of
+   interest, two pass-through Schedule Cs the reader leaves out, and a
+   first-year 355S paying only the $456 minimum. The W-2 lines below are
+   what the reader reports once the browser points it at Schedule INC. */
+const BRANDT = {
+  meta: { taxYear: 2025, filingStatus: "Married filing jointly", stateCode: "MA", stateForm: "1", entityForm: "1120-S" },
+  after: numbers({
+    w2Income: 72000,
+    w2Taxpayer: 15000,
+    w2Spouse: 57000,
+    w2TaxpayerEntity: 15000,
+    w2SpouseEntity: 57000,
+    scorpIncome: 180200,
+    totalIncome: 252261,
+    agi: 252261,
+    dependentCount: 3,
+    qualifyingChildren: 2,
+    otherDependents: 1,
+    qbiDeduction: 36040,
+    taxableIncome: 184721,
+    incomeTax: 30467,
+    additionalTaxes: 9586,
+    childTaxCredit: 4900,
+    niit: 2,
+    otherTaxes: 2,
+    federalTotalTax: 35155,
+    federalPayments: 17294,
+    federalWithholding: 17294,
+    federalAmountOwed: 18529,
+    federalPenalty: 668,
+    ptcFamilySize: 5,
+    ptcPovertyLine: 36580,
+    ptcMonths: 10,
+    ptcPremiums: 17554,
+    ptcSlcsp: 15804,
+    ptcAdvance: 9586,
+    ptcAllowed: 0,
+    ptcRepayment: 9586,
+    stateTotalTax: 11866,
+    statePayments: 6699, // 6,259 withheld + the 440 refundable Child and Family credit
+    stateWithholding: 6259,
+    stateAmountOwed: 5167,
+    statePenalty: 104,
+    stateTotalDue: 5271,
+    stateTaxOnIncome: 11866,
+    stateExemptions: 11800,
+    stateWageDeduction: 3148,
+  }),
+  entity: entityNumbers({
+    grossReceipts: 767198,
+    cogs: 274422,
+    totalIncome: 492776,
+    officerComp: 15000,
+    wages: 145391,
+    taxesLicenses: 18199,
+    otherDeductions: 101564,
+    totalDeductions: 312576,
+    ordinaryIncome: 180200,
+    k1Ordinary: 180200,
+    ownershipPct: 100,
+    distributions: 167057,
+    stateNetIncome: 0, // 355S line 5: no income measure under $6M of receipts
+    stateTax: 456,
+    stateTotalTax: 456,
+    statePayments: 456,
+    stateAmountDue: 0,
+  }),
+};
+
+/* ── Chiu 2024, single, Texas resident, CA 540NR — someone else's dependent ──
+   AFTER only ("Prosper Chiu 2024 Tax Returns", 46 pages, every FTB page and
+   the Schedule C with a garbled text layer). Line 12a is checked, so the
+   standard deduction is the dependent's: earned income $843 + $322 (no SE
+   deduction under the $400 floor) + $450 = $1,615 on both the 1040 and the
+   540NR, with no California personal exemption credit. Form 8995 gives $65
+   ($64 on the $322 plus $1 on $5 of REIT dividends the engine doesn't read;
+   inside the $2 tolerance). Qualified dividends $634 and a $13,679 long-term
+   gain go through the worksheet; the $40,290 of gains is otherwise ordinary
+   income here. The after reproduces: tax $3,041, California $1,080 on all
+   $43,288 of income as California-source.
+
+   The before, by hand: Schedule C $20,013 of receipts, SE earnings 18,482 →
+   2,292 + 536 = 2,828, half 1,414; AGI 61,565; earned income 19,442 + 450
+   is over the regular $14,600, which applies; QBI 20% × 18,599 = 3,720;
+   taxable 43,245, of which 14,313 preferential inside the 0% bracket:
+   tax on the 28,932 ordinary slice from the $50 row at 28,925 = 3,239.
+   Federal total 3,239 + 2,828 = 6,067.                                      */
+const CHIU_2024 = {
+  meta: { taxYear: 2024, filingStatus: "Single", stateCode: "CA", stateForm: "540NR" },
+  after: numbers({
+    w2Income: 843,
+    w2Taxpayer: 843,
+    qualifiedDividends: 634,
+    capitalGain: 40290,
+    capitalGainLongTerm: 13679,
+    businessNetIncome: 322,
+    totalIncome: 43288,
+    agi: 43288,
+    dependentOfAnother: 1,
+    qbiDeduction: 65,
+    taxableIncome: 41608,
+    incomeTax: 3041,
+    otherTaxes: 0,
+    federalTotalTax: 3041,
+    federalAmountOwed: 3067,
+    federalPenalty: 26,
+    grossReceipts: 20013,
+    totalExpenses: 19691,
+    homeOffice: 0,
+    stateTotalTax: 1080,
+    stateAmountOwed: 1080,
+    stateTotalDue: 1080,
+    stateSourceIncome: 43288,
+    stateTaxOnIncome: 1080,
+    stateExemptionCredits: 0,
+    stateDeduction: 1615,
+  }),
+};
+
+/* ── Luciano / Luciano Media LLC 2024, single, Texas resident, Maryland Form 505 (nonresident) ──
+   AFTER only ("Nicholas Luciano - 2024 1040 INDIVIDUAL TAX RETURN_FINAL" and
+   "Luciano Media, LLC - 2024 S-CORP 1120S TAX RETURN_FINAL"). Three things
+   the engine didn't model (2026-10-08):
+    - a $12,384 W-2 from another employer beside the $31,500 of officer pay,
+      with no W-2 copies in the print — the 505NR shows it is the Maryland-
+      source wages; the reviewer types the officer's $31,500;
+    - the K-1's $4,126 section 179 deduction (box 11), which Schedule E
+      column (j) nets off the $67,578 to the $63,452 Schedule 1 carries;
+    - Maryland's nonresident 505NR: deduction 15% of the Maryland income
+      ($1,858) and the $1,600 exemption each × 0.115363, taxable 11,985,
+      the $4,850 resident tax × 0.116305 = $564, plus 2.25% = $270: $834.
+   Before, by hand: K-1 437,030, AGI 449,426 with the outside W-2, taxable
+   434,826 past the QBI range (no deduction), tax 1,160 + 4,266 + 11,742.5
+   + 21,942 + 16,568 + 35% × 191,101 = 122,564. Maryland: line 1 446,726
+   (exemption phased to 0), tax 24,072; factor 0.027555 → deduction 51,
+   taxable 12,333; share 0.027607 → 665, special 277: 942.                 */
+const LUCIANO = {
+  meta: { taxYear: 2024, filingStatus: "Single", stateCode: "MD", stateForm: "505", entityForm: "1120-S" },
+  after: numbers({
+    w2Income: 43884,
+    w2Taxpayer: 43884,
+    w2TaxpayerEntity: 31500,
+    scorpIncome: 63452,
+    totalIncome: 107348,
+    agi: 107348,
+    qbiDeduction: 12690,
+    taxableIncome: 80058,
+    incomeTax: 12670,
+    federalTotalTax: 12670,
+    federalPayments: 2457,
+    federalWithholding: 2457,
+    federalAmountOwed: 10253,
+    federalPenalty: 40,
+    stateTotalTax: 834,
+    statePayments: 789,
+    stateWithholding: 789,
+    stateAmountOwed: 45,
+    stateTotalDue: 45,
+    stateSourceIncome: 12384,
+    stateTaxOnIncome: 564,
+    stateExemptions: 1600,
+    stateDeduction: 2700,
+  }),
+  entity: entityNumbers({
+    grossReceipts: 437030,
+    cogs: 63211,
+    totalIncome: 373819,
+    officerComp: 31500,
+    wages: 4500,
+    taxesLicenses: 3201,
+    otherDeductions: 247935,
+    totalDeductions: 306241,
+    ordinaryIncome: 67578,
+    k1Ordinary: 67578,
+    k1Section179: 4126,
+    ownershipPct: 100,
+    distributions: 66589,
+  }),
+};
+
 /* ── Returns the engine must refuse, and the word its reason has to carry ── */
 const inha = PAIRINGS[0];
 const singh = PAIRINGS[4];
 const REFUSALS = [
+  {
+    name: "Luciano 2024 (derives: outside W-2 kept, K-1 section 179 zeroed, Maryland 505NR reproduced)",
+    meta: LUCIANO.meta,
+    after: LUCIANO.after,
+    entity: LUCIANO.entity,
+    expect: null,
+    federal: 122564,
+    state: 942,
+    assert: (r) =>
+      r.before.w2Income === 12384 &&
+      r.before.scorpIncome === 437030 &&
+      r.before.taxableIncome === 434826 &&
+      r.before.qbiDeduction === null &&
+      r.before.stateTaxOnIncome === 665 &&
+      r.before.medicareWages === null &&
+      r.entityBefore?.k1Section179 === null &&
+      r.entityBefore?.k1Ordinary === 437030 &&
+      r.derived.notes.some((s) => /\$4,126 section 179/.test(s)),
+  },
+  {
+    // The reader took Schedule E column (k) for the S corporation income
+    // (gross of the section 179): reconciled by the K-1, same before.
+    name: "Luciano with Schedule E read gross of the section 179 (derives, reconciled)",
+    meta: LUCIANO.meta,
+    after: { ...LUCIANO.after, scorpIncome: 67578 },
+    entity: LUCIANO.entity,
+    expect: null,
+    federal: 122564,
+    assert: (r) => r.derived.notes.some((s) => /section 179 deduction \(column \(j\)\) nets it/.test(s)),
+  },
+  {
+    // The officer's W-2 not placed: the $12,384 beyond the officer's pay
+    // can't be told from a spouse on the payroll, and the refusal says so.
+    name: "Luciano without the officer's W-2 line typed (refuses, naming the lines)",
+    meta: LUCIANO.meta,
+    after: { ...LUCIANO.after, w2TaxpayerEntity: null },
+    entity: LUCIANO.entity,
+    expect: /\$12,384 more than the officer's pay/,
+  },
+  {
+    // Maryland's 505NR needs the Maryland income; without it, says so.
+    name: "Luciano without the Maryland income read (refuses, naming 505NR line 8)",
+    meta: LUCIANO.meta,
+    after: { ...LUCIANO.after, stateSourceIncome: null },
+    entity: LUCIANO.entity,
+    expect: /Form 505NR line 8/,
+  },
+  {
+    name: "Chiu 2024 as someone's dependent (derives: the dependent's deduction on both returns, no CA personal credit)",
+    meta: CHIU_2024.meta,
+    after: CHIU_2024.after,
+    expect: null,
+    federal: 6067,
+    assert: (r) =>
+      r.before.seTax === 2828 &&
+      r.before.agi === 61565 &&
+      r.before.qbiDeduction === 3720 &&
+      r.before.taxableIncome === 43245 &&
+      r.before.incomeTax === 3239 &&
+      r.before.stateExemptionCredits === 0 &&
+      r.derived.notes.some((s) => /Someone else claims the filer/.test(s)),
+  },
+  {
+    // The same return with line 12a not read: the $1,615 deduction can't be
+    // explained, and the refusal says what to read.
+    name: "Chiu 2024 with line 12a unread (refuses, naming it)",
+    meta: CHIU_2024.meta,
+    after: { ...CHIU_2024.after, dependentOfAnother: null },
+    expect: /a filer someone else claims \(line 12a, not read\)/,
+  },
+  {
+    // Without the W-2 lines the $57,000 beyond the officer's pay can't be
+    // placed, and the refusal has to say which lines to type.
+    name: "Brandt without the W-2 lines read (refuses, naming the lines to type)",
+    meta: BRANDT.meta,
+    after: { ...BRANDT.after, w2Taxpayer: null, w2Spouse: null, w2TaxpayerEntity: null, w2SpouseEntity: null },
+    entity: BRANDT.entity,
+    expect: /W-2 wages from the business.*recompute the before column/,
+  },
+  {
+    // Whose they are but not who paid them: the same answer.
+    name: "Brandt with whose W-2s read but not who paid them (refuses)",
+    meta: BRANDT.meta,
+    after: { ...BRANDT.after, w2TaxpayerEntity: null, w2SpouseEntity: null },
+    entity: BRANDT.entity,
+    expect: /\$15,000 the taxpayer's, \$57,000 the spouse's/,
+  },
+  {
+    // The spouse's W-2 from another employer: it stays on the before, with
+    // its own Massachusetts FICA deduction, and the officer's leaves.
+    name: "Brandt with the spouse's W-2 from another employer (derives, W-2 kept)",
+    meta: BRANDT.meta,
+    after: { ...BRANDT.after, w2SpouseEntity: null },
+    entity: BRANDT.entity,
+    expect: null,
+    assert: (r) =>
+      r.before.w2Income === 57000 &&
+      r.before.w2Spouse === 57000 &&
+      r.before.w2Taxpayer === null &&
+      r.before.stateWageDeduction === 2000 &&
+      r.before.federalWithholding === 13691 && // 17,294 less the officer's 3,603 (15,000 / 72,000 of it): the spouse's share stays
+      r.derived.notes.some((s) => /from another employer stay/.test(s)),
+  },
+  {
+    // Schedule 8812's counts misread (three children): they don't give
+    // $4,900, so the mix is inferred instead — two children, one other.
+    name: "Brandt with the dependent counts misread (derives, inferred)",
+    meta: BRANDT.meta,
+    after: { ...BRANDT.after, qualifyingChildren: 3, otherDependents: null },
+    entity: BRANDT.entity,
+    expect: null,
+    federal: 206198,
+  },
+  {
+    // The Massachusetts FICA line not read: the engine figures it per person
+    // from the W-2 lines and the return still reproduces.
+    name: "Brandt without lines 11a/11b read (derives, unchanged)",
+    meta: BRANDT.meta,
+    after: { ...BRANDT.after, stateWageDeduction: null },
+    entity: BRANDT.entity,
+    expect: null,
+    federal: 206198,
+    state: 37773,
+  },
+  {
+    // Someone can claim the filer: the dependent's deduction is earned income
+    // + $450, which on Inha's $72,396 is capped at the regular $15,750 — the
+    // federal side reproduces and the before doesn't move (Texas, so no
+    // state side to disagree).
+    name: "Inha as someone's dependent, no state (derives, unchanged: the limited deduction is capped at the regular one)",
+    meta: { ...inha.meta, stateCode: "TX", stateForm: null },
+    after: { ...inha.after, dependentOfAnother: 1, stateTotalTax: null, statePayments: null, stateAmountOwed: null, stateTotalDue: null },
+    expect: null,
+    federal: 41287,
+  },
+  {
+    // The same on her real California return, which claims the $153
+    // personal credit a dependent can't: the card says so, and refuses.
+    name: "Inha as someone's dependent on her California return (refuses: a dependent gets no personal credit)",
+    meta: inha.meta,
+    after: { ...inha.after, dependentOfAnother: 1 },
+    expect: /California/,
+  },
+  {
+    // Earned income small enough for the limit to bite: Inha with $1,000
+    // of profit would have a $1,350 deduction, so her printed $15,750 one
+    // can't be the dependent's — the refusal says so.
+    name: "a filer whose deduction isn't the dependent's limited one (refuses, naming it)",
+    meta: inha.meta,
+    after: { ...inha.after, dependentOfAnother: 1, businessNetIncome: 1000, grossReceipts: 1000, totalExpenses: 0, homeOffice: 0, totalIncome: 1000, agi: 929, seTax: 141, taxableIncome: 0, incomeTax: 0, qbiDeduction: 0, federalTotalTax: 141 },
+    expect: /dependent's standard deduction/,
+  },
   {
     name: "a partner's return without the 1065",
     meta: singh.meta,
@@ -1085,6 +1430,118 @@ for (const p of PAIRINGS) {
   }
 }
 
+/* ── Brandt 2025 (see BRANDT above): the whole return, by hand ─────────────
+   Before: the K-1 is the $767,198 of receipts; both W-2s go (the officer's
+   with the salary, the spouse's with the write-offs); AGI 767,259 with the
+   $61 of interest; standard deduction 31,500; taxable before QBI 735,759 is
+   past the phase-in range and the corporation pays no wages on the before,
+   so no QBI deduction; tax 2,385 + 8,772 + 24,145 + 45,096 + 34,064 + 35% ×
+   234,709 = 196,610; the $9,586 advance is still repaid in full (401%
+   either way); the child tax credit has phased out; $2 of NIIT on the
+   interest: 206,198. Massachusetts: 767,259 − 11,800 of exemptions and no
+   FICA deduction (no wages) at 5% = 37,773; the corporation's $456. Both
+   W-2s' withholding leaves; the $440 refundable credit stays as a payment.
+   Penalties carried: 772. Before 245,199, after 48,249.                    */
+{
+  console.log("\nBrandt 2025 (married filing jointly, MA Form 1, S corporation on MA 355S, spouse on the payroll)");
+  const { meta, after, entity } = BRANDT;
+  const want = {
+    w2Income: null,
+    w2Taxpayer: null,
+    w2Spouse: null,
+    w2TaxpayerEntity: null,
+    w2SpouseEntity: null,
+    scorpIncome: 767198,
+    totalIncome: 767259,
+    agi: 767259,
+    qualifyingChildren: 2,
+    otherDependents: 1,
+    qbiDeduction: null,
+    taxableIncome: 735759,
+    incomeTax: 196610,
+    additionalTaxes: 9586,
+    childTaxCredit: null,
+    niit: 2,
+    otherTaxes: 2,
+    federalTotalTax: 206198,
+    federalPayments: 0,
+    federalWithholding: null,
+    federalAmountOwed: 206866,
+    ptcAllowed: 0,
+    ptcRepayment: 9586,
+    stateExemptions: 11800,
+    stateWageDeduction: null,
+    stateTaxOnIncome: 37773,
+    stateTotalTax: 37773,
+    stateWithholding: null,
+    statePayments: 440,
+    stateAmountOwed: 37333,
+    stateTotalDue: 37437,
+  };
+  const wantEntity = {
+    grossReceipts: 767198,
+    cogs: null,
+    totalIncome: 767198,
+    officerComp: null,
+    wages: null,
+    totalDeductions: 0,
+    ordinaryIncome: 767198,
+    k1Ordinary: 767198,
+    stateTax: 456,
+    stateTotalTax: 456,
+    stateAmountDue: 0,
+  };
+  const r = deriveBefore(after, meta, undefined, entity);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    console.log("  " + "line".padEnd(26) + "derived".padStart(10) + "by hand".padStart(11));
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(10) + money(w).padStart(11) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    console.log("  1120-S before:");
+    for (const [key, w] of Object.entries(wantEntity)) {
+      const got = r.entityBefore?.[key] ?? null;
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(10) + money(w).padStart(11) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).savings;
+    const ok = savings === 196950;
+    if (!ok) failed++;
+    console.log(`  savings ${money(savings)} vs by hand $196,950 ${ok ? "ok" : "MISMATCH"}`);
+    console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
+    const analysis = attributeStrategies(after, meta, undefined, entity);
+    // The headline: the before without the three dependents, which on the
+    // before are worth only their $150 of Massachusetts exemptions (the
+    // federal credit has phased out).
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    const sumOk = sum === headline && headline === 197100;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}, by hand $197,100):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}  ${a.note}`);
+    const kids = analysis?.kids;
+    const kidsOk = kids?.after === 5050 && kids?.before === 150 && kids?.inBefore?.federal === 0 && kids?.inBefore?.state === 150;
+    if (!kidsOk) failed++;
+    console.log(`  kids: after ${money(kids?.after)}, before ${money(kids?.before)} (${kids?.note}) vs by hand $5,050 / $150 ${kidsOk ? "ok" : "MISMATCH"}`);
+    // Schedule SE on the $180,200 K-1: 92.35% = 166,415; 12.4% + 2.9% = 25,461.
+    const sc = analysis?.scorpSavings?.amount ?? null;
+    const scOk = sc === 25461;
+    if (!scOk) failed++;
+    console.log(`  S-corp SE tax avoided ${money(sc)} vs by hand $25,461 ${scOk ? "ok" : "MISMATCH"}`);
+    // The split must carry the spouse's wages note on the write-offs step.
+    const wo = analysis?.attribution.find((a) => /write-offs/i.test(a.label));
+    const noteOk = !!wo && /\$57,000 of wages paid to the spouse/.test(wo.note);
+    if (!noteOk) failed++;
+    console.log(`  ${noteOk ? "ok" : "WRONG"}  write-offs step names the spouse's wages`);
+  }
+}
+
 /* ── The S corporation cards on their own: the corporation's tax and elective tax ──
    California is proven on LaLaNation89's prints; New Jersey's figures are the
    Division of Taxation's published minimum-tax tiers and BAIT schedule, not
@@ -1170,7 +1627,8 @@ for (const c of REFUSALS) {
       ? r.ok &&
         (c.federal === undefined || r.before.federalTotalTax === c.federal) &&
         (c.state === undefined || r.before.stateTotalTax === c.state) &&
-        (c.noNote === undefined || !r.derived.notes.some((s) => c.noNote.test(s)))
+        (c.noNote === undefined || !r.derived.notes.some((s) => c.noNote.test(s))) &&
+        (c.assert === undefined || c.assert(r))
       : !r.ok && r.reasons.some((s) => c.expect.test(s));
   if (!ok) failed++;
   console.log(`  ${ok ? "ok" : "WRONG"}  ${c.name}`);

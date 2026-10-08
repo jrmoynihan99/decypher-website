@@ -99,10 +99,18 @@ export type FederalCard = {
    */
   childTaxCredit: {
     perChild: number;
+    /** The credit for other dependents (Schedule 8812 line 7): a dependent 17 or over, or without the required SSN. Phased out with the children's credit. */
+    perOtherDependent: number;
     phaseOutThreshold: ByStatus<number>;
     phaseOutPer: number;
     phaseOutStep: number;
   };
+  /**
+   * The Standard Deduction Worksheet for Dependents (someone can claim the
+   * filer): the greater of `minimum` and earned income plus `earnedPlus`,
+   * never more than the regular standard deduction.
+   */
+  dependentStandardDeduction: { minimum: number; earnedPlus: number };
   /** Form 8960: the rate on the smaller of net investment income and AGI over the threshold. */
   netInvestmentIncomeTax: { rate: number; threshold: ByStatus<number> };
   /**
@@ -187,6 +195,8 @@ export type StateCard = {
   addBackQbi: boolean;
   deduction:
     | { kind: "standard"; amount: ByStatus<number> }
+    /** Maryland's: a share of the state's income, between a floor and a cap. */
+    | { kind: "percent"; rate: number; min: ByStatus<number>; max: ByStatus<number> }
     | { kind: "federal" }
     | { kind: "none" };
   exemption: {
@@ -230,12 +240,20 @@ export type StateCard = {
   /** A city tax on the same taxable income (New York City). */
   local: { name: string; brackets: ByStatus<Bracket[]> } | null;
   /**
-   * The state's nonresident / part-year form, if the state prorates the way
-   * California does: tax figured as a resident on all income, then scaled by
-   * the state-source share of AGI, with the exemption credit scaled the same
-   * way. Null means a nonresident return is refused.
+   * The state's nonresident / part-year form, and how it prorates. Null
+   * means a nonresident return is refused.
+   *
+   *  - "proration" (California's 540NR, the default): tax figured as a
+   *    resident on all income, then scaled by the state-source share of
+   *    AGI, with the exemption credit scaled the same way.
+   *  - "maryland" (Form 505 with 505NR): the deduction (15% of the
+   *    state-source income, between the floor and cap) and the exemptions
+   *    are scaled by the state-source share of federal AGI; the resident
+   *    tax on all income is scaled by the share of taxable income that is
+   *    left; and a special nonresident tax at `specialRate` is charged on
+   *    that taxable income in place of the county tax.
    */
-  nonresident: { form: string } | null;
+  nonresident: { form: string; method?: "proration" | "maryland"; specialRate?: number } | null;
   /**
    * A medical-expense deduction the New Jersey way: health premiums the
    * client actually paid (marketplace premiums less the credit allowed)
@@ -250,6 +268,26 @@ export type StateCard = {
    * part of the state's total tax on the recap.
    */
   sharedResponsibility: { rate: number; threshold: ByStatus<number>; flatAdult: number } | null;
+  /**
+   * A deduction for the Social Security and Medicare tax paid on wages, per
+   * person (Massachusetts Form 1 lines 11a and 11b): `rate` of each
+   * person's wages, up to `cap`. Figured per person because the cap is,
+   * so the engine needs to know whose W-2s are whose.
+   */
+  wageDeduction: { rate: number; cap: number } | null;
+  /**
+   * How the state treats a filer someone else claims as a dependent (Form
+   * 1040 line 12a). `standardDeduction`: the state's own dependent worksheet
+   * — the greater of `minimum` and earned income plus `earnedPlus`, up to
+   * its regular deduction (California conforms to the federal figures);
+   * null keeps the regular deduction. `noPersonalExemption`: the filer gets
+   * no personal exemption credit or deduction (California). Null means the
+   * state has no such rules on the card.
+   */
+  dependentFiler: {
+    standardDeduction: { minimum: number; earnedPlus: number } | null;
+    noPersonalExemption: boolean;
+  } | null;
 };
 
 /**
@@ -316,6 +354,8 @@ export function noIncomeTaxCard(code: string): StateCard {
     nonresident: null,
     medical: null,
     sharedResponsibility: null,
+    wageDeduction: null,
+    dependentFiler: null,
     entity: null,
     partnership: null,
     proven: true,
@@ -386,10 +426,14 @@ const FEDERAL_2025: FederalCard = {
   // $200,000 ($400,000 joint), Schedule 8812.
   childTaxCredit: {
     perChild: 2200,
+    perOtherDependent: 500,
     phaseOutThreshold: { single: 200000, mfs: 200000, hoh: 200000, mfj: 400000, qss: 400000 },
     phaseOutPer: 50,
     phaseOutStep: 1000,
   },
+  // Rev. Proc. 2024-40 §2.15: a dependent's standard deduction is the greater
+  // of $1,350 and earned income + $450, up to the regular amount.
+  dependentStandardDeduction: { minimum: 1350, earnedPlus: 450 },
   netInvestmentIncomeTax: {
     rate: 0.038,
     threshold: { single: 200000, hoh: 200000, mfs: 125000, mfj: 250000, qss: 250000 },
@@ -482,6 +526,12 @@ const CALIFORNIA_2025: StateCard = {
   nonresident: { form: "540NR" },
   medical: null,
   sharedResponsibility: null,
+  wageDeduction: null,
+  // Someone else's dependent (line 12a): the FTB's worksheet is the
+  // federal one (greater of $1,350 and earned income + $450, up to the
+  // regular deduction) and no personal exemption credit. Checked on Chiu's
+  // 2024 return ($1,615 on the 540NR, $0 of credits, tax $1,080).
+  dependentFiler: { standardDeduction: { minimum: 1350, earnedPlus: 450 }, noPersonalExemption: true },
   // Form 100S: 1.5% of net income, $800 minimum franchise tax; the elective
   // pass-through entity tax at 9.3% (Form 3804), credited on the 540 via
   // FTB 3804-CR, nonrefundable with a carryover. Checked on LaLaNation89's
@@ -558,6 +608,8 @@ const NEW_JERSEY_2025: StateCard = {
     threshold: { single: 10000, mfs: 10000, hoh: 20000, mfj: 20000, qss: 20000 },
     flatAdult: 695,
   },
+  wageDeduction: null,
+  dependentFiler: null,
   // CBT-100S: a New Jersey S corporation pays only the minimum tax, tiered
   // by its New Jersey gross receipts (Division of Taxation, Corporation
   // Business Tax overview); income not subject to federal corporate tax
@@ -613,6 +665,8 @@ const FEDERAL_2024: FederalCard = {
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 168600 },
   qbi: { ...FEDERAL_2025.qbi, threshold: { single: 191950, mfs: 191950, hoh: 191950, mfj: 383900, qss: 383900 } },
   childTaxCredit: { ...FEDERAL_2025.childTaxCredit, perChild: 2000 },
+  // Rev. Proc. 2023-34: $1,300 and earned income + $450.
+  dependentStandardDeduction: { minimum: 1300, earnedPlus: 450 },
   // Rev. Proc. 2023-34 §3.03. Checked on Weinstein's 2024 return: $1,317 of
   // qualified dividends at 15% inside $172,728 of taxable income gives the
   // printed $34,379.
@@ -649,6 +703,8 @@ const FEDERAL_2023: FederalCard = {
     hoh: b([[15700, 0.10], [59850, 0.12], [95350, 0.22], [182100, 0.24], [231250, 0.32], [578100, 0.35], [null, 0.37]]),
   },
   standardDeduction: { single: 13850, mfj: 27700, qss: 27700, mfs: 13850, hoh: 20800 },
+  // Rev. Proc. 2022-38: $1,250 and earned income + $400.
+  dependentStandardDeduction: { minimum: 1250, earnedPlus: 400 },
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 160200 },
   qbi: { ...FEDERAL_2025.qbi, threshold: { single: 182100, mfs: 182100, hoh: 182100, mfj: 364200, qss: 364200 } },
   // Rev. Proc. 2022-38 §3.03.
@@ -687,6 +743,8 @@ const FEDERAL_2026: FederalCard = {
     hoh: b([[17700, 0.10], [67450, 0.12], [105700, 0.22], [201775, 0.24], [256200, 0.32], [640600, 0.35], [null, 0.37]]),
   },
   standardDeduction: { single: 16100, mfj: 32200, qss: 32200, mfs: 16100, hoh: 24150 },
+  // Rev. Proc. 2025-32: $1,350 and earned income + $450 (verify on a 2026 return).
+  dependentStandardDeduction: { minimum: 1350, earnedPlus: 450 },
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 184500 },
   qbi: {
     ...FEDERAL_2025.qbi,
@@ -865,7 +923,9 @@ export function sanitizeStateCard(raw: unknown, code: string, fallback?: StateCa
         ? { kind: "federal" }
         : ded.kind === "none"
           ? { kind: "none" }
-          : { kind: "standard", amount: byStatus(ded.amount, num) },
+          : ded.kind === "percent"
+            ? { kind: "percent", rate: num(ded.rate), min: byStatus(ded.min, num), max: byStatus(ded.max, num) }
+            : { kind: "standard", amount: byStatus(ded.amount, num) },
     exemption: {
       kind: ex.kind === "credit" ? "credit" : ex.kind === "deduction" ? "deduction" : "none",
       amount: num(ex.amount),
@@ -882,7 +942,11 @@ export function sanitizeStateCard(raw: unknown, code: string, fallback?: StateCa
         : null,
     nonresident:
       r.nonresident && typeof r.nonresident === "object" && str(nonresident.form, 20)
-        ? { form: str(nonresident.form, 20) }
+        ? {
+            form: str(nonresident.form, 20),
+            method: nonresident.method === "maryland" ? "maryland" : "proration",
+            specialRate: numOr(nonresident.specialRate, 0),
+          }
         : null,
     medical:
       r.medical && typeof r.medical === "object"
@@ -892,6 +956,28 @@ export function sanitizeStateCard(raw: unknown, code: string, fallback?: StateCa
       r.sharedResponsibility && typeof r.sharedResponsibility === "object"
         ? { rate: num(srp.rate), threshold: byStatus(srp.threshold, num), flatAdult: num(srp.flatAdult) }
         : null,
+    // A card saved before the rule existed keeps the seed's.
+    wageDeduction:
+      r.wageDeduction === undefined
+        ? (fallback?.wageDeduction ?? null)
+        : r.wageDeduction && typeof r.wageDeduction === "object"
+          ? { rate: num(obj(r.wageDeduction).rate), cap: num(obj(r.wageDeduction).cap) }
+          : null,
+    dependentFiler:
+      r.dependentFiler === undefined
+        ? (fallback?.dependentFiler ?? null)
+        : r.dependentFiler && typeof r.dependentFiler === "object"
+          ? {
+              standardDeduction:
+                obj(r.dependentFiler).standardDeduction && typeof obj(r.dependentFiler).standardDeduction === "object"
+                  ? {
+                      minimum: num(obj(obj(r.dependentFiler).standardDeduction).minimum),
+                      earnedPlus: num(obj(obj(r.dependentFiler).standardDeduction).earnedPlus),
+                    }
+                  : null,
+              noPersonalExemption: obj(r.dependentFiler).noPersonalExemption === true,
+            }
+          : null,
     entity:
       r.entity === undefined
         ? (fallback?.entity ?? null)
@@ -997,10 +1083,19 @@ export function sanitizeFederalCard(raw: unknown, fallback?: FederalCard | null)
         ? fallback.childTaxCredit
         : {
             perChild: numOr(ctc.perChild, 0),
+            // Cards saved before the other-dependent credit existed: the seed's, or the $500 every year since 2018 has had.
+            perOtherDependent: numOr(ctc.perOtherDependent, fallback?.childTaxCredit.perOtherDependent ?? 500),
             phaseOutThreshold:
               ctc.phaseOutThreshold === undefined ? ZERO_BY_STATUS : byStatus(ctc.phaseOutThreshold, num),
             phaseOutPer: numOr(ctc.phaseOutPer, 0),
             phaseOutStep: numOr(ctc.phaseOutStep, 1000),
+          },
+    dependentStandardDeduction:
+      r.dependentStandardDeduction === undefined
+        ? (fallback?.dependentStandardDeduction ?? FEDERAL_2025.dependentStandardDeduction)
+        : {
+            minimum: numOr(obj(r.dependentStandardDeduction).minimum, fallback?.dependentStandardDeduction.minimum ?? 0),
+            earnedPlus: numOr(obj(r.dependentStandardDeduction).earnedPlus, fallback?.dependentStandardDeduction.earnedPlus ?? 0),
           },
     netInvestmentIncomeTax:
       r.netInvestmentIncomeTax === undefined && fallback
@@ -1139,6 +1234,11 @@ export function validateYearCard(card: YearCard): string[] {
   }
   const ctc = f.childTaxCredit;
   if (!fin(ctc.perChild) || ctc.perChild < 0) out.push("Child tax credit per child needs a number");
+  if (!fin(ctc.perOtherDependent) || ctc.perOtherDependent < 0) out.push("Credit for other dependents needs a number");
+  const dsd = f.dependentStandardDeduction;
+  if (!fin(dsd.minimum) || dsd.minimum < 0 || !fin(dsd.earnedPlus) || dsd.earnedPlus < 0) {
+    out.push("Dependent's standard deduction needs a minimum and an amount added to earned income");
+  }
   validateByStatus(ctc.phaseOutThreshold, "Child tax credit phase-out threshold", out);
   if (!fin(ctc.phaseOutPer) || ctc.phaseOutPer < 0) out.push("Child tax credit phase-out amount needs a number");
   if (!fin(ctc.phaseOutStep) || ctc.phaseOutStep <= 0) out.push("Child tax credit phase-out step must be positive");
@@ -1184,6 +1284,14 @@ export function validateYearCard(card: YearCard): string[] {
     const where = s.name || code;
     validateBrackets(s.brackets, `${where} brackets`, out);
     if (s.deduction.kind === "standard") validateByStatus(s.deduction.amount, `${where} standard deduction`, out);
+    if (s.deduction.kind === "percent") {
+      if (!fin(s.deduction.rate) || s.deduction.rate <= 0 || s.deduction.rate >= 1) out.push(`${where} deduction: the share of income must be a percentage`);
+      validateByStatus(s.deduction.min, `${where} deduction floor`, out);
+      validateByStatus(s.deduction.max, `${where} deduction cap`, out);
+    }
+    if (s.nonresident && s.nonresident.method === "maryland" && (!fin(s.nonresident.specialRate ?? NaN) || (s.nonresident.specialRate ?? 0) < 0 || (s.nonresident.specialRate ?? 0) >= 1)) {
+      out.push(`${where} special nonresident tax rate must be a percentage`);
+    }
     if (s.exemption.kind !== "none") {
       if (!fin(s.exemption.amount) || s.exemption.amount < 0) out.push(`${where} exemption amount needs a number`);
       if (!fin(s.exemption.dependentAmount) || s.exemption.dependentAmount < 0) out.push(`${where} dependent exemption amount needs a number`);
@@ -1208,6 +1316,13 @@ export function validateYearCard(card: YearCard): string[] {
       if (!fin(p.rate) || p.rate < 0 || p.rate >= 1) out.push(`${where} shared responsibility rate must be a percentage`);
       validateByStatus(p.threshold, `${where} shared responsibility threshold`, out);
       if (!fin(p.flatAdult) || p.flatAdult < 0) out.push(`${where} shared responsibility flat amount needs a number`);
+    }
+    if (s.wageDeduction && (!fin(s.wageDeduction.rate) || s.wageDeduction.rate < 0 || s.wageDeduction.rate >= 1 || !fin(s.wageDeduction.cap) || s.wageDeduction.cap < 0)) {
+      out.push(`${where} Social Security / Medicare deduction needs a rate and a cap per person`);
+    }
+    const dsd = s.dependentFiler?.standardDeduction;
+    if (dsd && (!fin(dsd.minimum) || dsd.minimum < 0 || !fin(dsd.earnedPlus) || dsd.earnedPlus < 0)) {
+      out.push(`${where} dependent's standard deduction needs a minimum and an amount added to earned income`);
     }
     if (s.entity) {
       const e = s.entity;

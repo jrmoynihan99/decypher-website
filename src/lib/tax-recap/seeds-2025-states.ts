@@ -71,6 +71,8 @@ function card(name: string, partial: Partial<StateCard>): StateCard {
     nonresident: null,
     medical: null,
     sharedResponsibility: null,
+    wageDeduction: null,
+    dependentFiler: null,
     entity: null,
     // No state's partnership return (filing fees, franchise taxes) is
     // seeded here: a partner's return is refused until the rules are typed
@@ -240,8 +242,12 @@ export const STATES_2025: Record<string, StateCard> = {
     brackets: flat(0.05),
     surtax: { rate: 0.04, above: 1083150 },
     exemption: { kind: "deduction", amount: 4400, count: by(1, 2, 1.5455, 1, 2), dependentAmount: 1000, phaseOut: null },
+    // Lines 11a/11b: Social Security and Medicare tax paid on wages (7.65%),
+    // up to $2,000 per person. Checked on the Brandt return: $15,000 and
+    // $57,000 of wages give $1,148 and $2,000.
+    wageDeduction: { rate: 0.0765, cap: 2000 },
     entity: entity("355S", 456, pte(0.05, "refundable")),
-    note: "Form 1, 2025: 5% on Part B income plus the 4% surtax over $1,083,150. Personal exemption $4,400 / $8,800 / $6,800 (as multiples of $4,400) and $1,000 per dependent. NOT MODELED: the FICA/SE deduction (up to $2,000 per person), the rental deduction, Part A/C income — expect small mismatches. S corporation non-income measure $456 (income measure applies only above $6M of receipts). PTE excise 5% with a credit of 90% — the engine gives 100%, so the credit line will mismatch.",
+    note: "Form 1, 2025: 5% on Part B income (interest and dividends at 5% too) plus the 4% surtax over $1,083,150. Personal exemption $4,400 / $8,800 / $6,800 (as multiples of $4,400) and $1,000 per dependent. The FICA deduction (lines 11a/11b, 7.65% of each person's wages up to $2,000) is modeled; the SE-tax half of it, the rental deduction, Part A/C income at 8.5%/12% and the refundable $440 Child and Family credit (a payment on the recap) are not. S corporation Form 355S: the $456 minimum excise (the income measure applies only above $6M of receipts; the net-worth measure isn't modeled). PTE excise 5% with a credit of 90% — the engine gives 100%, so the credit line will mismatch.",
   }),
 
   MD: card("Maryland", {
@@ -251,10 +257,29 @@ export const STATES_2025: Record<string, StateCard> = {
       [[1000, 0.02], [2000, 0.03], [3000, 0.04], [150000, 0.0475], [175000, 0.05], [225000, 0.0525], [300000, 0.055], [500000, 0.0575], [1000000, 0.0625], [null, 0.065]],
       [[1000, 0.02], [2000, 0.03], [3000, 0.04], [150000, 0.0475], [175000, 0.05], [225000, 0.0525], [300000, 0.055], [500000, 0.0575], [1000000, 0.0625], [null, 0.065]],
     ),
-    deduction: { kind: "standard", amount: by(2700, 5450, 5450, 2700, 5450) },
-    exemption: { kind: "deduction", amount: 3200, count: ONE, dependentAmount: 3200, phaseOut: null },
+    // 15% of Maryland adjusted gross income between $1,800 and $2,700
+    // ($3,650–$5,450 joint / head of household). On a nonresident's 505NR
+    // the 15% is of the Maryland-source income (Luciano: $12,384 → $1,858).
+    deduction: { kind: "percent", rate: 0.15, min: by(1800, 3650, 3650, 1800, 3650), max: by(2700, 5450, 5450, 2700, 5450) },
+    // $3,200 per exemption, stepping down with federal AGI: 3,200 to
+    // $100,000 ($150,000 joint), then 1,600, then 800, then 0 at $150,000
+    // ($200,000). Modeled as 1,600 off per $25,000 step, which lands on
+    // 3,200 / 1,600 / 0 — right except in the $125,000–$150,000 band
+    // ($175,000–$200,000 joint), where Maryland gives $800 and this gives 0.
+    exemption: {
+      kind: "deduction",
+      amount: 3200,
+      count: ONE,
+      dependentAmount: 3200,
+      phaseOut: { threshold: by(100000, 150000, 150000, 100000, 150000), step: by(25000, 25000, 25000, 25000, 25000), reduce: 1600 },
+    },
+    // Form 505 with 505NR: the deduction and exemptions scaled by the
+    // Maryland share of federal AGI, the resident tax scaled by the share
+    // of taxable income left, plus the 2.25% special nonresident tax in
+    // place of the county tax. Checked on Luciano's 2024 return ($564 + $270).
+    nonresident: { form: "505", method: "maryland", specialRate: 0.0225 },
     entity: entity("510", 0, pte(0.08, "refundable")),
-    note: "Form 502, 2025, including the new 6.25% and 6.5% brackets over $500,000 and $1,000,000. Standard deduction is 15% of AGI between $1,800 and $2,700 ($3,650–$5,450 joint/HOH) — seeded at the maximum. $3,200 exemptions, phased out above $100,000 (not modeled). NOT MODELED: the county tax (2.25%–3.2%) on every return, so expect a refusal on Maryland total tax; add the county's rate as a city tax for a given client. PTE tax 8% on resident members' shares, refundable.",
+    note: "Form 502, 2025, including the new 6.25% and 6.5% brackets over $500,000 and $1,000,000. Standard deduction 15% of Maryland AGI between $1,800 and $2,700 ($3,650–$5,450 joint/HOH). $3,200 exemptions stepping down above $100,000 of federal AGI ($150,000 joint); the $800 band ($125,000–$150,000) comes out as $0. Nonresident Form 505/505NR modeled with the 2.25% special nonresident tax (proven on a 2024 client). NOT MODELED for residents: the county tax (2.25%–3.2%) on every Form 502, so expect a refusal on a resident's Maryland total tax; add the county's rate as a city tax for a given client. PTE tax 8% on resident members' shares, refundable.",
   }),
 
   ME: card("Maine", {

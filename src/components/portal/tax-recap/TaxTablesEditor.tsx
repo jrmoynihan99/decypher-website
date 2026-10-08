@@ -458,6 +458,15 @@ function FederalEditor({ card, onChange }: { card: FederalCard; onChange: (patch
           <Labeled label="Phase-out: per step of">
             <Num value={card.childTaxCredit.phaseOutStep} onChange={(v) => onChange({ childTaxCredit: { ...card.childTaxCredit, phaseOutStep: v ?? 1000 } })} />
           </Labeled>
+          <Labeled label="Credit for other dependents" hint="Schedule 8812 line 7: a dependent 17 or over, or without the required SSN. Phased out with the children's credit.">
+            <Num value={card.childTaxCredit.perOtherDependent} onChange={(v) => onChange({ childTaxCredit: { ...card.childTaxCredit, perOtherDependent: v ?? 0 } })} />
+          </Labeled>
+          <Labeled label="Dependent's standard deduction: minimum" hint="Someone can claim the filer (line 12a): the deduction is the greater of this and earned income plus the amount beside, up to the regular deduction.">
+            <Num value={card.dependentStandardDeduction.minimum} onChange={(v) => onChange({ dependentStandardDeduction: { ...card.dependentStandardDeduction, minimum: v ?? 0 } })} />
+          </Labeled>
+          <Labeled label="Dependent's standard deduction: added to earned income">
+            <Num value={card.dependentStandardDeduction.earnedPlus} onChange={(v) => onChange({ dependentStandardDeduction: { ...card.dependentStandardDeduction, earnedPlus: v ?? 0 } })} />
+          </Labeled>
           <Labeled label="QBI W-2 wage limit" hint="Form 8995-A line 5: this share of W-2 wages.">
             <Num value={card.qbi.wageLimit} pct onChange={(v) => onChange({ qbi: { ...card.qbi, wageLimit: v ?? 0 } })} />
           </Labeled>
@@ -661,18 +670,37 @@ function StateEditor({
           </Labeled>
           <Labeled
             label="Nonresident form"
-            hint="e.g. 540NR. Prorates the resident tax by the state-source share of income, California's way. Blank means nonresident returns are refused."
+            hint="e.g. 540NR or 505. Blank means nonresident returns are refused. California's way prorates the resident tax by the state-source share of income; Maryland's (505NR) scales the deduction and exemptions by the Maryland share of AGI, the resident tax by the share of taxable income, and adds a special nonresident tax."
           >
             <input
               value={card.nonresident?.form ?? ""}
               onChange={(e) => {
                 const form = e.target.value.slice(0, 20);
-                onChange({ nonresident: form.trim() ? { form } : null });
+                onChange({ nonresident: form.trim() ? { ...(card.nonresident ?? { method: "proration", specialRate: 0 }), form } : null });
               }}
               className={inputCls}
               disabled={!card.incomeTax}
             />
           </Labeled>
+          {card.nonresident ? (
+            <Labeled label="Nonresident method">
+              <Select
+                value={card.nonresident.method ?? "proration"}
+                onChange={(method) =>
+                  onChange({ nonresident: { ...card.nonresident!, method: method === "maryland" ? "maryland" : "proration", specialRate: method === "maryland" ? (card.nonresident?.specialRate || 0.0225) : 0 } })
+                }
+                options={[
+                  { value: "proration", label: "Prorate the resident tax (California)" },
+                  { value: "maryland", label: "Maryland's 505NR, with a special nonresident tax" },
+                ]}
+              />
+            </Labeled>
+          ) : null}
+          {card.nonresident?.method === "maryland" ? (
+            <Labeled label="Special nonresident tax" hint="On Maryland taxable net income, in place of the county tax (2.25%).">
+              <Num value={card.nonresident.specialRate ?? 0} pct onChange={(v) => onChange({ nonresident: { ...card.nonresident!, specialRate: v ?? 0 } })} />
+            </Labeled>
+          ) : null}
           <Labeled label="Income tax">
             <Toggle value={card.incomeTax} onChange={(incomeTax) => onChange(incomeTax ? { incomeTax } : { ...noIncomeTaxCard(code), name: card.name })} labels={["Yes", "None"]} />
           </Labeled>
@@ -748,6 +776,10 @@ function StateEditor({
                     deduction:
                       kind === "standard"
                         ? { kind, amount: card.deduction.kind === "standard" ? card.deduction.amount : same(0) }
+                        : kind === "percent"
+                          ? card.deduction.kind === "percent"
+                            ? card.deduction
+                            : { kind, rate: 0.15, min: { single: 1800, mfs: 1800, hoh: 3650, mfj: 3650, qss: 3650 }, max: { single: 2700, mfs: 2700, hoh: 5450, mfj: 5450, qss: 5450 } }
                         : kind === "federal"
                           ? { kind }
                           : { kind: "none" },
@@ -755,6 +787,7 @@ function StateEditor({
                 }
                 options={[
                   { value: "standard", label: "The state's own standard deduction" },
+                  { value: "percent", label: "A share of income between a floor and a cap (Maryland)" },
                   { value: "federal", label: "Same as the federal deduction" },
                   { value: "none", label: "None (New Jersey)" },
                 ]}
@@ -762,6 +795,15 @@ function StateEditor({
             </Labeled>
             {card.deduction.kind === "standard" ? (
               <StatusRow label="Standard deduction" value={card.deduction.amount} onChange={(amount) => onChange({ deduction: { kind: "standard", amount } })} />
+            ) : null}
+            {card.deduction.kind === "percent" ? (
+              <div className="space-y-1">
+                <Labeled label="Share of income" hint="Maryland: 15% of Maryland adjusted gross income (of the Maryland-source income on a nonresident's 505NR)." className="max-w-[160px]">
+                  <Num value={card.deduction.rate} pct onChange={(v) => onChange({ deduction: { ...(card.deduction as { kind: "percent"; rate: number; min: ByStatus<number>; max: ByStatus<number> }), rate: v ?? 0 } })} />
+                </Labeled>
+                <StatusRow label="Floor" value={card.deduction.min} onChange={(min) => onChange({ deduction: { ...(card.deduction as { kind: "percent"; rate: number; min: ByStatus<number>; max: ByStatus<number> }), min } })} />
+                <StatusRow label="Cap" value={card.deduction.max} onChange={(max) => onChange({ deduction: { ...(card.deduction as { kind: "percent"; rate: number; min: ByStatus<number>; max: ByStatus<number> }), max } })} />
+              </div>
             ) : null}
           </Panel>
 
@@ -866,6 +908,64 @@ function StateEditor({
                     </Labeled>
                   </div>
                   <StatusRow label="Income threshold" value={card.sharedResponsibility.threshold} onChange={(threshold) => onChange({ sharedResponsibility: { ...card.sharedResponsibility!, threshold } })} />
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-5">
+              <Check
+                value={!!card.wageDeduction}
+                onChange={(on) => onChange({ wageDeduction: on ? { rate: 0.0765, cap: 2000 } : null })}
+                label="Deduction for Social Security and Medicare tax paid on wages, per person"
+                hint="Massachusetts Form 1 lines 11a/11b: a rate on each person's wages, up to a cap per person. The engine applies it per person, so a joint return's W-2 lines have to say whose wages are whose."
+              />
+              {card.wageDeduction ? (
+                <div className="mt-3 grid max-w-[360px] gap-4 sm:grid-cols-2">
+                  <Labeled label="Rate on wages">
+                    <Num value={card.wageDeduction.rate} pct onChange={(v) => onChange({ wageDeduction: { ...card.wageDeduction!, rate: v ?? 0 } })} />
+                  </Labeled>
+                  <Labeled label="Cap per person">
+                    <Num value={card.wageDeduction.cap} onChange={(v) => onChange({ wageDeduction: { ...card.wageDeduction!, cap: v ?? 0 } })} />
+                  </Labeled>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-5">
+              <Check
+                value={!!card.dependentFiler}
+                onChange={(on) => onChange({ dependentFiler: on ? { standardDeduction: { minimum: 1350, earnedPlus: 450 }, noPersonalExemption: true } : null })}
+                label="Rules for a filer someone else claims as a dependent"
+                hint="Form 1040 line 12a. California: the standard deduction is the greater of a minimum and earned income plus a small amount (the federal worksheet), capped at the regular one, and there is no personal exemption credit."
+              />
+              {card.dependentFiler ? (
+                <div className="mt-3 space-y-3 rounded-[16px] border border-edge px-4 py-3">
+                  <Check
+                    value={card.dependentFiler.noPersonalExemption}
+                    onChange={(noPersonalExemption) => onChange({ dependentFiler: { ...card.dependentFiler!, noPersonalExemption } })}
+                    label="No personal exemption"
+                  />
+                  <Check
+                    value={!!card.dependentFiler.standardDeduction}
+                    onChange={(on) =>
+                      onChange({ dependentFiler: { ...card.dependentFiler!, standardDeduction: on ? { minimum: 1350, earnedPlus: 450 } : null } })
+                    }
+                    label="Limited standard deduction"
+                  />
+                  {card.dependentFiler.standardDeduction ? (
+                    <div className="grid max-w-[360px] gap-4 sm:grid-cols-2">
+                      <Labeled label="Minimum">
+                        <Num
+                          value={card.dependentFiler.standardDeduction.minimum}
+                          onChange={(v) => onChange({ dependentFiler: { ...card.dependentFiler!, standardDeduction: { ...card.dependentFiler!.standardDeduction!, minimum: v ?? 0 } } })}
+                        />
+                      </Labeled>
+                      <Labeled label="Added to earned income">
+                        <Num
+                          value={card.dependentFiler.standardDeduction.earnedPlus}
+                          onChange={(v) => onChange({ dependentFiler: { ...card.dependentFiler!, standardDeduction: { ...card.dependentFiler!.standardDeduction!, earnedPlus: v ?? 0 } } })}
+                        />
+                      </Labeled>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

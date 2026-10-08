@@ -80,7 +80,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "9";
+export const DERIVE_VERSION = "10";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -250,6 +250,31 @@ type Rental = {
  */
 type Itemized = { total: number; saltPaid: number; saltDeducted: number; medical: number; medicalDeducted: number };
 
+/**
+ * Whose W-2 wages are whose, and who paid them. The before treats the
+ * three kinds differently: the officer's pay leaves with the salary
+ * strategy, wages the business paid anyone else on the return (a spouse on
+ * its payroll, inside the entity's line 8) leave with the write-offs they
+ * sit in — and the W-2 income with them — and wages from another employer
+ * stay. Persons are indexed as the 1040 lists them: 0 the taxpayer, 1 the
+ * spouse.
+ */
+type Wages = {
+  /** Which person is the business's officer. */
+  officer: 0 | 1;
+  /** Box 1 of the officer's W-2 from the business: officer compensation less any 401(k) deferral. */
+  officerBox1: number;
+  /** Box 1 wages the business paid the other person on the return. */
+  employeeEntity: number;
+  /** Wages from other employers, per person. */
+  outside: [number, number];
+  /** True when the split was read off the return's W-2 lines rather than assumed. */
+  read: boolean;
+};
+
+/** The W-2 lines of one scenario, laid out the way the review grid shows them. */
+type W2Lines = { taxpayer: number; spouse: number; taxpayerEntity: number; spouseEntity: number };
+
 type FederalInputs = {
   /** Schedule C net profit — subject to SE tax. */
   netProfit: number;
@@ -259,10 +284,14 @@ type FederalInputs = {
   scorp: number;
   /** The partners on this return, when the business is a partnership. */
   partners: Partner[];
-  /** Form W-2 box 1. */
+  /** Form W-2 box 1, every W-2 on the return. */
   w2: number;
   /** Form W-2 box 5, every W-2 on the return: what the additional Medicare tax counts. Equal to box 1 unless read. */
   medicareWages: number;
+  /** The owner's Medicare wages from the S corporation alone (Form 7206 line 11): the cap on the health insurance deduction. */
+  scorpMedicareWages: number;
+  /** Form 1040 line 12a: someone can claim the filer, so the standard deduction is the dependent's limited one. */
+  claimedAsDependent: boolean;
   otherIncome: number;
   rental: Rental | null;
   /** Schedule 1 adjustments other than the SE, health insurance and retirement plan deductions, carried across. */
@@ -281,6 +310,8 @@ type FederalInputs = {
   itemized: Itemized | null;
   /** Qualifying children for the child tax credit. */
   children: number;
+  /** Other dependents (Schedule 8812 line 6): the $500 credit, phased out with the children's. */
+  others: number;
   /** Schedule 3 line 2, taken as read (it needs earned income, so it's zero without any). */
   childCareCredit: number;
   /** The rest of Form 1040 line 20, carried across. */
@@ -345,6 +376,8 @@ type Federal = {
   refundable: number;
   /** Wages plus Schedule C profit: what the child-care credit needs. */
   earnedIncome: number;
+  /** Earned income the dependents' standard deduction worksheet counts: wages and Schedule C profit less the SE deduction. */
+  dependentEarned: number;
 };
 
 /** Form 8962 lines 5–8b and 24–29 for one household income. */
@@ -416,13 +449,17 @@ function qbiDeduction(
   return { deduction: Math.max(0, Math.min(component, limit)), componentBinds: component < limit };
 }
 
-/** Form 1040 line 19 before the tax-liability limit. */
-function childTaxCredit(card: FederalCard, status: FilingStatus, agi: number, children: number): number {
-  if (children <= 0) return 0;
+/**
+ * Form 1040 line 19 before the tax-liability limit: the child tax credit
+ * and the credit for other dependents (Schedule 8812 lines 5 and 7), phased
+ * out together on line 11.
+ */
+function childTaxCredit(card: FederalCard, status: FilingStatus, agi: number, children: number, others = 0): number {
+  if (children <= 0 && others <= 0) return 0;
   const c = card.childTaxCredit;
   const over = Math.max(0, agi - c.phaseOutThreshold[status]);
   const reduction = c.phaseOutStep > 0 ? Math.ceil(over / c.phaseOutStep) * c.phaseOutPer : 0;
-  return Math.max(0, children * c.perChild - reduction);
+  return Math.max(0, children * c.perChild + others * c.perOtherDependent - reduction);
 }
 
 /**
@@ -485,7 +522,7 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
       sehi += Math.min(p.premiums, Math.max(0, bases[k] - units[k].half - sepShare));
     });
   } else {
-    const sehiCap = i.scorp > 0 && i.netProfit <= 0 ? i.medicareWages : Math.max(0, i.netProfit - halfSe - i.sep);
+    const sehiCap = i.scorp > 0 && i.netProfit <= 0 ? i.scorpMedicareWages : Math.max(0, i.netProfit - halfSe - i.sep);
     sehi = i.sehiPaid !== null ? Math.min(i.sehiPaid, sehiCap) : 0;
   }
 
@@ -522,7 +559,16 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   // Schedule A, re-figured at this income: the SALT cap at modified AGI
   // (the 2025 Act's phase-down), the medical floor at AGI; the rest of
   // the schedule is fixed. The larger of that and the standard deduction.
-  const standard = card.standardDeduction[status];
+  // Someone else's dependent: the Standard Deduction Worksheet for
+  // Dependents — the greater of the minimum and earned income (wages and
+  // Schedule C profit less the SE deduction) plus a small amount, never
+  // more than the regular deduction.
+  let standard = card.standardDeduction[status];
+  const dependentEarned = i.w2 + i.netProfit - halfSe;
+  if (i.claimedAsDependent) {
+    const d = card.dependentStandardDeduction;
+    standard = Math.min(standard, Math.max(d.minimum, dependentEarned + d.earnedPlus));
+  }
   let itemizedTotal = 0;
   let saltDeducted = 0;
   if (i.itemized) {
@@ -539,10 +585,12 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   // attributable to it — the SE deduction, the health insurance deduction
   // and the retirement plan deduction. A partner's is their ordinary share
   // less the part of their SE deduction that belongs to it (the guaranteed
-  // payments carry the rest, and the premiums). An S corporation's comes
-  // off Form 8995-A as read. Form 8995 line 3 nets a prior year's loss
-  // carryforward off it first, and a rental counted as a business adds
-  // its net.
+  // payments carry the rest, and the premiums). An S corporation
+  // shareholder's over the threshold comes off Form 8995-A as read; under
+  // it (Form 8995) it's the K-1's ordinary income less the health insurance
+  // deduction the wages carried (Brandt: $180,200 → $36,040). Form 8995 line
+  // 3 nets a prior year's loss carryforward off it first, and a rental
+  // counted as a business adds its net.
   let qbiBase: number;
   if (i.qbi) qbiBase = i.qbi.income;
   else if (i.partners.length > 0) {
@@ -551,7 +599,8 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
       const share = base > 0 ? Math.round((units[k].half * p.ordinary) / base) : 0;
       return s + p.ordinary - share;
     }, 0);
-  } else qbiBase = i.netProfit - halfSe - sehi - i.sep - i.qbiCarryforward;
+  } else if (i.scorp > 0 && i.netProfit <= 0) qbiBase = i.scorp - sehi - i.qbiCarryforward;
+  else qbiBase = i.netProfit - halfSe - sehi - i.sep - i.qbiCarryforward;
   if (i.rental?.qbi) qbiBase += rentalDeducted;
   qbiBase = Math.max(0, qbiBase);
   const netCapitalGain = Math.max(0, Math.min(i.preferential, taxableBeforeQbi));
@@ -571,7 +620,7 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   // other nonrefundable credits (Credit Limit Worksheet A).
   const tax18 = incomeTax + additionalTaxes;
   const credits = i.childCareCredit + i.otherCredits;
-  const ctc = Math.min(childTaxCredit(card, status, agi, i.children), Math.max(0, tax18 - credits));
+  const ctc = Math.min(childTaxCredit(card, status, agi, i.children, i.others), Math.max(0, tax18 - credits));
   const line22 = Math.max(0, tax18 - ctc - credits);
 
   // Form 8960: on the smaller of net investment income and AGI over the
@@ -614,6 +663,7 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
     totalTax: line22 + seTax + additionalMedicare + niit,
     refundable,
     earnedIncome: i.w2 + Math.max(0, i.netProfit) + i.partners.reduce((s, p) => s + Math.max(0, p.ordinary + p.guaranteed), 0),
+    dependentEarned,
   };
 }
 
@@ -638,11 +688,35 @@ type StateInputs = {
   carriedAdjustment: number;
   /** The state's deduction as read (its itemized deductions, when they beat its standard deduction), carried across. */
   deductionRead: number | null;
+  /** Each person's wages in this scenario (the FICA base for a per-person wage deduction). */
+  wagesByPerson: number[];
+  /** Form 1040 line 12a: someone else claims the filer. */
+  claimedAsDependent: boolean;
 };
+
+/**
+ * The state's standard deduction for this filer: the card's amount (or
+ * Maryland's share of `income`, between its floor and cap), or for someone
+ * else's dependent the state's own dependent worksheet when the card has
+ * one (California's is the federal one).
+ */
+function standardDeductionFor(card: StateCard, status: FilingStatus, fed: Federal, s: StateInputs, income: number): number {
+  const d = card.deduction;
+  if (d.kind === "percent") return Math.min(d.max[status], Math.max(d.min[status], Math.round(Math.max(0, income) * d.rate)));
+  if (d.kind !== "standard") return 0;
+  const regular = d.amount[status];
+  const rule = card.dependentFiler?.standardDeduction;
+  if (!s.claimedAsDependent || !rule) return regular;
+  return Math.min(regular, Math.max(rule.minimum, fed.dependentEarned + rule.earnedPlus));
+}
+
+const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
 type State = {
   income: number;
   taxable: number;
+  /** The per-person Social Security / Medicare deduction (Massachusetts lines 11a + 11b), 0 for states without one. */
+  wageDeduction: number;
   /** Tax on taxable income before credits and add-ons (NJ line 43, CA line 31). */
   tax: number;
   /** Nonresident only: the tax on all income as if a resident (540NR line 31), before the proration that gives `tax` (line 37). */
@@ -653,6 +727,8 @@ type State = {
   sharedResponsibility: number;
   /** The PTE credit actually used: limited to the tax when nonrefundable, the whole share when refundable. */
   pteCredit: number;
+  /** Maryland's special nonresident tax (Form 505 line 32b), charged in place of the county tax; 0 elsewhere. */
+  nonresidentTax: number;
   /** The state's printed total before a refundable PTE credit (NJ-1040 line 54). */
   grossTax: number;
   /** What the recap calls State Taxes: tax less every credit, plus add-ons. */
@@ -660,7 +736,7 @@ type State = {
 };
 
 const EMPTY_STATE: State = {
-  income: 0, taxable: 0, tax: 0, exemption: 0, medical: 0, local: 0, sharedResponsibility: 0, pteCredit: 0, grossTax: 0, netTax: 0,
+  income: 0, taxable: 0, wageDeduction: 0, tax: 0, exemption: 0, medical: 0, local: 0, sharedResponsibility: 0, pteCredit: 0, nonresidentTax: 0, grossTax: 0, netTax: 0,
 };
 
 /**
@@ -692,8 +768,8 @@ function state(card: StateCard, status: FilingStatus, fed: Federal, s: StateInpu
   // interest without the federal cap and drops the state income tax; the
   // figure is fixed across before and after).
   const deduction =
-    card.deduction.kind === "standard"
-      ? Math.max(card.deduction.amount[status], s.deductionRead ?? 0)
+    card.deduction.kind === "standard" || card.deduction.kind === "percent"
+      ? Math.max(standardDeductionFor(card, status, fed, s, income), s.deductionRead ?? 0)
       : card.deduction.kind === "federal"
         ? fed.deduction
         : 0;
@@ -706,12 +782,17 @@ function state(card: StateCard, status: FilingStatus, fed: Federal, s: StateInpu
       const over = fed.agi - ex.phaseOut.threshold[status];
       if (over > 0) reduce = Math.ceil(over / ex.phaseOut.step[status]) * ex.phaseOut.reduce;
     }
+    // Someone else's dependent gets no personal exemption where the card
+    // says so (California's line 7).
+    const personal = s.claimedAsDependent && card.dependentFiler?.noPersonalExemption ? 0 : ex.count[status];
     // Each exemption shrinks on its own and stops at zero: California's
     // $153 personal credit is gone before the $475 dependent credit is.
     exemption =
-      Math.max(0, ex.amount - reduce) * ex.count[status] +
+      Math.max(0, ex.amount - reduce) * personal +
       Math.max(0, ex.dependentAmount - reduce) * s.dependents;
-    if (ex.kind === "deduction" && s.exemptionsRead !== null) exemption = s.exemptionsRead;
+    // A fixed exemption as printed (New Jersey's) is carried; one that
+    // phases down on income (Maryland's) is re-figured at each income.
+    if (ex.kind === "deduction" && s.exemptionsRead !== null && !ex.phaseOut) exemption = s.exemptionsRead;
   }
 
   const medical = card.medical
@@ -719,9 +800,18 @@ function state(card: StateCard, status: FilingStatus, fed: Federal, s: StateInpu
       (card.medical.seHealthInsuranceFull ? fed.sehi : 0)
     : 0;
 
+  // Massachusetts lines 11a/11b: the Social Security and Medicare tax each
+  // person paid on their own wages, capped per person — so whose wages are
+  // whose matters, and a W-2 that leaves on the before takes its deduction
+  // with it.
+  const wd = card.wageDeduction;
+  const wageDeduction = wd
+    ? s.wagesByPerson.reduce((t, w) => t + Math.min(wd.cap, Math.round(Math.max(0, w) * wd.rate)), 0)
+    : 0;
+
   const taxable = Math.max(
     0,
-    income - deduction - (ex.kind === "deduction" ? exemption : 0) - medical,
+    income - deduction - (ex.kind === "deduction" ? exemption : 0) - medical - wageDeduction,
   );
   let tax = printedTax(card.brackets[status], card.taxTable, taxable);
   if (card.surtax && taxable > card.surtax.above) {
@@ -749,12 +839,14 @@ function state(card: StateCard, status: FilingStatus, fed: Federal, s: StateInpu
   return {
     income,
     taxable,
+    wageDeduction,
     tax,
     exemption,
     medical,
     local,
     sharedResponsibility,
     pteCredit,
+    nonresidentTax: 0,
     grossTax,
     netTax: grossTax - pteCredit,
   };
@@ -781,9 +873,45 @@ function nonresidentState(
   const resident = state(card, status, fed, s);
   const totalTaxable = resident.taxable;
   const tax = resident.tax;
+
+  // Maryland's Form 505NR, line by line: 1 taxable net income as if a
+  // resident, 2 the tax on it; 8 the Maryland income (fixed: what was
+  // earned there), 9 its share of federal AGI to six places; 10 the
+  // deduction (15% of the Maryland income, between the floor and cap) and
+  // 12 the exemptions, each scaled by that share; 13 Maryland taxable net
+  // income; 15 its share of line 1; 16 the resident tax at that share; 17
+  // the special nonresident tax on line 13 in place of the county tax.
+  if (card.nonresident?.method === "maryland") {
+    const factor = fed.agi > 0 ? Math.min(1, round6(stateSource / fed.agi)) : 1;
+    const deduction = Math.round(standardDeductionFor(card, status, fed, s, stateSource) * factor);
+    const net = Math.max(0, stateSource - deduction);
+    const exemption = Math.round(resident.exemption * factor);
+    const taxable = Math.max(0, net - exemption);
+    const share = totalTaxable > 0 ? Math.min(1, round6(taxable / totalTaxable)) : 0;
+    const stateTax = Math.round(tax * share);
+    const special = Math.round(taxable * (card.nonresident.specialRate ?? 0));
+    const mode = creditMode(card);
+    const available = Math.max(0, s.pteCreditAvailable);
+    const pteCredit = mode === "nonrefundable" ? Math.min(available, stateTax) : mode === "refundable" ? available : 0;
+    return {
+      ...resident,
+      income: stateSource,
+      taxable,
+      tax: stateTax,
+      residentTax: tax,
+      exemption,
+      local: 0,
+      sharedResponsibility: 0,
+      pteCredit,
+      nonresidentTax: special,
+      grossTax: stateTax + special,
+      netTax: stateTax + special - pteCredit,
+    };
+  }
+
   const share = fed.totalIncome > 0 ? stateSource / fed.totalIncome : 0;
   const stateAgi = Math.max(0, stateSource - Math.round(fed.adjustments * share));
-  const deduction = card.deduction.kind === "standard" ? card.deduction.amount[status] : 0;
+  const deduction = standardDeductionFor(card, status, fed, s, fed.agi);
   const taxable = Math.max(
     0,
     stateAgi - Math.round(fed.agi > 0 ? (deduction * stateAgi) / fed.agi : 0),
@@ -944,6 +1072,10 @@ type Model = {
     officerComp: number;
     healthInsurance: number;
     deferral: number;
+    /** Whose wages are whose and who paid them. */
+    wages: Wages;
+    /** The K-1's section 179 deduction (box 11), zeroed on the before with the write-offs. */
+    section179: number;
     pension: number;
     stateAddBack: number;
     ownershipPct: number;
@@ -976,6 +1108,8 @@ type Model = {
     nomineeNote: string | null;
     /** Set when the reader's two K-1 lines were reconciled by the entity's form. */
     k1Note: string | null;
+    /** Set when Schedule E's S corporation income was reconciled with the K-1's section 179 deduction. */
+    s179Note: string | null;
     /** Schedule A as read, when the after return itemizes. */
     itemized: Itemized | null;
     /** The state's own deduction as read, when it beats the state's standard deduction. */
@@ -984,10 +1118,12 @@ type Model = {
     sep: number;
     ira: number;
     hsa: number;
-    /** Dependents on the return: the count read, or the qualifying children the child tax credit implies when that's more. */
+    /** Dependents on the return: the count read, or the qualifying children and other dependents the credit on line 19 implies when that's more. */
     dependents: number;
     /** Schedule 3 line 2 as read. */
     childCareCredit: number;
+    /** Form 1040 line 12a: the filer is someone else's dependent. */
+    claimedAsDependent: boolean;
   };
 };
 
@@ -1016,6 +1152,101 @@ function impliedLines(r: ReturnNumbers, fed: FederalCard | null): { numbers: Ret
       line23Zero ? "line 23 prints 0" : `Schedule C net profit (${fmt(n(r.businessNetIncome))}) is under the $400 floor of net earnings`
     } and no Schedule SE was printed`,
   };
+}
+
+/**
+ * Whose W-2s are whose, and who paid them — from the return's W-2 lines
+ * when the reader could tell (W-2 copies in the print, a state wage schedule
+ * such as Massachusetts Schedule INC, with the business's own W-2s pointed
+ * out by the browser from their EIN), and otherwise from the one assumption
+ * the engine used to make: that the only W-2 on the 1040 is the officer's.
+ *
+ * Refuses, with the lines to type named, when wages above the officer's pay
+ * can't be placed: the before can't zero a spouse's wages from the business
+ * and keep an outside employer's without knowing which they are.
+ */
+function splitWages(
+  after: ReturnNumbers,
+  shape: Model["shape"],
+  officerComp: number,
+  /** Form 1120-S line 8: what the business paid everyone else. */
+  entityWages: number,
+  w2: number,
+): { wages: Wages; reasons: string[] } {
+  const reasons: string[] = [];
+  const t = has(after.w2Taxpayer) ? after.w2Taxpayer : null;
+  const s = has(after.w2Spouse) ? after.w2Spouse : null;
+  const tE = has(after.w2TaxpayerEntity) ? after.w2TaxpayerEntity : null;
+  const sE = has(after.w2SpouseEntity) ? after.w2SpouseEntity : null;
+  const perPerson = t !== null || s !== null;
+  const entityRead = tE !== null || sE !== null;
+  const none: Wages = { officer: 0, officerBox1: 0, employeeEntity: 0, outside: [w2, 0], read: false };
+
+  if (perPerson && off(n(t) + n(s), w2)) {
+    reasons.push(
+      `The W-2 lines read (${fmt(n(t))} the taxpayer's, ${fmt(n(s))} the spouse's) don't add up to line 1z (${fmt(w2)})`,
+    );
+    return { wages: none, reasons };
+  }
+  if ((tE !== null && t !== null && tE > t + TOL) || (sE !== null && s !== null && sE > s + TOL)) {
+    reasons.push("A W-2 from the business was read as more than that person's W-2 wages altogether");
+    return { wages: none, reasons };
+  }
+
+  if (shape !== "scorp") {
+    // A sole proprietor's or a partner's wages are all from elsewhere; who
+    // earned them matters only for the wage base (decided by the SE tax,
+    // further down) and a per-person state deduction.
+    const outside: [number, number] = perPerson ? [n(t), n(s)] : [w2, 0];
+    return { wages: { officer: 0, officerBox1: 0, employeeEntity: 0, outside, read: perPerson }, reasons };
+  }
+
+  if (!entityRead) {
+    if (w2 <= officerComp + TOL) {
+      // The one W-2 is the officer's, as the engine always assumed.
+      const officer: 0 | 1 = perPerson && n(t) <= 0 && n(s) > 0 ? 1 : 0;
+      return { wages: { officer, officerBox1: w2, employeeEntity: 0, outside: [0, 0], read: perPerson }, reasons };
+    }
+    const beyond = w2 - officerComp;
+    reasons.push(
+      `The 1040 carries ${fmt(w2)} of W-2 wages${perPerson ? ` (${fmt(n(t))} the taxpayer's, ${fmt(n(s))} the spouse's)` : ""}, ${fmt(beyond)} more than the officer's pay on the 1120-S (${fmt(officerComp)}). The engine can't tell whether the corporation paid the rest (a spouse on its payroll, inside the ${fmt(entityWages)} of salaries on line 8) or another employer did — the before zeroes the first and keeps the second. Type what the corporation paid each person in the two "W-2 wages from the business" lines of the after column (show all lines; ${fmt(w2)} between them if it paid all of it, ${fmt(officerComp)} if only the officer) and recompute the before column`,
+    );
+    return { wages: none, reasons };
+  }
+
+  const entity: [number, number] = [n(tE), n(sE)];
+  const entityTotal = entity[0] + entity[1];
+  // Without the per-person totals, whatever line 1z carries beyond the
+  // business's W-2s is taken as the taxpayer's from another employer.
+  const all: [number, number] = perPerson ? [n(t), n(s)] : [entity[0] + Math.max(0, w2 - entityTotal), entity[1]];
+  if (entityTotal > w2 + TOL) {
+    reasons.push(`The W-2s from the business (${fmt(entityTotal)}) come to more than line 1z (${fmt(w2)})`);
+    return { wages: none, reasons };
+  }
+  // The officer's W-2 is the one at or under officer compensation (box 1 is
+  // the pay less any 401(k) deferral); the closer, the surer.
+  let officer: 0 | 1 = 0;
+  let officerBox1 = 0;
+  if (officerComp > 0) {
+    const fits = ([0, 1] as const).filter((k) => entity[k] > 0 && entity[k] <= officerComp + TOL);
+    if (!fits.length) {
+      reasons.push(
+        `The 1120-S pays ${fmt(officerComp)} of officer compensation, but no W-2 from the business on the 1040 (${fmt(entity[0])} the taxpayer's, ${fmt(entity[1])} the spouse's) is at or under it`,
+      );
+      return { wages: none, reasons };
+    }
+    officer = fits.length === 1 ? fits[0] : officerComp - entity[0] <= officerComp - entity[1] ? 0 : 1;
+    officerBox1 = entity[officer];
+  }
+  const employeeEntity = entityTotal - officerBox1;
+  if (employeeEntity > entityWages + TOL) {
+    reasons.push(
+      `The business's W-2s beyond the officer's (${fmt(employeeEntity)}) are more than the 1120-S deducts as salaries and wages on line 8 (${fmt(entityWages)})`,
+    );
+    return { wages: none, reasons };
+  }
+  const outside: [number, number] = [Math.max(0, all[0] - entity[0]), Math.max(0, all[1] - entity[1])];
+  return { wages: { officer, officerBox1, employeeEntity, outside, read: true }, reasons };
 }
 
 /**
@@ -1079,6 +1310,18 @@ function buildModel(
         : `The ${fmt(partnershipIncome)} read as partnership income is the S corporation's K-1 income — the entity return is a Form 1120-S`;
     scorpIncome += partnershipIncome;
     partnershipIncome = 0;
+  }
+  // Schedule E nets the K-1's section 179 deduction (box 11, column (j))
+  // off the ordinary income; a reader that took column (k) alone is
+  // reconciled here, before the income is split up.
+  let s179Note: string | null = null;
+  if (entity && scorpIncome > 0) {
+    const k1 = n(entity.k1Ordinary);
+    const s179 = n(entity.k1Section179);
+    if (s179 > 0 && !off(k1, scorpIncome) && off(k1 - s179, scorpIncome)) {
+      s179Note = `Schedule E's S corporation income was read as the K-1's ${fmt(k1)} of ordinary income; its ${fmt(s179)} section 179 deduction (column (j)) nets it to ${fmt(k1 - s179)}, which is what Schedule 1 carries`;
+      scorpIncome = k1 - s179;
+    }
   }
   after = { ...after, scorpIncome: scorpIncome > 0 ? scorpIncome : null, partnershipIncome: partnershipIncome > 0 ? partnershipIncome : null };
   if (scorpIncome > 0 && partnershipIncome > 0) {
@@ -1218,14 +1461,13 @@ function buildModel(
     } else if (ordinary <= 0) {
       reasons.push(`The 1120-S shows no ordinary income (${fmt(ordinary)}) — a loss year can't be run through the before`);
     }
-    if (off(k1, scorpIncome)) {
+    // Schedule E carries the K-1's ordinary income less its section 179
+    // deduction (box 11, column (j)); a read of column (k) alone was
+    // reconciled above.
+    const s179 = n(e.k1Section179);
+    if (off(k1 - s179, scorpIncome)) {
       reasons.push(
-        `The 1040's S corporation income (${fmt(scorpIncome)}) doesn't match the K-1's ordinary income (${fmt(k1)}) — a second K-1, a basis limitation, or a passive loss`,
-      );
-    }
-    if (w2 > officerComp + TOL) {
-      reasons.push(
-        `W-2 wages on the 1040 (${fmt(w2)}) exceed the officer compensation on the 1120-S (${fmt(officerComp)}) — a W-2 from another employer the engine doesn't model`,
+        `The 1040's S corporation income (${fmt(scorpIncome)}) doesn't match the K-1's ordinary income (${fmt(k1)})${s179 > 0 ? ` less its ${fmt(s179)} section 179 deduction (${fmt(k1 - s179)})` : ""} — a second K-1, a basis limitation, or a passive loss`,
       );
     }
     if (totalDeductions - officerComp - pension - stateAddBack < -TOL) {
@@ -1327,33 +1569,49 @@ function buildModel(
     }));
   }
 
+  // Whose W-2s are whose and who paid them.
+  const split = splitWages(after, shape, officerComp, n(e.wages), w2);
+  let wages = split.wages;
+  if (split.reasons.length) {
+    reasons.push(...split.reasons);
+    return refuse();
+  }
+  const outsideWages = wages.outside[0] + wages.outside[1];
+
   // The owner's pay on an S corporation: officer compensation is the cash
   // wages (Medicare wages) plus the health insurance run through payroll;
   // box 1 is that less the 401(k) deferral.
   const healthInsurance = shape === "scorp" ? n(sehiPaid) : 0;
   const medicareWagesRead = has(after.medicareWages) ? after.medicareWages : null;
-  const medicareWages = shape === "scorp" ? (medicareWagesRead ?? Math.max(0, officerComp - healthInsurance)) : w2;
-  const deferral = shape === "scorp" ? Math.max(0, officerComp - w2) : 0;
+  const officerMedicare = shape === "scorp" ? (medicareWagesRead ?? Math.max(0, officerComp - healthInsurance)) : 0;
+  const deferral = shape === "scorp" ? Math.max(0, officerComp - wages.officerBox1) : 0;
   if (shape === "scorp" && medicareWagesRead !== null && off(medicareWagesRead + healthInsurance, officerComp)) {
     reasons.push(
       `Officer compensation on the 1120-S (${fmt(officerComp)}) isn't the Medicare wages (${fmt(medicareWagesRead)}) plus the health insurance premiums (${fmt(healthInsurance)}) — another benefit in the owner's pay the engine doesn't model`,
     );
     return refuse();
   }
+  // Form 8959 counts every W-2's Medicare wages; the health insurance
+  // deduction is capped at the owner's from the S corporation alone.
+  const medicareWages = shape === "scorp" ? officerMedicare + wages.employeeEntity + outsideWages : w2;
+  const claimedAsDependent = n(after.dependentOfAnother) > 0;
 
   /* 3 · proof: re-run the after return and compare, layer by layer */
 
   // Schedule 1 adjustments beyond the SE and health insurance deductions
   // (student loan interest, an HSA, a SEP) stay on the before as they are:
   // the CPA's before prints keep them. Those two are recomputed.
-  const k1After = shape === "scorp" ? (e.k1Ordinary as number) : shape === "partnership" ? partnershipIncome : 0;
-  const children = inferChildren(fed, status, after);
-  if (children === null) {
+  /** The K-1's section 179 deduction: a write-off of the entity's, outside line 21, zeroed on the before with the rest. */
+  const section179 = shape === "scorp" ? n(e.k1Section179) : 0;
+  const k1After = shape === "scorp" ? (e.k1Ordinary as number) - section179 : shape === "partnership" ? partnershipIncome : 0;
+  const dependentsInferred = inferDependents(fed, status, after);
+  if (dependentsInferred === null) {
     reasons.push(
-      `The child tax credit on line 19 (${fmt(n(after.childTaxCredit))}) isn't what the ${year} tables give for any number of children at this income`,
+      `The credit on line 19 (${fmt(n(after.childTaxCredit))}) isn't what the ${year} tables give for any mix of qualifying children (${fmt(fed.childTaxCredit.perChild)} each) and other dependents (${fmt(fed.childTaxCredit.perOtherDependent)} each) at this income`,
     );
     return refuse();
   }
+  const { children, others } = dependentsInferred;
   const childCareCredit = n(after.childCareCredit);
   const otherCredits = Math.max(0, n(after.nonrefundableCredits) - childCareCredit);
   const qbiRead: QbiInputs | null = has(after.qbiIncome)
@@ -1423,6 +1681,8 @@ function buildModel(
     partners,
     w2,
     medicareWages,
+    scorpMedicareWages: officerMedicare,
+    claimedAsDependent,
     otherIncome,
     rental,
     carried: 0,
@@ -1434,6 +1694,7 @@ function buildModel(
     preferential,
     itemized,
     children,
+    others,
     childCareCredit,
     otherCredits,
   };
@@ -1465,6 +1726,12 @@ function buildModel(
       base = hit.inputs;
       seWagesNote = hit.note;
       partners = base.partners;
+      // Whose the wages turned out to be, for a per-person state deduction,
+      // unless the W-2 lines already said.
+      if (!wages.read) {
+        const spouses = shape === "partnership" ? partners.findIndex((p) => p.wages > 0) === 1 : base.seWages === 0;
+        wages = { ...wages, outside: spouses ? [0, w2] : [w2, 0] };
+      }
     }
   }
 
@@ -1545,10 +1812,13 @@ function buildModel(
 
   const deductionRead = (after.agi as number) - n(after.qbiDeduction) - (after.taxableIncome as number);
   if (off(deductionRead, check.deduction)) {
+    const standardLabel = claimedAsDependent
+      ? `the ${year} dependent's standard deduction (${fmt(check.deduction)}: earned income plus ${fmt(fed.dependentStandardDeduction.earnedPlus)}, at least ${fmt(fed.dependentStandardDeduction.minimum)})`
+      : `the ${year} standard deduction for ${statusLabel} (${fmt(fed.standardDeduction[status])})`;
     reasons.push(
       itemized
-        ? `The after return's deduction (${fmt(deductionRead)}) isn't the ${year} standard deduction for ${statusLabel} (${fmt(fed.standardDeduction[status])}) or the Schedule A total as read (${fmt(check.itemizedTotal)}): age or blindness, or Schedule 1-A`
-        : `The after return's deduction (${fmt(deductionRead)}) isn't the ${year} standard deduction for ${statusLabel} (${fmt(check.deduction)}): itemized (Schedule A wasn't read), age or blindness, or Schedule 1-A`,
+        ? `The after return's deduction (${fmt(deductionRead)}) isn't ${standardLabel} or the Schedule A total as read (${fmt(check.itemizedTotal)}): age or blindness, or Schedule 1-A`
+        : `The after return's deduction (${fmt(deductionRead)}) isn't ${standardLabel}: itemized (Schedule A wasn't read), age or blindness, Schedule 1-A${claimedAsDependent ? "" : ", or a filer someone else claims (line 12a, not read)"}`,
     );
   }
   // Over the threshold the deduction depends on Form 8995-A's own lines.
@@ -1638,6 +1908,7 @@ function buildModel(
     businessIncome: number,
     pteCreditAvailable: number,
     wagesNow: number,
+    wagesByPerson: number[],
     pteExcluded = 0,
   ): StateInputs => ({
     w2: wagesNow,
@@ -1651,7 +1922,11 @@ function buildModel(
     dependents,
     pteCreditAvailable,
     pteExcluded,
+    wagesByPerson,
+    claimedAsDependent,
   });
+  /** Each person's FICA wages on the after return: the officer's Medicare wages, the other's pay from the business, and everyone's outside wages. */
+  const afterWagesByPerson = wagesByPersonFor(wages, shape === "scorp" ? officerMedicare : 0, wages.employeeEntity);
   let entityCheck: EntityTax | null = null;
   /** The elective tax the entity elected into, per the returns. */
   const electing =
@@ -1694,17 +1969,17 @@ function buildModel(
         reasons.push("State total tax wasn't read from the after return");
       } else if (nonresident && !has(after.stateSourceIncome)) {
         reasons.push(
-          `State-source income (Schedule CA (${sc.nonresident?.form}) line 10, column E) wasn't read from the after return — it's what the nonresident tax is prorated by`,
-        );
-      } else if (sc.base === "stateGrossIncome" && !has(after.stateBusinessIncome)) {
-        reasons.push(
-          `${sc.name} works from its own business profit line, which wasn't read from the after return`,
+          `State-source income (${
+            sc.nonresident?.method === "maryland" ? `Form ${sc.nonresident.form}NR line 8, the Maryland income` : `Schedule CA (${sc.nonresident?.form}) line 10, column E`
+          }) wasn't read from the after return — it's what the nonresident tax is prorated by`,
         );
       } else if (shape === "scorp" && !sc.entity) {
         reasons.push(
           `${sc.name}'s card has no S corporation rules (the entity's own tax and elective tax) — add them on the Tax Tables page`,
         );
-      } else if (shape === "scorp" && !has(e.stateNetIncome)) {
+      } else if (shape === "scorp" && !has(e.stateNetIncome) && (sc.entity?.rate ?? 0) > 0) {
+        // A state that charges the corporation only a minimum (Massachusetts
+        // under $6M of receipts, New Jersey) needs no net income figure.
         reasons.push(`The ${sc.name} S corporation return's net income for tax wasn't read from the 1120-S print`);
       } else if (shape === "partnership" && !sc.partnership) {
         reasons.push(
@@ -1718,14 +1993,18 @@ function buildModel(
         );
       } else {
         if (nonresident) stateSource = after.stateSourceIncome as number;
-        const businessAfter = sc.base === "stateGrossIncome" ? (after.stateBusinessIncome as number) : netAfter + k1After;
+        // A state that starts from its own business line (New Jersey, with
+        // its own expense rules; Massachusetts, where the line is the federal
+        // figure) uses that line when read, and the federal figure when not —
+        // the total-tax check below says whether that was right.
+        const businessAfter = sc.base === "stateGrossIncome" && has(after.stateBusinessIncome) ? after.stateBusinessIncome : netAfter + k1After;
         const mode = creditMode(sc);
 
         // The entity's own state return, when there is one. The owner's
         // credit is their share of the elective tax.
         let pteAvailable = 0;
         if (shape === "scorp") {
-          entityCheck = entityTax(sc, e.stateNetIncome as number, eGross, electing);
+          entityCheck = entityTax(sc, has(e.stateNetIncome) ? e.stateNetIncome : n(e.ordinaryIncome) + stateAddBack, eGross, electing);
           pteAvailable = Math.round(entityCheck.pte * ownershipPct);
           if (has(e.stateTax)) {
             mismatch(`${sc.name} S corporation tax`, e.stateTax, entityCheck.franchise, `a credit, or a rate or minimum the ${sc.name} card doesn't have`);
@@ -1751,7 +2030,7 @@ function buildModel(
         }
 
         const run = (f: Federal, biz: number, pte: number) => {
-          const si = stateInputsFor(f, biz, mode === "exclusion" ? 0 : pte, w2, mode === "exclusion" && electing ? k1After : 0);
+          const si = stateInputsFor(f, biz, mode === "exclusion" ? 0 : pte, w2, afterWagesByPerson, mode === "exclusion" && electing ? k1After : 0);
           return stateSource !== null ? nonresidentState(sc, status, f, si, stateSource) : state(sc, status, f, si);
         };
         let sCheck = run(check, businessAfter, pteAvailable);
@@ -1818,6 +2097,16 @@ function buildModel(
             "medical expenses beyond the marketplace premiums, which the return doesn't itemize",
           );
         }
+        if (has(after.stateWageDeduction)) {
+          mismatch(
+            `${sc.name} Social Security / Medicare deduction`,
+            after.stateWageDeduction,
+            sCheck.wageDeduction,
+            wages.read
+              ? "retirement contributions beyond the FICA tax, or a W-2's wages read on the wrong person"
+              : "a joint return whose W-2 lines (taxpayer's and spouse's) weren't read, so each person's cap can't be applied",
+          );
+        }
         if (sc.sharedResponsibility || has(after.stateSharedResponsibility)) {
           mismatch(
             `${sc.name} shared responsibility payment`,
@@ -1830,7 +2119,11 @@ function buildModel(
           `${sc.name} total tax`,
           after.stateTotalTax,
           mode === "refundable" ? sCheck.grossTax : sCheck.netTax,
-          `dependents, a credit, or an adjustment the ${sc.name} card doesn't model`,
+          `dependents, a credit, or an adjustment the ${sc.name} card doesn't model${
+            sc.wageDeduction && !wages.read && w2 > 0 && (status === "mfj" || status === "qss")
+              ? `; the per-person Social Security / Medicare deduction was figured on one person's wages because the W-2 lines (taxpayer's and spouse's) weren't read`
+              : ""
+          }`,
         );
       }
     }
@@ -1857,11 +2150,16 @@ function buildModel(
     ? after.stateBusinessIncome - (shape === "scorp" ? k1After : netAfter)
     : 0;
   const ordinaryAfter = shape === "scorp" ? (e.ordinaryIncome as number) : 0;
-  // The owner's W-2 carries the withholding; without the salary there is
-  // no W-2, so the before's payments are the estimates alone. That is what
-  // the CPA's before prints show.
-  const fedWithholding = shape === "scorp" ? Math.min(paid, n(after.federalWithholding)) : 0;
-  const stateWithholding = shape === "scorp" ? Math.min(statePaid, n(after.stateWithholding)) : 0;
+  // A W-2 from the business carries withholding; without the pay there is
+  // no W-2, so the before's payments are the estimates (and any outside
+  // employer's withholding) alone. That is what the CPA's before prints
+  // show. The return doesn't say how much was withheld on which W-2, so
+  // the withholding is split by box 1 wages.
+  const share = (total: number, part: number) => (w2 > 0 && part > 0 ? Math.round((total * part) / w2) : 0);
+  const fedWithholdingRead = shape === "scorp" ? Math.min(paid, n(after.federalWithholding)) : 0;
+  const stateWithholdingRead = shape === "scorp" ? Math.min(statePaid, n(after.stateWithholding)) : 0;
+  const fedWithholding = { officer: share(fedWithholdingRead, wages.officerBox1), employee: share(fedWithholdingRead, wages.employeeEntity) };
+  const stateWithholding = { officer: share(stateWithholdingRead, wages.officerBox1), employee: share(stateWithholdingRead, wages.employeeEntity) };
 
   const run = (s: Scenario): Outcome => {
     let fi: FederalInputs;
@@ -1871,6 +2169,12 @@ function buildModel(
     let k1 = 0;
     let ent: EntityTax | null = null;
     let entityNumbers: EntityNumbers | null = null;
+    /** Each person's FICA wages in this scenario, and the W-2 lines as the grid shows them. */
+    let wagesByPerson = afterWagesByPerson;
+    let w2Lines: W2Lines | null = null;
+    /** Withholding that left with the W-2s switched off. */
+    let fedWithheldOff = 0;
+    let stateWithheldOff = 0;
     if (shape === "soleProp") {
       const profit = gross - (s.expenses ? schCogs + expenses : 0) - (s.homeOffice ? homeOffice : 0);
       fi = { ...inputs, netProfit: profit };
@@ -1940,18 +2244,29 @@ function buildModel(
         (s.salary ? officerComp : 0) -
         (s.retirement ? pension : 0) -
         (s.pte ? stateAddBack : 0);
-      k1 = Math.round(ordinary * ownershipPct);
+      // The K-1's section 179 deduction goes with the write-offs: box 1
+      // stays gross of it, Schedule E nets it.
+      const k1Gross = Math.round(ordinary * ownershipPct);
+      k1 = k1Gross - (s.writeOffs ? section179 : 0);
       fraction = (eGross - ordinary) / Math.max(1, eGross - ordinaryAfter);
       const comp = s.salary ? officerComp : 0;
       const hi = s.salary ? healthInsurance : 0;
       const box1 = Math.max(0, comp - (s.salary && s.retirement ? deferral : 0));
+      // Wages the business paid anyone else sit inside the write-offs: off
+      // with them, the W-2 income goes too. Other employers' wages stay.
+      const employee = s.writeOffs ? wages.employeeEntity : 0;
+      wagesByPerson = wagesByPersonFor(wages, Math.max(0, comp - hi), employee);
+      w2Lines = wages.read ? w2LinesFor(wages, box1, employee) : null;
+      fedWithheldOff = (s.salary ? 0 : fedWithholding.officer) + (s.writeOffs ? 0 : fedWithholding.employee);
+      stateWithheldOff = (s.salary ? 0 : stateWithholding.officer) + (s.writeOffs ? 0 : stateWithholding.employee);
       const stateNet = ordinary + (s.pte ? stateAddBack : 0);
       ent = stateCard?.entity ? entityTax(stateCard, stateNet, eGross, s.pte && electing) : null;
       fi = {
         ...inputs,
         scorp: k1,
-        w2: box1,
-        medicareWages: Math.max(0, comp - hi),
+        w2: box1 + employee + outsideWages,
+        medicareWages: Math.max(0, comp - hi) + employee + outsideWages,
+        scorpMedicareWages: Math.max(0, comp - hi),
         sehiPaid: s.salary ? sehiPaid : null,
         qbi: qbiRead
           ? { income: qbiRatio !== null ? Math.round(k1 * qbiRatio) : qbiRead.income, w2Wages: s.salary ? qbiRead.w2Wages : 0, ubia: qbiRead.ubia }
@@ -1972,7 +2287,8 @@ function buildModel(
         otherDeductions: s.writeOffs ? e.otherDeductions : null,
         totalDeductions: eGross - (s.writeOffs ? cogs : 0) - ordinary,
         ordinaryIncome: ordinary,
-        k1Ordinary: k1,
+        k1Ordinary: k1Gross,
+        k1Section179: s.writeOffs && section179 > 0 ? section179 : null,
         ownershipPct: e.ownershipPct,
         distributions: e.distributions,
         stateNetIncome: ent ? stateNet : null,
@@ -2002,7 +2318,7 @@ function buildModel(
     // Without the dependents: no child tax credit, no child-care credit, and
     // no qualifying person for head of household.
     const runStatus = s.noKids ? statusWithoutDependents(status) : status;
-    if (s.noKids) fi = { ...fi, children: 0, childCareCredit: 0 };
+    if (s.noKids) fi = { ...fi, children: 0, others: 0, childCareCredit: 0 };
     const f = federal(fed, runStatus, fi);
     let st: State | null = null;
     const pteShare = ent ? Math.round(ent.pte * (shape === "partnership" ? sharesTotal : ownershipPct)) : 0;
@@ -2013,6 +2329,7 @@ function buildModel(
         stateBiz,
         mode === "exclusion" ? 0 : pteShare,
         fi.w2,
+        wagesByPerson,
         mode === "exclusion" && s.pte && electing ? k1 : 0,
       );
       // A state that doesn't allow the HSA deduction adds it back
@@ -2042,7 +2359,6 @@ function buildModel(
       }
       st = stateSource !== null ? nonresidentState(stateCard, runStatus, f, si, stateSource) : state(stateCard, runStatus, f, si);
     }
-    const salaryOn = shape !== "scorp" || s.salary;
     const numbers = fillNumbers(
       after,
       f,
@@ -2052,11 +2368,16 @@ function buildModel(
       stateCard,
       stateSource,
       uninsured,
-      salaryOn ? paid : paid - fedWithholding,
-      salaryOn ? statePaid : statePaid - stateWithholding,
+      paid - fedWithheldOff,
+      statePaid - stateWithheldOff,
       gross,
       s,
       pteShare,
+      {
+        federal: shape === "scorp" ? Math.max(0, n(after.federalWithholding) - fedWithheldOff) : null,
+        state: shape === "scorp" ? Math.max(0, n(after.stateWithholding) - stateWithheldOff) : null,
+      },
+      w2Lines,
     );
     const total = totalTaxesOf(numbers, entityNumbers);
     return { fed: f, st, entity: ent, numbers, entityNumbers, total };
@@ -2091,6 +2412,8 @@ function buildModel(
         officerComp,
         healthInsurance,
         deferral,
+        wages,
+        section179,
         pension,
         stateAddBack,
         ownershipPct,
@@ -2100,8 +2423,8 @@ function buildModel(
         uninsured,
         uninsuredNote,
         w2Note: shape === "soleProp" && w2 > 0,
-        fedWithholding,
-        stateWithholding,
+        fedWithholding: fedWithholding.officer + fedWithholding.employee,
+        stateWithholding: stateWithholding.officer + stateWithholding.employee,
         schCogs,
         otherPayments,
         preferential,
@@ -2114,33 +2437,74 @@ function buildModel(
         seWagesNote,
         nomineeNote,
         k1Note,
+        s179Note,
         itemized,
         stateDeduction,
-        dependents: Math.max(dependents, children),
+        dependents: Math.max(dependents, children + others),
         childCareCredit,
         sep,
         ira,
         hsa,
+        claimedAsDependent,
       },
     },
   };
 }
 
+/** Each person's FICA wages: the officer's Medicare wages, the other's pay from the business, and everyone's outside wages. */
+function wagesByPersonFor(w: Wages, officerMedicare: number, employeeEntity: number): [number, number] {
+  const out: [number, number] = [w.outside[0], w.outside[1]];
+  out[w.officer] += officerMedicare;
+  out[1 - w.officer] += employeeEntity;
+  return out;
+}
+
+/** The W-2 lines of a scenario as the review grid shows them. */
+function w2LinesFor(w: Wages, officerBox1: number, employeeEntity: number): W2Lines {
+  const entity: [number, number] = [0, 0];
+  entity[w.officer] = officerBox1;
+  entity[1 - w.officer] = employeeEntity;
+  return {
+    taxpayer: w.outside[0] + entity[0],
+    spouse: w.outside[1] + entity[1],
+    taxpayerEntity: entity[0],
+    spouseEntity: entity[1],
+  };
+}
+
 /**
- * How many qualifying children the child tax credit on line 19 implies.
- * The count isn't read reliably off the dependents block, but the credit
- * is a known function of it: the smallest count that reproduces the line
- * (or zero when there is none). Null when no count does.
+ * How many qualifying children and other dependents the credit on line 19
+ * implies. Schedule 8812's own counts (lines 4 and 6) are taken when read
+ * and they reproduce the line; otherwise the credit is a known function of
+ * the two counts, and the mix that reproduces it is taken — the one that
+ * matches the dependents listed, then the one with the fewest "other"
+ * dependents. Null when no mix does.
  */
-function inferChildren(card: FederalCard, status: FilingStatus, after: ReturnNumbers): number | null {
+function inferDependents(card: FederalCard, status: FilingStatus, after: ReturnNumbers): { children: number; others: number } | null {
   const read = n(after.childTaxCredit);
-  if (read <= 0) return 0;
+  const kidsRead = has(after.qualifyingChildren) ? Math.max(0, Math.round(after.qualifyingChildren)) : null;
+  const othersRead = has(after.otherDependents) ? Math.max(0, Math.round(after.otherDependents)) : null;
+  if (read <= 0) return { children: kidsRead ?? 0, others: othersRead ?? 0 };
   const agi = n(after.agi);
   const limit = Math.max(0, n(after.incomeTax) + n(after.additionalTaxes) - n(after.nonrefundableCredits));
-  for (let k = 1; k <= 10; k++) {
-    if (!off(Math.min(childTaxCredit(card, status, agi, k), limit), read)) return k;
+  const fits = (k: number, o: number) => !off(Math.min(childTaxCredit(card, status, agi, k, o), limit), read);
+  if ((kidsRead ?? 0) + (othersRead ?? 0) > 0 && fits(kidsRead ?? 0, othersRead ?? 0)) {
+    return { children: kidsRead ?? 0, others: othersRead ?? 0 };
   }
-  return null;
+  const listed = Math.max(0, Math.round(n(after.dependentCount)));
+  const lexLess = (a: number[], b: number[]) => {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i];
+    return false;
+  };
+  let best: { k: number; o: number; score: number[] } | null = null;
+  for (let k = 0; k <= 10; k++) {
+    for (let o = 0; o <= 10; o++) {
+      if (k + o === 0 || !fits(k, o)) continue;
+      const score = [listed > 0 && k + o === listed ? 0 : 1, o, k + o];
+      if (!best || lexLess(score, best.score)) best = { k, o, score };
+    }
+  }
+  return best ? { children: best.k, others: best.o } : null;
 }
 
 /** Lay a run out as the lines of a return, the way the review grid shows them. */
@@ -2159,10 +2523,22 @@ function fillNumbers(
   s: Scenario,
   /** The shareholder's share of the entity's elective tax in this scenario. */
   pteShare: number,
+  /** What's still withheld once the W-2s switched off took theirs; null means the after's own figure. */
+  withholding: { federal: number | null; state: number | null },
+  /** The W-2 lines of this scenario, when the return's were read; null carries the after's. */
+  w2Lines: W2Lines | null,
 ): ReturnNumbers {
   const mode = creditMode(stateCard);
   const out = emptyNumbers();
   out.w2Income = fi.w2 > 0 ? fi.w2 : shape === "scorp" ? null : after.w2Income;
+  const orNull = (v: number) => (v > 0 ? v : null);
+  out.w2Taxpayer = w2Lines ? orNull(w2Lines.taxpayer) : after.w2Taxpayer;
+  out.w2Spouse = w2Lines ? orNull(w2Lines.spouse) : after.w2Spouse;
+  out.w2TaxpayerEntity = w2Lines ? orNull(w2Lines.taxpayerEntity) : after.w2TaxpayerEntity;
+  out.w2SpouseEntity = w2Lines ? orNull(w2Lines.spouseEntity) : after.w2SpouseEntity;
+  out.dependentOfAnother = after.dependentOfAnother;
+  out.qualifyingChildren = s.noKids ? null : after.qualifyingChildren;
+  out.otherDependents = s.noKids ? null : after.otherDependents;
   out.businessNetIncome = shape === "soleProp" ? fi.netProfit : null;
   out.scorpIncome = shape === "scorp" ? fi.scorp : null;
   out.partnershipIncome = shape === "partnership" ? fi.partners.reduce((s, p) => s + p.ordinary + p.guaranteed, 0) : null;
@@ -2204,7 +2580,7 @@ function fillNumbers(
   // Line 33 is withholding and estimates plus the refundable credits; the
   // money actually sent in stays the same, the credit is the run's own.
   out.federalPayments = paid + b.refundable;
-  out.federalWithholding = shape === "scorp" ? (fi.w2 > 0 ? after.federalWithholding : null) : after.federalWithholding;
+  out.federalWithholding = withholding.federal !== null ? orNull(withholding.federal) : after.federalWithholding;
   out.federalPenalty = after.federalPenalty;
   const fedBalance = b.totalTax - (paid + b.refundable) + n(after.federalPenalty);
   if (fedBalance >= 0) {
@@ -2239,7 +2615,7 @@ function fillNumbers(
   }
   out.sehiDeduction = b.sehi > 0 ? b.sehi : null;
   out.sehiPaid = fi.sehiPaid;
-  out.medicareWages = shape === "scorp" && fi.medicareWages > 0 ? fi.medicareWages : null;
+  out.medicareWages = shape === "scorp" && fi.scorpMedicareWages > 0 ? fi.scorpMedicareWages : null;
   if (fi.coverage && b.ptc) {
     out.ptcFamilySize = after.ptcFamilySize;
     out.ptcPovertyLine = after.ptcPovertyLine;
@@ -2264,6 +2640,7 @@ function fillNumbers(
       : null;
     out.stateExemptions = after.stateExemptions;
     out.stateMedical = stateCard.medical ? sBefore.medical : null;
+    out.stateWageDeduction = stateCard.wageDeduction || has(after.stateWageDeduction) ? orNull(sBefore.wageDeduction) : null;
     out.stateTaxOnIncome = has(after.stateTaxOnIncome) ? sBefore.tax : null;
     out.stateExemptionCredits = stateCard.exemption.kind === "credit" && has(after.stateExemptionCredits) ? sBefore.exemption : null;
     out.statePteCreditAvailable = pteShare > 0 && mode !== "exclusion" ? pteShare : null;
@@ -2276,7 +2653,7 @@ function fillNumbers(
     out.uninsuredMonths = stateCard.sharedResponsibility ? uninsured : after.uninsuredMonths;
     out.stateTotalTax = mode === "refundable" ? sBefore.grossTax : sBefore.netTax;
     out.statePayments = has(after.statePayments) ? statePaid + (mode === "refundable" ? sBefore.pteCredit : 0) : null;
-    out.stateWithholding = shape === "scorp" ? (fi.w2 > 0 ? after.stateWithholding : null) : after.stateWithholding;
+    out.stateWithholding = withholding.state !== null ? orNull(withholding.state) : after.stateWithholding;
     out.statePenalty = after.statePenalty;
     const balance = sBefore.netTax - statePaid;
     if (balance >= 0) {
@@ -2518,8 +2895,17 @@ export function deriveBefore(
       `Derived from the two after returns: every deduction on the 1065 set to zero — ${facts.cogs > 0 ? `cost of goods sold (${fmt(facts.cogs)}), ` : ""}write-offs (${fmt(facts.writeOffs)}) and the ${fmt(facts.guaranteedPayments)} of guaranteed payments${facts.partnerPremiums > 0 ? " (the partners' health premiums)" : ""} — so the K-1s are the gross receipts${rentalBit}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} partnership` : ""} tables re-run (engine v${DERIVE_VERSION})`,
     );
   } else {
+    const w = facts.wages;
+    const other = w.officer === 0 ? "spouse" : "taxpayer";
+    const outside = w.outside[0] + w.outside[1];
     notes.push(
-      `Derived from the two after returns: every deduction on the 1120-S set to zero — cost of goods sold (${fmt(facts.cogs)}), write-offs (${fmt(facts.writeOffs)}), the owner's ${fmt(facts.officerComp)} of pay, the ${fmt(facts.pension)} retirement plan, the ${fmt(facts.stateAddBack)} of state taxes — so the K-1 is the gross receipts, with no PTE election${rentalBit}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} S corporation` : ""} tables re-run (engine v${DERIVE_VERSION})`,
+      `Derived from the two after returns: every deduction on the 1120-S set to zero — cost of goods sold (${fmt(facts.cogs)}), write-offs (${fmt(facts.writeOffs)}${w.employeeEntity > 0 ? `, including the ${fmt(w.employeeEntity)} of wages the corporation paid the ${other}, whose W-2 goes with them` : ""})${facts.section179 > 0 ? `, the ${fmt(facts.section179)} section 179 deduction on the K-1` : ""}, the owner's ${fmt(facts.officerComp)} of pay, the ${fmt(facts.pension)} retirement plan, the ${fmt(facts.stateAddBack)} of state taxes — so the K-1 is the gross receipts, with no PTE election${rentalBit}${outside > 0 ? `; the ${fmt(outside)} of W-2 wages from another employer stay as they are` : ""}; the ${year} federal${stateName ? `, ${stateName} and ${stateName} S corporation` : ""} tables re-run (engine v${DERIVE_VERSION})`,
+    );
+  }
+  if (facts.s179Note) notes.push(facts.s179Note);
+  if (facts.claimedAsDependent) {
+    notes.push(
+      `Someone else claims the filer (line 12a), so the standard deduction on both sides is the dependent's: earned income plus ${fmt(fed.dependentStandardDeduction.earnedPlus)}, at least ${fmt(fed.dependentStandardDeduction.minimum)} and at most the regular ${fmt(fed.standardDeduction[m.status])} — ${fmt(b.fed.deduction)} on the before`,
     );
   }
   notes.push(
@@ -2628,7 +3014,9 @@ export function deriveBefore(
   }
   if (stateCard && facts.stateSource !== null) {
     notes.push(
-      `${stateCard.name} part-year/nonresident (Form ${stateCard.nonresident?.form}): tax figured as a resident on all income, then prorated by the ${stateCard.name}-source share — ${fmt(facts.stateSource)} of ${fmt(b.fed.totalIncome)} on the before`,
+      stateCard.nonresident?.method === "maryland"
+        ? `${stateCard.name} nonresident (Form ${stateCard.nonresident.form} with ${stateCard.nonresident.form}NR): the deduction and exemptions scaled by the ${stateCard.name} share of federal AGI, the resident tax on all income scaled by the share of taxable income that is ${stateCard.name}'s, plus the ${Math.round((stateCard.nonresident.specialRate ?? 0) * 10000) / 100}% special nonresident tax — ${fmt(facts.stateSource)} of ${stateCard.name}-source income on both sides (${fmt(b.st?.tax ?? 0)} + ${fmt(b.st?.nonresidentTax ?? 0)} on the before)`
+        : `${stateCard.name} part-year/nonresident (Form ${stateCard.nonresident?.form}): tax figured as a resident on all income, then prorated by the ${stateCard.name}-source share — ${fmt(facts.stateSource)} of ${fmt(b.fed.totalIncome)} on the before`,
     );
   }
   if (stateCard && b.st && stateCard.sharedResponsibility && b.st.sharedResponsibility > 0) {
@@ -2638,13 +3026,15 @@ export function deriveBefore(
   }
   if (facts.uninsuredNote) notes.push(facts.uninsuredNote);
   if (m.shape === "scorp" && (facts.fedWithholding > 0 || facts.stateWithholding > 0)) {
+    const w = facts.wages;
+    const outside = w.outside[0] + w.outside[1];
     notes.push(
-      `The owner's W-2 withholding (${[
+      `The withholding on the W-2s from the corporation (${[
         facts.fedWithholding > 0 ? `${fmt(facts.fedWithholding)} federal` : "",
         facts.stateWithholding > 0 ? `${fmt(facts.stateWithholding)} state` : "",
       ]
         .filter(Boolean)
-        .join(", ")}) leaves with the salary, so the before's payments are the estimates alone`,
+        .join(", ")}${w.employeeEntity > 0 ? ", split between the two W-2s by their wages" : ""}) leaves with the pay, so the before's payments are the estimates${outside > 0 ? " and the other employer's withholding" : ""} alone`,
     );
   } else if (m.shape === "scorp" && n(after.w2Income) > 0 && !has(after.federalWithholding)) {
     notes.push("Federal withholding (line 25d) wasn't read, so the before keeps the after's payments; a before print would drop the W-2's withholding");
@@ -2809,8 +3199,14 @@ export function attributeStrategies(
           {
             key: "writeOffs",
             label: "Bookkeeping: business write-offs",
-            note: `${fmt(facts.cogs + facts.writeOffs)} deducted on the 1120-S${facts.cogs > 0 ? ` (${fmt(facts.cogs)} of it cost of goods sold)` : ""}, before the owner's pay, the retirement plan and state taxes`,
-            skip: facts.cogs + facts.writeOffs <= 0,
+            note: `${fmt(facts.cogs + facts.writeOffs + facts.section179)} deducted on the 1120-S${facts.cogs > 0 ? ` (${fmt(facts.cogs)} of it cost of goods sold)` : ""}${
+              facts.section179 > 0 ? ` and the K-1 (${fmt(facts.section179)} of section 179)` : ""
+            }${
+              facts.wages.employeeEntity > 0
+                ? `, including ${fmt(facts.wages.employeeEntity)} of wages paid to the ${facts.wages.officer === 0 ? "spouse" : "taxpayer"}, which come back as W-2 income`
+                : ""
+            }, before the owner's pay, the retirement plan and state taxes`,
+            skip: facts.cogs + facts.writeOffs + facts.section179 <= 0,
           },
           {
             key: "salary",
