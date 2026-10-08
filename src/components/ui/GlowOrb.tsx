@@ -30,6 +30,7 @@ export default function GlowOrb({
   beta = 0.1,
   duration = 17,
   anchorTop = false,
+  rgb,
   className,
   style,
 }: {
@@ -47,6 +48,12 @@ export default function GlowOrb({
    * rather than of a top-anchored heading block.
    */
   anchorTop?: boolean;
+  /**
+   * "r,g,b" overrides for the core and mid stops; the brand's magenta and
+   * violet by default. The feedback survey layers a teal orb over the
+   * default one and crossfades them as a client's ratings climb.
+   */
+  rgb?: { core?: string; mid?: string };
   className?: string;
   style?: React.CSSProperties;
 }) {
@@ -109,9 +116,11 @@ export default function GlowOrb({
   // (transparent at 100%, not 82%) — a hand-rolled gaussian that dissolves
   // instead of stopping, so the glow bleeds across the boundary like the
   // blurred desktop one, at zero filter cost.
+  const core = rgb?.core ?? "255,45,120";
+  const mid = rgb?.mid ?? "139,43,232";
   const background = coarse
-    ? `radial-gradient(circle,rgba(255,45,120,${a}) 0%,rgba(139,43,232,${b}) 26%,rgba(139,43,232,${(b * 0.5).toFixed(4)}) 48%,rgba(139,43,232,${(b * 0.16).toFixed(4)}) 70%,rgba(10,10,14,0) 100%)`
-    : `radial-gradient(circle,rgba(255,45,120,${a}) 0%,rgba(139,43,232,${b}) 45%,rgba(10,10,14,0) 72%)`;
+    ? `radial-gradient(circle,rgba(${core},${a}) 0%,rgba(${mid},${b}) 26%,rgba(${mid},${(b * 0.5).toFixed(4)}) 48%,rgba(${mid},${(b * 0.16).toFixed(4)}) 70%,rgba(10,10,14,0) 100%)`
+    : `radial-gradient(circle,rgba(${core},${a}) 0%,rgba(${mid},${b}) 45%,rgba(10,10,14,0) 72%)`;
 
   return (
     <div

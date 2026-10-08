@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { isConfigured } from "@/lib/firebase/admin";
-import { getSession } from "@/lib/firebase/session";
 import {
   ToolNamesError,
   getToolNames,
   saveToolNames,
 } from "@/lib/tax-strategy/names";
+import { gate } from "../_gate";
 
 /**
  * Custom display names for the Tax Strategy tools. Reads need the tab
@@ -13,31 +12,6 @@ import {
  * as the tools-hub catalog. PUT takes the whole map ({ names: { id: name } });
  * an id absent from the map reverts to the built-in name.
  */
-async function gate(needsAdmin: boolean) {
-  if (!isConfigured()) {
-    return NextResponse.json(
-      { ok: false, message: "Server missing Firebase credentials" },
-      { status: 500 },
-    );
-  }
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ ok: false, message: "Not signed in" }, { status: 401 });
-  }
-  if (!session.permissions.includes("tax-strategy")) {
-    return NextResponse.json(
-      { ok: false, message: "No access to the tax strategy tab" },
-      { status: 403 },
-    );
-  }
-  if (needsAdmin && session.role !== "admin") {
-    return NextResponse.json(
-      { ok: false, message: "Only admins can rename tools" },
-      { status: 403 },
-    );
-  }
-  return session;
-}
 
 export async function GET() {
   const session = await gate(false);

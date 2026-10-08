@@ -1792,6 +1792,10 @@ export default function TaxRecapBuilder({
                 <span className="mb-1.5 block font-mono text-[10.5px] font-bold uppercase tracking-[1.2px] text-mist">
                   Next steps
                 </span>
+                <span className="-mt-0.5 mb-2 block text-[11.5px] text-dusk">
+                  Survey links open our own feedback survey with the
+                  client&rsquo;s name and tax year filled in.
+                </span>
                 <div className="space-y-2">
                   {nextSteps.map((s, i) => (
                     <div key={i} className="space-y-1.5">

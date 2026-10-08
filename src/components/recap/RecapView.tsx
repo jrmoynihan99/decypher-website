@@ -10,6 +10,7 @@ import SectionHeading from "@/components/ui/SectionHeading";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
+import { recapSurveyHref } from "@/lib/feedback/links";
 import { computeRecap, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
 import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
@@ -69,6 +70,10 @@ export default function RecapView({
   const kids = recap.analysis?.kids ?? null;
   const kidsOut = !!kids?.inBefore;
   const kidsBeside = kids && !kids.inBefore && kids.after > 0 ? kids : null;
+
+  // Survey links open the in-house feedback survey with this client's name,
+  // year and recap already filled in — old recaps' Airtable links included.
+  const stepHref = (href: string) => recapSurveyHref(href, recap);
 
   const owed = c.filing.federal.owed + c.filing.state.owed + (c.filing.entity?.owed ?? 0);
   const paid = c.filing.federal.paid + c.filing.state.paid + (c.filing.entity?.paid ?? 0);
@@ -238,7 +243,7 @@ export default function RecapView({
                           {s.options.map((o) => (
                             <a
                               key={o.href}
-                              href={o.href}
+                              href={stepHref(o.href)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-2 rounded-full border border-magenta/50 bg-magenta/[0.06] px-4 py-2 font-display text-[13.5px] font-semibold text-fog no-underline transition-colors hover:border-magenta hover:bg-magenta/[0.12]"
@@ -251,7 +256,7 @@ export default function RecapView({
                       </Panel>
                     ) : s.href ? (
                       <a
-                        href={s.href}
+                        href={stepHref(s.href)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="group flex h-full items-center justify-between gap-4 rounded-[20px] border border-white/10 bg-panel/85 px-6 py-5 no-underline transition-colors hover:border-magenta/60 hover:bg-magenta/[0.06] md:bg-white/[0.045] md:backdrop-blur-xl"

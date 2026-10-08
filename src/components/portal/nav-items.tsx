@@ -39,7 +39,7 @@ export const PORTAL_WIDGETS: PortalWidget[] = [
     href: "/portal/tax-strategy",
     name: "Tax Strategy",
     blurb:
-      "Savings snapshot, shelter engine, S-corp analyzer and the property deal desk.",
+      "Savings snapshot, shelter engine, S-corp analyzer, accountable plans, money allocator and the property deal desk.",
     note: "Shares the bracket tables in lib/tax.ts",
     icon: "M3 3v18h18M7 15l3.5-4 3 2.5L21 7",
     permission: "tax-strategy",
@@ -109,6 +109,16 @@ export const PORTAL_INBOX: PortalWidget[] = [
     note: "Mirrors the #recruiting Slack channel",
     icon: "M3 8h18v12H3zM9 8V6a2 2 0 012-2h2a2 2 0 012 2v2M3 13h18",
     permission: "applications",
+    live: true,
+  },
+  {
+    href: "/portal/client-feedback",
+    name: "Client Feedback",
+    blurb:
+      "Onboarding, bookkeeping and tax surveys: scores by team, follow-ups on unhappy clients, and the monthly scorecard.",
+    note: "Survey links go out from TaxDome and the tax recap",
+    icon: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM8 9h8M8 13h5",
+    permission: "client-feedback",
     live: true,
   },
 ];

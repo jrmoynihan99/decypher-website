@@ -4,7 +4,7 @@ import { adminDb, isConfigured } from "@/lib/firebase/admin";
 /**
  * Admin-set display names for the Tax Strategy tools.
  *
- * The tools themselves are code (five components behind one permission), but
+ * The tools themselves are code (six components behind one permission), but
  * what the firm CALLS them is vocabulary — it changes with how they pitch,
  * so it lives in Firestore like the sales dropdowns do. One doc
  * (`taxStrategyConfig/names`) mapping tool id → custom name; a missing key

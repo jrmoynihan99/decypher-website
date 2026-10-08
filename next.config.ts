@@ -73,6 +73,17 @@ const nextConfig: NextConfig = {
         source: "/recap/:path*",
         headers: NO_STORE,
       },
+      {
+        // The client feedback survey: its link carries the client's name (and
+        // their team's), and the page is rendered with them. Listed bare as
+        // well, for the same :path* reason as the portal above.
+        source: "/feedback",
+        headers: NO_STORE,
+      },
+      {
+        source: "/feedback/:path*",
+        headers: NO_STORE,
+      },
     ];
   },
 };
