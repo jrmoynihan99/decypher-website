@@ -18,12 +18,12 @@ import type { CmsVideoTestimonial, SectionHeadingContent } from "@/sanity/types"
  * (ClickToPlayVideo) — a grid of live YouTube iframes would drag any phone
  * under.
  *
- * A page may carry up to forty videos, which is more wall than any visitor
+ * A page may carry any number of videos, which is more wall than any visitor
  * scrolls, so the grid grows as it's scrolled rather than mounting whole: the
  * first INITIAL on load, then BATCH more each time the bottom comes within
  * PRELOAD of the viewport. Mounting isn't free — each card carries a Reveal
  * (a motion element + its own IntersectionObserver) and a thumbnail request,
- * and forty of those on a phone for the sake of the two people who reach the
+ * and dozens of those on a phone for the sake of the two people who reach the
  * bottom is the wrong trade. Loading ahead of the fold rather than at it means
  * the next rows are already painted by the time they'd be read, so the wall
  * reads as one continuous scroll with no button and no visible stall.

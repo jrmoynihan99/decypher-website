@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * The Tax Strategy tab: six tools behind one permission.
+ * The Tax Strategy tab: seven tools behind one permission.
  *
  * Every tool here is client-facing: the tab gets screen-shared on a call, so
  * the copy inside speaks to the creator ("your numbers"), never about them.
  * Two also keep the team's client records (the S-Corp Analyzer's saved
  * salaries, the Accountable Plan Builder's saved plans); those lists stay
- * hidden until someone asks for them, for the same screen-share reason.
+ * hidden until someone asks for them, for the same screen-share reason. The
+ * seventh, Sales Discovery, is a launcher: the call itself runs full screen
+ * outside the portal, and its answers land in the Setter Answers inbox tab.
  *
  * The tab opens on a launcher rather than a tool, because "tax strategy" is a
  * category, not a question — you arrive knowing which question you're
@@ -29,9 +31,19 @@ import ScorpAnalyzer from "@/components/portal/widgets/ScorpAnalyzer";
 import DealDesk from "@/components/portal/widgets/DealDesk";
 import MoneyAllocator from "@/components/portal/widgets/MoneyAllocator";
 import AccountablePlanBuilder from "@/components/portal/widgets/AccountablePlanBuilder";
+import SalesDiscovery from "@/components/portal/widgets/SalesDiscovery";
 
 /** `icon` is an SVG path `d` on a 24×24 stroke grid, as in nav-items. */
 const TOOLS = [
+  {
+    id: "discovery",
+    name: "Sales Discovery",
+    blurb:
+      "The discovery call, one question per screen on a shared screen: how the creator got here, their entity and payroll, banking, last year's taxes and this year's income, with a red flag or a recommendation the moment an answer earns one. Ends by booking the strategy session.",
+    tag: "Sales",
+    icon: "M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.6a2 2 0 01-.5 2.1L8 9.7a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.8.3 1.7.6 2.6.7a2 2 0 011.7 2z",
+    Component: SalesDiscovery,
+  },
   {
     id: "wizard",
     name: "Savings Snapshot",
@@ -250,8 +262,9 @@ export default function TaxStrategyWorkbench({
       </div>
 
       <p className="mt-2 max-w-xl text-sm text-muted">
-        Six tools for modelling strategies against your numbers, live on the
-        call. The figures are for the conversation, not your return.
+        Seven tools for the call: the discovery questions, and six for
+        modelling strategies against your numbers, live. The figures are for
+        the conversation, not your return.
       </p>
 
       {renameError ? (

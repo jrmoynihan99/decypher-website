@@ -50,6 +50,26 @@ export interface FaqContent {
   answer: string;
 }
 
+/** One PDF in the staff Tools Hub's resource library. */
+export interface CmsResource {
+  id: string;
+  title: string;
+  description: string;
+  /** The asset's CDN URL. */
+  url: string;
+  filename: string;
+  /** Bytes, when the asset reports it. */
+  size: number | null;
+  mimeType: string;
+}
+
+export interface CmsResourceCategory {
+  id: string;
+  title: string;
+  description: string;
+  resources: CmsResource[];
+}
+
 export interface CmsService {
   /** 1-based position; hub colors on the neural map follow it. */
   order: number;

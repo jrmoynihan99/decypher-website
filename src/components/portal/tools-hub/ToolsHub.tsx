@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import { matchesQuery } from "@/lib/tools-hub/catalog";
 import type { ToolDepartment, ToolEntry, ToolsHubCatalog } from "@/lib/tools-hub/types";
+import type { CmsResource, CmsResourceCategory } from "@/sanity/types";
 import { Disclaimer, Mono } from "@/components/portal/widgets/ui";
 import CatalogEditor from "./CatalogEditor";
 import ToolLogo from "./ToolLogo";
 import { useHubPrefs } from "./prefs";
 
 /**
- * The Tools Hub: every tool the team uses, grouped by department.
+ * The Tools Hub: every tool the team uses, grouped by department — and, below
+ * them, the PDFs the team reaches for, grouped by category.
  *
  * Three things are separate on purpose and shouldn't be conflated:
  *
@@ -22,6 +24,12 @@ import { useHubPrefs } from "./prefs";
  *    so a hidden department that matches surfaces with a "hidden" marker on its
  *    header, which also explains why it appeared.
  *
+ * The RESOURCE LIBRARY is a fourth: it's content, not configuration, so it
+ * lives in Sanity (Portal Resources in the Studio) rather than the catalog
+ * editor, and arrives server-rendered like the catalog. Its sections share
+ * the collapse preference (keyed `res:<id>`) and the search box; the
+ * department pills don't apply to it.
+ *
  * Sections open by default. The prototype this came from started them all
  * collapsed to look compact, but the page's entire job is "find the tool and
  * click it", and a screen of four headings does that job badly. Collapse state
@@ -31,12 +39,30 @@ import { useHubPrefs } from "./prefs";
 const buttonCls =
   "inline-flex cursor-pointer items-center gap-2 rounded-[10px] border border-edge-mid px-3.5 py-2 font-mono text-[11px] uppercase tracking-[0.8px] text-dusk transition-colors duration-150 hover:border-edge-bright hover:text-fog";
 
+/** Where an admin adds or fixes a PDF — the Studio's Portal Resources group. */
+const STUDIO_RESOURCES = "/studio/structure/portalResources";
+
+const resourceKey = (id: string) => `res:${id}`;
+
+function matchesResource(r: CmsResource, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    r.title.toLowerCase().includes(q) ||
+    r.description.toLowerCase().includes(q) ||
+    r.filename.toLowerCase().includes(q)
+  );
+}
+
 export default function ToolsHub({
   initialCatalog,
+  resources = [],
   userId,
   isAdmin,
 }: {
   initialCatalog: ToolsHubCatalog;
+  /** The PDF library, by category, as the Studio has it. */
+  resources?: CmsResourceCategory[];
   userId: string;
   isAdmin: boolean;
 }) {
@@ -70,9 +96,24 @@ export default function ToolsHub({
     [catalog.departments, byDepartment, query, searching, hidden],
   );
 
-  const shownIds = sections.map((s) => s.department.id);
+  const library = useMemo(
+    () =>
+      resources
+        .map((category) => ({
+          category,
+          items: category.resources.filter((r) => matchesResource(r, query)),
+        }))
+        .filter(({ items }) => !searching || items.length > 0),
+    [resources, query, searching],
+  );
+
+  const shownIds = [
+    ...sections.map((s) => s.department.id),
+    ...library.map((l) => resourceKey(l.category.id)),
+  ];
   const allOpen = shownIds.length > 0 && shownIds.every((id) => !collapsed.has(id));
-  const hits = sections.reduce((n, s) => n + s.tools.length, 0);
+  const toolHits = sections.reduce((n, s) => n + s.tools.length, 0);
+  const fileHits = library.reduce((n, l) => n + l.items.length, 0);
 
   /** Returns an error message, or null when the save landed. */
   const saveCatalog = async (next: ToolsHubCatalog): Promise<string | null> => {
@@ -195,7 +236,9 @@ export default function ToolsHub({
 
       {searching ? (
         <p className="mt-5 font-mono text-[11px] uppercase tracking-[1.2px] text-dusk">
-          {hits} {hits === 1 ? "tool" : "tools"} matching “{query.trim()}”
+          {toolHits} {toolHits === 1 ? "tool" : "tools"}
+          {resources.length ? ` and ${fileHits} ${fileHits === 1 ? "document" : "documents"}` : ""} matching “
+          {query.trim()}”
         </p>
       ) : null}
 
@@ -203,23 +246,99 @@ export default function ToolsHub({
         {sections.map(({ department, tools }) => (
           <Section
             key={department.id}
-            department={department}
-            tools={tools}
+            title={department.label}
+            count={tools.length}
             open={searching || !collapsed.has(department.id)}
             // A forced-open search result has nothing to toggle.
             onToggle={searching ? undefined : () => toggleSection(department.id)}
             markHidden={searching && hidden.has(department.id)}
-          />
+          >
+            {tools.length ? (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(268px,1fr))] gap-3">
+                {tools.map((tool) => (
+                  <Card key={tool.id} tool={tool} />
+                ))}
+              </div>
+            ) : (
+              <Empty>No tools in this department yet</Empty>
+            )}
+          </Section>
         ))}
 
         {sections.length === 0 ? (
           <div className="rounded-[16px] border border-dashed border-edge-mid bg-white/[0.02] px-6 py-12 text-center text-[13px] text-dusk">
             {searching
-              ? `Nothing matches “${query.trim()}”.`
+              ? `No tools match “${query.trim()}”.`
               : "Every department is switched off — turn one back on above."}
           </div>
         ) : null}
       </div>
+
+      {/* The PDF library. Shown whenever the Studio has a category — an empty
+          one still renders, so a category made a minute ago is visibly there
+          to drop a file into — and always to admins, who get the way in. */}
+      {resources.length || isAdmin ? (
+        <>
+          <div className="mt-10 flex flex-wrap items-end justify-between gap-3 border-b border-edge pb-4">
+            <div>
+              <Mono className="text-faint">Resources</Mono>
+              <h2 className="mt-1 font-display text-[19px] font-semibold text-fog">Documents and guides</h2>
+              <p className="mt-1 text-[12.5px] text-muted">
+                PDFs the team reaches for, by category. Open in a new tab, or download.
+              </p>
+            </div>
+            {isAdmin ? (
+              <a href={STUDIO_RESOURCES} target="_blank" rel="noreferrer" className={buttonCls}>
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-[13px] w-[13px]"
+                >
+                  <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+                Edit in Studio
+              </a>
+            ) : null}
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {library.map(({ category, items }) => (
+              <Section
+                key={category.id}
+                title={category.title}
+                sub={category.description}
+                count={items.length}
+                open={searching || !collapsed.has(resourceKey(category.id))}
+                onToggle={searching ? undefined : () => toggleSection(resourceKey(category.id))}
+                markHidden={false}
+              >
+                {items.length ? (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(268px,1fr))] gap-3">
+                    {items.map((r) => (
+                      <ResourceCard key={r.id} resource={r} />
+                    ))}
+                  </div>
+                ) : (
+                  <Empty>No documents in this category yet</Empty>
+                )}
+              </Section>
+            ))}
+
+            {library.length === 0 ? (
+              <div className="rounded-[16px] border border-dashed border-edge-mid bg-white/[0.02] px-6 py-12 text-center text-[13px] text-dusk">
+                {searching
+                  ? `No documents match “${query.trim()}”.`
+                  : "No documents yet. An admin adds them in the Studio under Portal Resources."}
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
 
       {/* No mailto here on purpose — PortalShell already closes every page with
           one, and two "email otavio" lines stacked is just noise. This one's
@@ -227,28 +346,40 @@ export default function ToolsHub({
       <Disclaimer>
         Missing a tool, a department, or a link that&rsquo;s gone stale? An admin
         can add or fix it from Edit tools, and the change lands for the whole
-        team at once.
+        team at once. Documents and their categories are added in the Studio
+        under Portal Resources.
       </Disclaimer>
     </>
   );
 }
 
-/* ─────────────────────────── one department ─────────────────────────── */
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="py-6 text-center font-mono text-[11.5px] uppercase tracking-[1px] text-faint">{children}</p>
+  );
+}
+
+/* ─────────────────── one department, or one resource category ─────────────────── */
 
 function Section({
-  department,
-  tools,
+  title,
+  sub,
+  count,
   open,
   onToggle,
   markHidden,
+  children,
 }: {
-  department: ToolDepartment;
-  tools: ToolEntry[];
+  title: ToolDepartment["label"];
+  /** A category's one-line description, under its heading. */
+  sub?: string;
+  count: number;
   open: boolean;
   /** Absent while searching, when the section is pinned open. */
   onToggle?: () => void;
   /** This department's pill is off; it's only here because a search matched. */
   markHidden: boolean;
+  children: React.ReactNode;
 }) {
   return (
     <section className="overflow-hidden rounded-[16px] border border-edge bg-panel">
@@ -275,8 +406,9 @@ function Section({
         >
           <path d="m9 6 6 6-6 6" />
         </svg>
-        <span className="flex-1 font-display text-[15px] font-semibold text-fog">
-          {department.label}
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-[15px] font-semibold text-fog">{title}</span>
+          {sub ? <span className="mt-0.5 block text-[12px] text-muted">{sub}</span> : null}
         </span>
         {markHidden ? (
           <span className="flex-none" title="You have this department switched off">
@@ -284,26 +416,79 @@ function Section({
           </span>
         ) : null}
         <span className="flex-none rounded-full border border-edge px-2 py-0.5 font-mono text-[10.5px] tabular-nums text-dusk">
-          {tools.length}
+          {count}
         </span>
       </button>
 
-      {open ? (
-        <div className="p-4">
-          {tools.length ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(268px,1fr))] gap-3">
-              {tools.map((tool) => (
-                <Card key={tool.id} tool={tool} />
-              ))}
-            </div>
-          ) : (
-            <p className="py-6 text-center font-mono text-[11.5px] uppercase tracking-[1px] text-faint">
-              No tools in this department yet
-            </p>
-          )}
-        </div>
-      ) : null}
+      {open ? <div className="p-4">{children}</div> : null}
     </section>
+  );
+}
+
+/* ─────────────────────────── one PDF ─────────────────────────── */
+
+/** "32 KB", "1.4 MB". */
+function fileSize(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(bytes >= 10_000_000 ? 0 : 1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
+function ResourceCard({ resource }: { resource: CmsResource }) {
+  const meta = [resource.filename, fileSize(resource.size)].filter(Boolean).join(" · ");
+  // The CDN forces a download when asked, under the file's own name.
+  const downloadHref = `${resource.url}?dl=${encodeURIComponent(resource.filename)}`;
+  return (
+    <article className="flex flex-col rounded-[16px] border border-edge bg-white/[0.02] p-4 transition-colors duration-150 hover:border-edge-mid hover:bg-white/[0.04]">
+      <span
+        aria-hidden
+        className="grid h-10 w-10 place-items-center rounded-[10px] border border-magenta/30 bg-magenta/[0.08] text-magenta"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+          <path d="M6 2.5h8l5 5V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4A1.5 1.5 0 0 1 6.5 2.5z" />
+          <path d="M14 2.5v5h5M8.5 13h7M8.5 16.5h5" />
+        </svg>
+      </span>
+
+      <h3 className="mt-3.5 font-display text-[15px] font-semibold leading-tight text-fog">{resource.title}</h3>
+      <p className="mt-1 truncate font-mono text-[10.5px] uppercase tracking-[1.2px] text-faint" title={meta}>
+        {meta || "PDF"}
+      </p>
+
+      <p className="mt-2 flex-1 text-[12.5px] leading-relaxed text-muted">{resource.description}</p>
+
+      <div className="mt-4 flex items-center gap-3.5">
+        <a
+          href={resource.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${resource.title}`}
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-magenta/35 bg-magenta/[0.08] px-3 py-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.8px] text-magenta no-underline transition-colors duration-150 hover:border-magenta hover:bg-magenta hover:text-white"
+        >
+          Open
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-[11px] w-[11px]"
+          >
+            <path d="M7 17 17 7M8 7h9v9" />
+          </svg>
+        </a>
+        <a
+          href={downloadHref}
+          download={resource.filename}
+          aria-label={`Download ${resource.title}`}
+          className="text-[12.5px] text-dusk underline decoration-white/15 underline-offset-[3px] transition-colors duration-150 hover:text-fog"
+        >
+          Download
+        </a>
+      </div>
+    </article>
   );
 }
 

@@ -147,6 +147,15 @@ only**, because it's one document the whole team renders from.
   hidden department surfaces with a `hidden` marker on its header.
 - Logos: drop an SVG in `public/logos/` and point a tool's Logo URL at it.
   Without one, the card shows the vendor's monogram over a tint of its accent.
+- **Resource library** (below the tools): PDFs by category, from Sanity
+  rather than the catalog — content, not configuration — edited in the Studio
+  under Portal Resources (admins get an "Edit in Studio" button on the hub) or
+  added with `npm run resources:add`. Read uncached per request
+  (`getPortalResources` in `src/sanity/queries.ts`); the revalidate webhook
+  purges only `/portal/tools-hub` for these types. Category sections share
+  the hub's collapse preference (`res:<id>`) and search; the department pills
+  don't apply. Sanity is public-read, so no PDF with a client's data, a
+  password or a key goes here.
 - **Known placeholders in the seeded list**, ported as the client wrote them —
   `https://taxgpt.internal/`, `https://timeoff.decypher.internal/` and the
   `notion.so/decypher/*-sop` links don't resolve. Fix them in Edit tools.
@@ -328,7 +337,7 @@ the tab is the tax team.
 
 ## Tax Strategy records
 
-Six tools behind `tax-strategy` (`TaxStrategyWorkbench.tsx`). Two keep the
+Seven tools behind `tax-strategy` (`TaxStrategyWorkbench.tsx`). Two keep the
 team's client records, behind `/api/portal/tax-strategy/*` and its `_gate.ts`:
 
 - **S-Corp Analyzer** → `scorpClients/{id}` (`src/lib/tax-strategy/scorp*.ts`).
@@ -345,6 +354,20 @@ Both lists stay hidden until someone asks — the tab is screen-shared on calls.
 Ported from the client team's standalone HTML tools; their maths and wording
 are kept verbatim, so diff against a new version of theirs before changing
 either.
+
+**Sales Discovery** is the seventh tool and the odd one out: a launcher. The
+call itself runs at `/discovery-call`, a page outside `/portal` (like
+`/feedback`, and for the same reasons: no sidebar for the creator to read on
+a screen share, and the survey skin is night-only, which the portal's light
+theme would re-bind). It gates on `tax-strategy` itself. The page is the
+feedback survey's `SurveyFrame` with the discovery call's own questions
+(`src/components/discovery/`); the engine — questions, branching, the
+pop-ups, the record, sanitizers, talking points — is `src/lib/discovery/schema.ts`.
+The lock in the header (or `\`) opens the staff drawer: advisor (defaults to
+the signed-in person; the dropdown is the staff roster via
+`activeStaffNames`), fit, next step, notes, Fathom link, the talking points,
+and the practice flag — closed by default and empty in the DOM while closed.
+Its answers land in **Setter Answers** (below).
 
 ## Inbox tabs
 
@@ -380,6 +403,23 @@ so add, never rename.
   per-person scorecard. The server logs every delete with who did it.
 - Ship it with `npm run portal:grant -- client-feedback` after deploying.
 
+**Setter Answers** (`/portal/setter-answers`, key `setter-answers`) is the
+backend of the discovery call, built as Client Feedback's twin: what the
+creator said on the left, locked; advisor, fit and next step as editable
+dropdowns on the right; a creator opens to everything they said, the notes,
+the Fathom link and the talking points; a Stats tab of distributions; CSV.
+
+- The call writes the record (`POST /api/portal/setter-answers/calls`, then
+  `PUT …/calls/{id}` when an answer is changed or the next-call choice is
+  made) and may `PATCH` its own staff fields from the drawer; those writes
+  accept either `tax-strategy` or `setter-answers`. Reading, editing and
+  deleting from the tab needs `setter-answers` (`_guard.ts`).
+- Practice calls (ticked in the launcher or the drawer, fixed at the first
+  save) stay out of the KPIs by default (**Data** filter) and are cleared
+  with **Clear practice calls**. Deleting a real call is admins only, as
+  with feedback — it feeds the close rate.
+- Ship it with `npm run portal:grant -- setter-answers` after deploying.
+
 ## Data model
 
 `users/{uid}` — `email`, `displayName`, `role: "admin" | "staff"`, `disabled`,
@@ -410,3 +450,9 @@ fields…), `createdAt/ByName`, `savedAt/ByName`.
 map, `dedupe_key` (client ID or `recap:<id>`), `recap_id`, `is_test`; the
 follow-ups at-risk answers create; the dropdown lists, founder and survey
 URL. Schema in `src/lib/feedback/schema.ts`.
+
+`discoveryCalls/{id}` — `call` (what the creator said: `DiscoveryCall`,
+locked), `team` (`advisor`, `fit`, `fitReason`, `nextStep`, `notes`,
+`fathom` — editable), `isTest`, `submittedAt` (the call date), `savedAt` /
+`savedByName` (the call's last re-save), `teamUpdatedAt` / `teamUpdatedBy`.
+Schema in `src/lib/discovery/schema.ts`, store in `src/lib/discovery/store.ts`.

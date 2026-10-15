@@ -141,12 +141,12 @@ export const thankYouPage = defineType({
           options: { disableNew: false },
         },
       ],
-      // 40 is a wall, not a page — see VideoWall, which mounts the first nine
-      // and adds the rest as they're scrolled to, so a phone is never asked to
-      // mount forty cards nobody reached.
-      validation: (r) => r.max(40).unique(),
+      // No cap on the count: VideoWall mounts the first nine and adds the rest
+      // as they're scrolled to, so a phone is never asked to mount a wall
+      // nobody reached, however long the list gets.
+      validation: (r) => r.unique(),
       description:
-        "Which creator testimonials run on the wall, in this order — drag to reorder. Leave empty to show the whole Video Testimonials collection in its own order, which is what every page did before this field existed. Up to 40; they all appear as the visitor scrolls, loading a few rows at a time so the page stays quick to open. The heading over this wall is shared by every thank-you page — edit it in Book a Call → Confirmation → Video wall heading.",
+        "Which creator testimonials run on the wall, in this order — drag to reorder. Leave empty to show the whole Video Testimonials collection in its own order, which is what every page did before this field existed. Add as many as you like; they all appear as the visitor scrolls, loading a few rows at a time so the page stays quick to open. The heading over this wall is shared by every thank-you page — edit it in Book a Call → Confirmation → Video wall heading.",
     }),
     defineField({
       name: "trackingCode",

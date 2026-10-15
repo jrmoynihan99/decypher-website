@@ -27,6 +27,20 @@ export async function listStaff(): Promise<StaffUser[]> {
 }
 
 /**
+ * The names staff know each other by — everyone not disabled, A–Z, with the
+ * caller first when they're on it. The dropdowns that name a colleague (the
+ * discovery call's advisor) read this rather than keeping their own list.
+ */
+export async function activeStaffNames(first?: string): Promise<string[]> {
+  const staff = await listStaff();
+  const names = [...new Set(staff.filter((s) => !s.disabled).map((s) => s.displayName.trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  if (first && !names.includes(first)) names.unshift(first);
+  return names;
+}
+
+/**
  * A one-time set-password link for a staff account — the only way into an
  * invite-created login, and what both "Create account" and "Re-invite" hand
  * back to the admin.

@@ -1,9 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import CipherRain from "@/components/effects/CipherRain";
-import NeuralWeb from "@/components/effects/NeuralWeb";
-import GlowOrb from "@/components/ui/GlowOrb";
 import type { FeedbackLinkContext } from "@/lib/feedback/links";
 import {
   ALL_QUESTIONS,
@@ -23,19 +20,15 @@ import Headline from "./Headline";
 import { HoldToBegin, NameField, type HoldHandle, type NameFieldHandle } from "./IntroControls";
 import QuestionBody from "./QuestionBody";
 import ReviewAsk from "./ReviewAsk";
-import { MAGENTA, SURVEY_CSS } from "./survey-fx";
-
-/** The teal orb's stops: the brand teal, and the deeper teal of the light palette. */
-const TEAL_ORB = { core: "61,214,196", mid: "11,130,118" };
-
-/** NeuralWeb faded in at the top and out at the bottom, as on the recap. */
-const WEB_MASK = "linear-gradient(to bottom, transparent 0, #000 140px, #000 calc(100% - 200px), transparent 100%)";
+import SurveyFrame, { BackButton, DoneMark, PrimaryButton } from "./SurveyFrame";
+import { MAGENTA } from "./survey-fx";
 
 /**
  * The client feedback survey — the public page a TaxDome email or a tax recap
- * links to. It wears the recap's skin on purpose: night background, cipher
- * rain, decrypting headlines, a hold-to-begin ring. A client who's just seen
- * their recap should feel they're still in the same place.
+ * links to. It wears the recap's skin on purpose (SurveyFrame): night
+ * background, cipher rain, decrypting headlines, a hold-to-begin ring. A
+ * client who's just seen their recap should feel they're still in the same
+ * place.
  *
  * One question per screen, auto-advancing ~340ms after a tap, with digits and
  * Enter on a keyboard. A glow behind it drifts from magenta toward teal as the
@@ -382,13 +375,7 @@ export default function FeedbackSurvey({ link, already }: { link: FeedbackLinkCo
           </p>
         ) : null}
         <nav className="mt-auto flex items-center justify-between gap-3 pt-[30px]">
-          <button
-            type="button"
-            onClick={() => go(step === 0 ? "intro" : step - 1)}
-            className="min-h-[44px] cursor-pointer border-0 bg-transparent px-1 font-body text-[15px] font-medium text-muted transition-colors hover:text-fog"
-          >
-            Back
-          </button>
+          <BackButton onClick={() => go(step === 0 ? "intro" : step - 1)} />
           {isLast ? (
             <PrimaryButton disabled={!answered || busy} onClick={() => void submit()}>
               {busy ? "Sending…" : q.optional && blank(a) ? "Skip and send" : "Send feedback"}
@@ -448,163 +435,51 @@ export default function FeedbackSurvey({ link, already }: { link: FeedbackLinkCo
     }
   }
 
-  return (
+  const previewBar = link.preview ? (
     <div
-      // isolate: NeuralWeb sits at -z-10 inside its positioned ancestor, and
-      // without a stacking context here it would drop behind the page.
-      className={`fb-root relative isolate min-h-svh overflow-x-clip transition-colors duration-500 ${
-        pink ? "bg-magenta text-night" : "text-fog"
+      className={`mb-1.5 flex flex-wrap items-center justify-between gap-2.5 rounded-[10px] border px-3 py-2 text-[12.5px] ${
+        pink ? "border-night/25 text-night/70" : "border-white/10 bg-white/[0.035] text-muted"
       }`}
     >
-      <style>{SURVEY_CSS}</style>
-
-      {/* The recap's background, built from the site's own layers: cipher
-          rain, the neural mesh, and GlowOrb. Off on the magenta slide. */}
-      {pink ? null : (
-        <>
-          <CipherRain />
-          <NeuralWeb style={{ WebkitMaskImage: WEB_MASK, maskImage: WEB_MASK }} />
-          {/* Absolute in a clipped layer rather than fixed: a full-screen fixed
-              layer flush to the bottom edge is what makes iOS 26 paint its
-              home-indicator bar solid (see CipherRain). The orbs centre on
-              their box, so the box's height puts the glow at 44% of the
-              screen, behind the question. */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
-            <div
-              className="absolute inset-x-0 top-0 h-[88svh] transition-opacity duration-[1100ms] ease-out"
-              style={{ opacity: glow.dim }}
-            >
-              <div
-                className="absolute inset-0 transition-opacity duration-[1100ms] ease-out"
-                style={{ opacity: 1 - glow.lift }}
-              >
-                <GlowOrb size={980} alpha={0.22} beta={0.12} />
-              </div>
-              <div
-                className="absolute inset-0 transition-opacity duration-[1100ms] ease-out"
-                style={{ opacity: glow.lift }}
-              >
-                <GlowOrb size={980} alpha={0.22} beta={0.12} rgb={TEAL_ORB} />
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      <div className="relative z-[1] mx-auto flex min-h-svh max-w-[580px] flex-col px-5 pb-[max(32px,env(safe-area-inset-bottom))] pt-[max(18px,env(safe-area-inset-top))]">
-        {link.preview ? (
-          <div
-            className={`mb-1.5 flex flex-wrap items-center justify-between gap-2.5 rounded-[10px] border px-3 py-2 text-[12.5px] ${
-              pink ? "border-night/25 text-night/70" : "border-white/10 bg-white/[0.035] text-muted"
+      <span>Preview · answers save as test data</span>
+      <div
+        role="radiogroup"
+        aria-label="Survey to preview"
+        className={`inline-flex flex-wrap rounded-full border p-[3px] ${pink ? "border-night/25 bg-night/10" : "border-white/10 bg-panel"}`}
+      >
+        {KIND_TABS.map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={kind === k}
+            onClick={() => switchKind(k)}
+            className={`cursor-pointer rounded-full border-0 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.12em] ${
+              kind === k
+                ? pink
+                  ? "bg-night text-magenta"
+                  : "bg-magenta text-night"
+                : `bg-transparent ${pink ? "text-night/70" : "text-muted hover:text-fog"}`
             }`}
           >
-            <span>Preview · answers save as test data</span>
-            <div
-              role="radiogroup"
-              aria-label="Survey to preview"
-              className={`inline-flex flex-wrap rounded-full border p-[3px] ${pink ? "border-night/25 bg-night/10" : "border-white/10 bg-panel"}`}
-            >
-              {KIND_TABS.map(([k, label]) => (
-                <button
-                  key={k}
-                  type="button"
-                  role="radio"
-                  aria-checked={kind === k}
-                  onClick={() => switchKind(k)}
-                  className={`cursor-pointer rounded-full border-0 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.12em] ${
-                    kind === k
-                      ? pink
-                        ? "bg-night text-magenta"
-                        : "bg-magenta text-night"
-                      : `bg-transparent ${pink ? "text-night/70" : "text-muted hover:text-fog"}`
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <header className="flex items-center justify-between gap-3">
-          <div className={`font-display text-[17px] font-semibold ${pink ? "text-night" : "text-fog"}`}>
-            DeCypher <span className={pink ? "text-white" : "text-grad"}>Financials</span>
-          </div>
-          <div className={`font-mono text-[11.5px] tracking-[0.1em] ${pink ? "text-night/70" : "text-muted"}`}>{count}</div>
-        </header>
-
-        {idx >= 0 ? (
-          <div aria-hidden className="mt-3.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
-            {questions.map((qq, i) => (
-              <span
-                key={qq.id}
-                className={`h-[2px] rounded-[2px] transition-[background-color,box-shadow] duration-300 ${
-                  i < idx
-                    ? pink
-                      ? "bg-night"
-                      : "bg-magenta"
-                    : i === idx
-                      ? "bg-teal shadow-[0_0_10px_var(--color-teal)]"
-                      : pink
-                        ? "bg-night/20"
-                        : "bg-white/10"
-                }`}
-              />
-            ))}
-          </div>
-        ) : null}
-
-        <main
-          key={`${kind}:${String(step)}`}
-          className={`flex flex-1 flex-col ${pink ? "pt-[clamp(20px,4vh,44px)]" : "pt-[clamp(30px,8vh,76px)]"}`}
-        >
-          {screen}
-        </main>
+            {label}
+          </button>
+        ))}
       </div>
-
-      {/* the site's decrypting chip — desktop only, as on the recap */}
-      {pink ? null : (
-        <div
-          aria-hidden
-          className="fixed bottom-[18px] left-[18px] z-[2] hidden rounded-lg border border-edge-mid bg-night/80 px-3 py-2 font-mono text-[11px] tracking-[0.14em] text-[#9A93AB] backdrop-blur-[8px] md:block"
-        >
-          {"[ DECYPHERING // "}<span className="text-teal">{pct}%</span>{" ]"}
-        </div>
-      )}
     </div>
-  );
-}
+  ) : null;
 
-function PrimaryButton({
-  children,
-  disabled = false,
-  onClick,
-}: {
-  children: React.ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="inline-flex min-h-[50px] cursor-pointer items-center justify-center rounded-full border-0 bg-magenta px-6 font-display text-[15.5px] font-semibold text-night shadow-[0_0_30px_rgba(255,45,120,.38)] transition-[filter,box-shadow,opacity] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none disabled:hover:brightness-100"
+    <SurveyFrame
+      pink={pink}
+      glow={glow}
+      count={count}
+      pct={pct}
+      progress={idx >= 0 ? { idx, keys: questions.map((qq) => qq.id) } : null}
+      screenKey={`${kind}:${String(step)}`}
+      topBar={previewBar}
     >
-      {children}
-    </button>
-  );
-}
-
-function DoneMark() {
-  return (
-    <div
-      aria-hidden
-      className="mb-6 grid h-14 w-14 place-items-center rounded-full bg-teal/[0.12] text-teal shadow-[0_0_34px_rgba(61,214,196,.3)]"
-    >
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 12.5l4.5 4.5L19 7.5" />
-      </svg>
-    </div>
+      {screen}
+    </SurveyFrame>
   );
 }

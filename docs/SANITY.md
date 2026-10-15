@@ -39,6 +39,14 @@ The entire site is content-driven from Sanity (project `076c9ywj`, dataset
   someone external is relying on.
 - **Site Settings** — logo, navbar links, footer, stats, default SEO, and
   the global consultation button (label + link).
+- **Portal Resources** — the PDFs the staff portal's Tools Hub hands out
+  (`resource`), filed under categories (`resourceCategory`) the team invents
+  as it goes. Nothing on the public site reads them; the hub fetches them
+  uncached (`getPortalResources`) on every load. Add one in the Studio
+  (Portal Resources → Resources, or "Create new" on a resource's category
+  field) or with `npm run resources:add -- <file.pdf> --category "…"`.
+  **The dataset is public-read**, so a PDF here is reachable by anyone who
+  finds its asset URL — nothing with a client's data, a password or a key.
 
 Content conventions:
 

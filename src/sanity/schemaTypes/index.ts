@@ -29,6 +29,7 @@ import {
   teamPage,
 } from "./pages";
 import { leaderboardPage } from "./leaderboard";
+import { resource, resourceCategory } from "./resources";
 import { siteSettings } from "./siteSettings";
 import { thankYouPage } from "./thankYou";
 
@@ -61,6 +62,9 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   teamMember,
   service,
   jobOpening,
+  // portal resources (the staff Tools Hub's PDFs)
+  resourceCategory,
+  resource,
   // singletons
   siteSettings,
 ];

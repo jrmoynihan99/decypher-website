@@ -29,6 +29,21 @@ export function mixRgb(a: string, b: string, t: number): string {
 export const finePointer = () =>
   typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
+/**
+ * The survey's frosted surface. Frosted only from md up: a backdrop blur on a
+ * phone re-blurs every frame the page scrolls, for a look nobody can see at
+ * that size.
+ */
+export const glass = "border border-white/10 bg-white/[0.035] md:backdrop-blur-[6px]";
+
+/** An answer row: glass at rest, a magenta ring once picked. */
+export const rowCls = (sel: boolean) =>
+  `flex min-h-[58px] w-full cursor-pointer items-center gap-3.5 rounded-[12px] px-4 py-3 text-left font-body text-[15.5px] text-fog transition-[border-color,background-color,box-shadow] duration-150 ${
+    sel
+      ? "border border-magenta bg-magenta/[0.14] shadow-[0_0_0_1px_#ff2d78,0_0_26px_rgba(255,45,120,.28)]"
+      : `${glass} hover:border-magenta/50`
+  }`;
+
 export const SURVEY_CSS = `
 .fb-enter{animation:fb-rise .34s cubic-bezier(.2,.7,.2,1) both}
 /* the site's hover scramble, on the magenta slide (see Headline) */

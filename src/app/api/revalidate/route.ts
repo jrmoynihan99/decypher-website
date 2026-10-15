@@ -42,6 +42,14 @@ function revalidateForDoc(doc: {
     return { strategy: "surgical", type, path };
   }
 
+  // The staff Tools Hub's PDF library. Nothing on the public site renders
+  // these, and the hub reads them uncached on every request — so there's
+  // nothing to purge, and certainly no reason to purge the marketing site.
+  if (type === "resource" || type === "resourceCategory") {
+    revalidatePath("/portal/tools-hub");
+    return { strategy: "surgical", type, path: "/portal/tools-hub" };
+  }
+
   // Its own fixed route, no slug — the default full purge below would work,
   // but this page is edited often enough during a campaign to be worth the
   // surgical path.

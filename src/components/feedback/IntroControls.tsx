@@ -21,8 +21,28 @@ export type NameFieldHandle = { nudge: () => void };
 
 export const NameField = forwardRef<
   NameFieldHandle,
-  { value: string; onChange: (v: string) => void; onEnter: () => void }
->(function NameField({ value, onChange, onEnter }, ref) {
+  {
+    value: string;
+    onChange: (v: string) => void;
+    onEnter: () => void;
+    /** The wording — the feedback survey's by default; the discovery call asks for the creator's first name. */
+    label?: string;
+    placeholder?: string;
+    hint?: string;
+    autoComplete?: string;
+  }
+>(function NameField(
+  {
+    value,
+    onChange,
+    onEnter,
+    label = "[ YOUR NAME ]",
+    placeholder = "First and last name",
+    hint = "So we know who this feedback is from.",
+    autoComplete = "name",
+  },
+  ref,
+) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const ok = value.trim().length >= 2;
@@ -53,17 +73,17 @@ export const NameField = forwardRef<
   return (
     <div ref={wrapRef} className="fb-enter relative mt-[26px] max-w-[400px]">
       <label htmlFor="fb-name" className="mb-2 block font-mono text-[11px] tracking-[0.14em] text-magenta">
-        [ YOUR NAME ]
+        {label}
       </label>
       <input
         ref={inputRef}
         id="fb-name"
         type="text"
-        autoComplete="name"
+        autoComplete={autoComplete}
         autoCapitalize="words"
         spellCheck={false}
         maxLength={120}
-        placeholder="First and last name"
+        placeholder={placeholder}
         aria-describedby="fb-name-hint"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -88,7 +108,7 @@ export const NameField = forwardRef<
         </svg>
       </span>
       <p id="fb-name-hint" className="mt-2 text-[13px] text-muted">
-        So we know who this feedback is from.
+        {hint}
       </p>
     </div>
   );
@@ -105,8 +125,22 @@ export const HoldToBegin = forwardRef<
     onLocked: () => void;
     /** The charge finished and the unlock beat has played. */
     onBegin: () => void;
+    ariaLabel?: string;
+    /** The captions under the ring, ready and locked. */
+    readyText?: string;
+    lockedText?: string;
   }
->(function HoldToBegin({ ready, onLocked, onBegin }, ref) {
+>(function HoldToBegin(
+  {
+    ready,
+    onLocked,
+    onBegin,
+    ariaLabel = "Start the survey",
+    readyText = "[ HOLD OR TAP TO BEGIN ]",
+    lockedText = "[ ADD YOUR NAME TO BEGIN ]",
+  },
+  ref,
+) {
   const progRef = useRef<SVGCircleElement>(null);
   const [phase, setPhase] = useState<"idle" | "charging" | "unlocked">("idle");
   const running = useRef(false);
@@ -156,7 +190,7 @@ export const HoldToBegin = forwardRef<
     <div className="mt-auto flex flex-col items-center pt-8">
       <button
         type="button"
-        aria-label="Start the survey"
+        aria-label={ariaLabel}
         aria-disabled={!ready}
         // Down, not up: the charge starts the moment a finger lands. The click
         // that follows is a no-op once it's running; with no name, the click
@@ -203,7 +237,7 @@ export const HoldToBegin = forwardRef<
         </span>
       </button>
       <p aria-hidden className="mt-3.5 text-center font-mono text-[11px] tracking-[0.14em] text-muted">
-        {ready ? "[ HOLD OR TAP TO BEGIN ]" : "[ ADD YOUR NAME TO BEGIN ]"}
+        {ready ? readyText : lockedText}
       </p>
     </div>
   );

@@ -14,6 +14,8 @@ import type { StructureResolver } from "sanity/structure";
  *   Team           → personnel files, in site order
  *   Services       → the five service nodes
  *   Job Openings   → careers-page roles, in site order
+ *   Portal Resources → the PDFs the staff Tools Hub hands out, and their
+ *                    categories — not on the public site at all
  *   Site Settings  → nav, footer, stats, default SEO
  */
 
@@ -42,6 +44,8 @@ const HANDLED = [
   "teamMember",
   "service",
   "jobOpening",
+  "resource",
+  "resourceCategory",
   "siteSettings",
   "media.tag",
 ];
@@ -136,6 +140,34 @@ export const structure: StructureResolver = (S) =>
           S.documentTypeList("jobOpening")
             .title("Job Openings")
             .defaultOrdering([{ field: "order", direction: "asc" }]),
+        ),
+      S.divider(),
+      // The staff portal's Tools Hub reads these; nothing on the public site
+      // does. The id is fixed so the hub can deep-link admins straight here.
+      S.listItem()
+        .id("portalResources")
+        .title("Portal Resources")
+        .child(
+          S.list()
+            .title("Portal Resources")
+            .items([
+              S.listItem()
+                .id("resources")
+                .title("Resources (PDFs)")
+                .child(
+                  S.documentTypeList("resource")
+                    .title("Resources")
+                    .defaultOrdering([{ field: "title", direction: "asc" }]),
+                ),
+              S.listItem()
+                .id("categories")
+                .title("Categories")
+                .child(
+                  S.documentTypeList("resourceCategory")
+                    .title("Resource categories")
+                    .defaultOrdering([{ field: "order", direction: "asc" }]),
+                ),
+            ]),
         ),
       S.divider(),
       S.listItem()

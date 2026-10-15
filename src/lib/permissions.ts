@@ -28,6 +28,7 @@ export const PERMISSION_KEYS = [
   "leads",
   "applications",
   "client-feedback",
+  "setter-answers",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -42,6 +43,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   leads: "Leads",
   applications: "Applications",
   "client-feedback": "Client Feedback",
+  "setter-answers": "Setter Answers",
 };
 
 const VALID = new Set<string>(PERMISSION_KEYS);

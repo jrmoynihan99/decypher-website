@@ -5,6 +5,8 @@ import type {
   CmsJob,
   CmsLeaderboardPage,
   CmsLegalPage,
+  CmsResource,
+  CmsResourceCategory,
   CmsService,
   CmsTeamMember,
   CmsTestimonial,
@@ -62,6 +64,64 @@ export async function getAllPageSlugs(
     `*[_type in $types && defined(slug.current)].slug.current`,
     { types },
   );
+}
+
+// ── portal resources ────────────────────────────────────────────────
+
+/**
+ * The staff Tools Hub's PDF library: every category in hub order, each with
+ * its resources. A resource whose file is missing (an upload that never
+ * finished, a deleted asset) is dropped rather than rendered as a dead card.
+ *
+ * Straight to the API and never cached: the portal is dynamic, the Studio is
+ * where these are edited, and a PDF someone just uploaded should be on the
+ * hub on the next load, not in a minute.
+ */
+export async function getPortalResources(): Promise<CmsResourceCategory[]> {
+  type RawResource = {
+    _id: string;
+    title?: string;
+    description?: string;
+    url?: string;
+    filename?: string;
+    size?: number;
+    mimeType?: string;
+  };
+  type RawCategory = { _id: string; title?: string; description?: string; resources?: RawResource[] };
+  const rows: RawCategory[] = await freshClient.fetch(
+    `*[_type == "resourceCategory"] | order(order asc, title asc) {
+      _id, title, description,
+      "resources": *[_type == "resource" && references(^._id)] | order(coalesce(order, 9999) asc, title asc) {
+        _id, title, description,
+        "url": file.asset->url,
+        "filename": file.asset->originalFilename,
+        "size": file.asset->size,
+        "mimeType": file.asset->mimeType
+      }
+    }`,
+    {},
+    { cache: "no-store" },
+  );
+  return (rows ?? []).map((c) => ({
+    id: c._id,
+    title: c.title ?? "Untitled",
+    description: c.description ?? "",
+    resources: (c.resources ?? []).flatMap((r): CmsResource[] =>
+      r.url
+        ? [
+            {
+              id: r._id,
+              title: r.title ?? r.filename ?? "Untitled",
+              description: r.description ?? "",
+              url: r.url,
+              filename: r.filename ?? "document.pdf",
+              size: typeof r.size === "number" ? r.size : null,
+              mimeType: r.mimeType ?? "application/pdf",
+            },
+          ]
+        : [],
+    ),
+  }));
 }
 
 // ── thank-you pages ─────────────────────────────────────────────────

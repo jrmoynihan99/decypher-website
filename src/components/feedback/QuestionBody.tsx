@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Question } from "@/lib/feedback/schema";
-import { MAGENTA, TEAL, mixRgb } from "./survey-fx";
+import { MAGENTA, TEAL, glass, mixRgb, rowCls } from "./survey-fx";
 
 /**
  * The answer controls for one question, by type:
@@ -14,18 +14,9 @@ import { MAGENTA, TEAL, mixRgb } from "./survey-fx";
  *   choice   labelled rows
  *   text     a textarea, optional or "in your own words"
  *
- * Frosted only from md up: a backdrop blur on a phone re-blurs every frame
- * the page scrolls, for a look nobody can see at that size.
+ * The glass surface and the answer row live in survey-fx, shared with the
+ * sales discovery call, which asks its own kinds of question in the same skin.
  */
-
-const glass = "border border-white/10 bg-white/[0.035] md:backdrop-blur-[6px]";
-
-const rowCls = (sel: boolean) =>
-  `flex min-h-[58px] w-full cursor-pointer items-center gap-3.5 rounded-[12px] px-4 py-3 text-left font-body text-[15.5px] text-fog transition-[border-color,background-color,box-shadow] duration-150 ${
-    sel
-      ? "border border-magenta bg-magenta/[0.14] shadow-[0_0_0_1px_#ff2d78,0_0_26px_rgba(255,45,120,.28)]"
-      : `${glass} hover:border-magenta/50`
-  }`;
 
 export default function QuestionBody({
   q,

@@ -84,6 +84,17 @@ const nextConfig: NextConfig = {
         source: "/feedback/:path*",
         headers: NO_STORE,
       },
+      {
+        // The sales discovery call: a staff page outside /portal (it wears
+        // the survey skin), rendered with the creator's name and the staff
+        // roster.
+        source: "/discovery-call",
+        headers: NO_STORE,
+      },
+      {
+        source: "/discovery-call/:path*",
+        headers: NO_STORE,
+      },
     ];
   },
 };
