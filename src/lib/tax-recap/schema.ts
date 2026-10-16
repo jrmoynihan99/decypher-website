@@ -31,6 +31,35 @@ export type ReturnField = {
   optional?: boolean;
 };
 
+/**
+ * Schedule C Part II, line by line: what the DeCyphered video's top
+ * write-offs are built from (lib/decyphered/fromRecap.ts). Read when
+ * printed, hidden in the grid when blank, zeroed on the before with the
+ * other expenses; none of the engine's identities use them.
+ */
+export const SCH_C_LINE_FIELDS = [
+  { key: "schCAdvertising", label: "Advertising (Sch C)", source: "Schedule C line 8", group: "business", optional: true },
+  { key: "schCCarTruck", label: "Car and truck (Sch C)", source: "Schedule C line 9", group: "business", optional: true },
+  { key: "schCCommissions", label: "Commissions and fees (Sch C)", source: "Schedule C line 10", group: "business", optional: true },
+  { key: "schCContractLabor", label: "Contract labor (Sch C)", source: "Schedule C line 11", group: "business", optional: true },
+  { key: "schCEmployeeBenefits", label: "Employee benefits (Sch C)", source: "Schedule C line 14", group: "business", optional: true },
+  { key: "schCInsurance", label: "Insurance (Sch C)", source: "Schedule C line 15", group: "business", optional: true },
+  { key: "schCInterest", label: "Interest (Sch C)", source: "Schedule C lines 16a + 16b", group: "business", optional: true },
+  { key: "schCLegalProfessional", label: "Legal and professional (Sch C)", source: "Schedule C line 17", group: "business", optional: true },
+  { key: "schCOfficeExpense", label: "Office expense (Sch C)", source: "Schedule C line 18", group: "business", optional: true },
+  { key: "schCPension", label: "Pension and profit-sharing (Sch C)", source: "Schedule C line 19", group: "business", optional: true },
+  { key: "schCRent", label: "Rent or lease (Sch C)", source: "Schedule C lines 20a + 20b", group: "business", optional: true },
+  { key: "schCRepairs", label: "Repairs and maintenance (Sch C)", source: "Schedule C line 21", group: "business", optional: true },
+  { key: "schCSupplies", label: "Supplies (Sch C)", source: "Schedule C line 22", group: "business", optional: true },
+  { key: "schCTaxesLicenses", label: "Taxes and licenses (Sch C)", source: "Schedule C line 23", group: "business", optional: true },
+  { key: "schCTravel", label: "Travel (Sch C)", source: "Schedule C line 24a", group: "business", optional: true },
+  { key: "schCMeals", label: "Meals (Sch C)", source: "Schedule C line 24b", group: "business", optional: true },
+  { key: "schCUtilities", label: "Utilities (Sch C)", source: "Schedule C line 25", group: "business", optional: true },
+  { key: "schCOtherExpenses", label: "Other expenses (Sch C)", source: "Schedule C line 27a", group: "business", optional: true },
+] as const satisfies readonly ReturnField[];
+
+export const SCH_C_LINE_KEYS = SCH_C_LINE_FIELDS.map((f) => f.key);
+
 export const RETURN_FIELDS = [
   { key: "w2Income", label: "W-2 wages", source: "Form 1040 line 1z", group: "income" },
   /* ── whose W-2s, and who paid them: what the before does with wages depends on it ── */
@@ -373,6 +402,7 @@ export const RETURN_FIELDS = [
     group: "business",
     optional: true,
   },
+  ...SCH_C_LINE_FIELDS,
   {
     key: "stateTotalTax",
     label: "State total tax",
@@ -647,7 +677,13 @@ export const ENTITY_FIELDS = [
   { key: "officerComp", label: "Compensation of officers", source: "Form 1120-S line 7", group: "deductions", optional: true },
   { key: "wages", label: "Salaries and wages", source: "Form 1120-S line 8 / Form 1065 line 9", group: "deductions", optional: true },
   { key: "guaranteedPayments", label: "Guaranteed payments to partners", source: "Form 1065 line 10 (partnerships only)", group: "deductions", optional: true },
+  /* ── the entity's other expense lines: the DeCyphered video's top write-offs, zeroed on the before ── */
+  { key: "repairs", label: "Repairs and maintenance", source: "Form 1120-S line 9 / Form 1065 line 11", group: "deductions", optional: true },
+  { key: "rents", label: "Rents", source: "Form 1120-S line 11 / Form 1065 line 13", group: "deductions", optional: true },
   { key: "taxesLicenses", label: "Taxes and licenses", source: "Form 1120-S line 12 / Form 1065 line 14", group: "deductions", optional: true },
+  { key: "interest", label: "Interest", source: "Form 1120-S line 13 / Form 1065 line 15", group: "deductions", optional: true },
+  { key: "depreciation", label: "Depreciation", source: "Form 1120-S line 14 / Form 1065 line 16c", group: "deductions", optional: true },
+  { key: "advertising", label: "Advertising", source: "Form 1120-S line 16 (a partnership's sits in its other deductions)", group: "deductions", optional: true },
   { key: "pension", label: "Pension, profit-sharing plans", source: "Form 1120-S line 17 / Form 1065 line 18", group: "deductions", optional: true },
   { key: "employeeBenefits", label: "Employee benefit programs", source: "Form 1120-S line 18 / Form 1065 line 19", group: "deductions", optional: true },
   { key: "otherDeductions", label: "Other deductions", source: "Form 1120-S line 20 / Form 1065 line 21", group: "deductions", optional: true },

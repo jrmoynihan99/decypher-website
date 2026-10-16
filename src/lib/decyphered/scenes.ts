@@ -10,9 +10,12 @@ import type { RecapData } from "./types";
  * comes from `recap.display`. `seek(t)` draws any frame, deterministically.
  * Text stays inside Meta's 9:16 safe zone (x 90–930, y 290–1240).
  *
- * CHANGED from the template: no "top write-offs" scene (no Schedule C
- * line items yet), and the last scene points at @we.decypher instead of a
- * referral offer (no tracked links yet).
+ * CHANGED from the template: the fourth scene is "My top 5 write-offs" —
+ * the biggest expense buckets off the Schedule C or the entity's return
+ * (fromRecap.ts) — in place of the tax personality; a recap with no
+ * expense lines read (saved before they were) keeps the personality scene.
+ * The last scene points at @we.decypher instead of a referral offer (no
+ * tracked links yet).
  */
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -141,9 +144,10 @@ export function createVideo(recap: RecapData, ctx: Ctx, fonts: VideoFonts) {
   /* ── scene list and timeline, as the template builds it ── */
   let step = 0;
   const num = () => String(++step).padStart(2, "0");
+  const writeoffs = recap.top_writeoff_categories;
   const ids: [string, number][] = [["hook", 3.4]];
   if (money) ids.push(["income", 4.8]);
-  ids.push(["saved", 6.0], ["play", 6.0], ["cta", 5.2]);
+  ids.push(["saved", 6.0], [writeoffs.length ? "writeoffs" : "play", 6.0], ["cta", 5.2]);
   const T: Record<string, { start: number; end: number }> = {};
   let acc = 0;
   for (const [id, d] of ids) {
@@ -160,6 +164,10 @@ export function createVideo(recap: RecapData, ctx: Ctx, fonts: VideoFonts) {
   const savedBig = fit({ ...S.big, size: money ? 230 : 300, color: C.teal }, money ? X.estimated_tax_savings : X.tax_bill_cut_pct);
   const personality = recap.tax_personality.name.replace(/ (\S+)$/, "\n$1.");
   const playH1 = fit({ ...S.h1, size: 140 }, personality);
+  const writeoffsTitle = writeoffs.length === 1 ? "My biggest\nwrite-off." : `My top ${writeoffs.length}\nwrite-offs.`;
+  const writeoffsH1 = fit({ ...S.h1, size: 140 }, writeoffsTitle);
+  const rank: Style = { face: "mono", weight: 500, size: 26, lh: 1.3, ls: 0.14, color: C.mag };
+  const amount: Style = { face: "display", weight: 700, size: 42, lh: 1.21, ls: -0.02, color: C.teal };
   const rateN: Style = { face: "display", weight: 700, size: 150, lh: 1, ls: -0.04, color: C.strike };
   const arrow: Style = { face: "body", weight: 400, size: 90, lh: 1.21, ls: 0, color: C.mute };
   const chk: Style = { face: "body", weight: 400, size: 42, lh: 1.21, ls: 0, color: C.ink };
@@ -347,6 +355,35 @@ export function createVideo(recap: RecapData, ctx: Ctx, fonts: VideoFonts) {
           ctx.stroke();
           const { line } = metrics(chk);
           text(chk, s, bx + 40 + 26, rowTop + (76 - line) / 2);
+        });
+      });
+    },
+    writeoffs(L, frame, idx) {
+      let y = 430;
+      const eb = `[ ${eyebrows.writeoffs} // MY TOP WRITE-OFFS ]`;
+      enter(L, 0.1, 0.6, "fade", () => text(S.eyebrow, eb, COL_X, y));
+      y += height(S.eyebrow, eb) + 36;
+      decrypt(L, 0.3, 1.2, 0 * 13 + idx * 31 + 5, frame, (s) => text(writeoffsH1, s, COL_X, y), writeoffsTitle);
+      y += height(writeoffsH1, writeoffsTitle) + 50;
+      writeoffs.forEach((w, i) => {
+        const rowTop = y + i * 76;
+        enter(L, 1.6 + i * 0.4, 0.45, "left", () => {
+          // the rank, the bucket, and (dollars cut only) the amount on the right edge, each centred in a 76px row
+          const mid = (s: Style) => rowTop + (76 - metrics(s).line) / 2;
+          text(rank, String(i + 1).padStart(2, "0"), COL_X, mid(rank));
+          text(chk, w.name, COL_X + 70, mid(chk));
+          if (money) {
+            const { base } = metrics(amount);
+            font(amount);
+            ctx.fillStyle = C.teal;
+            ctx.textAlign = "right";
+            ctx.fillText(X.writeoffs[i], COL_X + COL_W, mid(amount) + base);
+            ctx.textAlign = "left";
+          }
+          if (i < writeoffs.length - 1) {
+            ctx.fillStyle = "rgba(255,255,255,.08)";
+            ctx.fillRect(COL_X, rowTop + 75, COL_W, 1);
+          }
         });
       });
     },

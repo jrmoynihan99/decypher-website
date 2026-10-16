@@ -1,5 +1,5 @@
 import { computeRecap } from "@/lib/tax-recap/compute";
-import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
+import type { EntityFieldKey, RecapDoc, ReturnFieldKey, VideoVariant } from "@/lib/tax-recap/schema";
 import { buildRecap, RecapInputError } from "./buildRecap";
 import type { RecapData, TaxFigures } from "./types";
 
@@ -48,6 +48,62 @@ type RecapLike = Pick<
   "clientName" | "taxYear" | "before" | "after" | "entityBefore" | "entityAfter" | "priorYearIncome" | "analysis"
 >;
 
+/** The after return's Schedule C lines → the kit's line names (config.ts LINE_GROUPS). */
+const SCH_C_LINES: [ReturnFieldKey, string][] = [
+  ["schCAdvertising", "advertising"],
+  ["schCCarTruck", "car_truck"],
+  ["schCCommissions", "commissions_fees"],
+  ["schCContractLabor", "contract_labor"],
+  ["schCWages", "wages"],
+  ["schCEmployeeBenefits", "employee_benefits"],
+  ["schCPension", "pension_profit_sharing"],
+  ["schCDepreciation", "depreciation"],
+  ["schCInsurance", "insurance"],
+  ["schCInterest", "interest"],
+  ["schCLegalProfessional", "legal_professional"],
+  ["schCOfficeExpense", "office_expense"],
+  ["schCRent", "rent_lease"],
+  ["schCRepairs", "repairs"],
+  ["schCSupplies", "supplies"],
+  ["schCTaxesLicenses", "taxes_licenses"],
+  ["schCTravel", "travel"],
+  ["schCMeals", "meals"],
+  ["schCUtilities", "utilities"],
+  ["homeOffice", "home_office"],
+  ["schCOtherExpenses", "other_expenses"],
+];
+
+/** The S corporation's (or partnership's) own deduction lines, the same way. */
+const ENTITY_LINES: [EntityFieldKey, string][] = [
+  ["officerComp", "officer_comp"],
+  ["wages", "wages"],
+  ["repairs", "repairs"],
+  ["rents", "rents"],
+  ["taxesLicenses", "taxes_licenses"],
+  ["interest", "interest"],
+  ["depreciation", "depreciation"],
+  ["advertising", "advertising"],
+  ["pension", "pension_profit_sharing"],
+  ["employeeBenefits", "employee_benefits"],
+  ["otherDeductions", "other_expenses"],
+];
+
+/**
+ * Every expense line the after return printed, Schedule C and the entity's
+ * return together (a client can have both), as the kit's line names. A
+ * recap saved before these lines were read has none, and the video keeps
+ * its personality scene instead of the write-offs.
+ */
+function writeoffLines(recap: RecapLike): Record<string, number> {
+  const lines: Record<string, number> = {};
+  const add = (name: string, v: number | null | undefined) => {
+    if (v && v > 0) lines[name] = (lines[name] ?? 0) + v;
+  };
+  for (const [key, name] of SCH_C_LINES) add(name, recap.after[key]);
+  if (recap.entityAfter) for (const [key, name] of ENTITY_LINES) add(name, recap.entityAfter[key]);
+  return lines;
+}
+
 export function toTaxFigures(recap: RecapLike, variant: VideoVariant): TaxFigures {
   const c = computeRecap(recap);
   const attribution = recap.analysis?.attribution ?? [];
@@ -63,7 +119,7 @@ export function toTaxFigures(recap: RecapLike, variant: VideoVariant): TaxFigure
   return {
     creator: { name: firstName },
     tax_year: recap.taxYear,
-    schedule_c: { gross_receipts: c.receipts, lines: {}, other_expenses: [] },
+    schedule_c: { gross_receipts: c.receipts, lines: writeoffLines(recap), other_expenses: [] },
     totals: {
       tax_before: c.before.totalTaxes,
       tax_after: c.after.totalTaxes,
@@ -103,7 +159,7 @@ export function videoHash(recap: RecapLike): string {
 }
 
 /** Bump when the video's look changes, so stored videos re-render on the next save. */
-export const RENDER_VERSION = "2";
+export const RENDER_VERSION = "3"; // 3: the top write-offs scene
 
 /** True when the recap's stored video still matches its numbers. */
 export function videoIsCurrent(recap: RecapLike & Pick<RecapDoc, "video">): boolean {

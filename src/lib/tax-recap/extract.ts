@@ -327,6 +327,7 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - cogs: Schedule C line 4 (cost of goods sold). Omit when blank.
 - schCWages: Schedule C line 26 (wages, less employment credits). Omit when blank.
 - schCDepreciation: Schedule C line 13 (depreciation and section 179). Omit when blank.
+- The rest of Schedule C Part II, each omitted when blank (with several Schedules C, add each line up across them): schCAdvertising line 8; schCCarTruck line 9; schCCommissions line 10; schCContractLabor line 11; schCEmployeeBenefits line 14; schCInsurance line 15; schCInterest lines 16a + 16b; schCLegalProfessional line 17; schCOfficeExpense line 18; schCPension line 19; schCRent lines 20a + 20b; schCRepairs line 21; schCSupplies line 22; schCTaxesLicenses line 23; schCTravel line 24a; schCMeals line 24b (the deductible amount as printed); schCUtilities line 25; schCOtherExpenses line 27a.
 
 State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field. If there is more than one state, sum the amounts and list the states in notes.
 - stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
@@ -385,7 +386,12 @@ Federal lines — Form 1120-S (2025 layout; on an older layout use the line with
 - totalIncome: Form 1120-S line 6.
 - officerComp: Form 1120-S line 7 (compensation of officers). Omit when blank.
 - wages: Form 1120-S line 8 (salaries and wages). Omit when blank.
+- repairs: Form 1120-S line 9 (repairs and maintenance). Omit when blank.
+- rents: Form 1120-S line 11. Omit when blank.
 - taxesLicenses: Form 1120-S line 12. Omit when blank.
+- interest: Form 1120-S line 13. Omit when blank.
+- depreciation: Form 1120-S line 14 (depreciation not claimed elsewhere on the return). Omit when blank.
+- advertising: Form 1120-S line 16. Omit when blank.
 - pension: Form 1120-S line 17 (pension, profit-sharing, etc., plans). Omit when blank.
 - employeeBenefits: Form 1120-S line 18. Omit when blank.
 - otherDeductions: Form 1120-S line 20. Omit when blank.
@@ -403,7 +409,11 @@ Federal lines — Form 1065 (2025 layout):
 - totalIncome: Form 1065 line 8.
 - wages: Form 1065 line 9 (salaries and wages other than to partners). Omit when blank.
 - guaranteedPayments: Form 1065 line 10 (guaranteed payments to partners). Omit when blank.
+- repairs: Form 1065 line 11 (repairs and maintenance). Omit when blank.
+- rents: Form 1065 line 13. Omit when blank.
 - taxesLicenses: Form 1065 line 14. Omit when blank.
+- interest: Form 1065 line 15. Omit when blank.
+- depreciation: Form 1065 line 16c (depreciation after the part reported elsewhere). Omit when blank.
 - pension: Form 1065 line 18. Omit when blank.
 - employeeBenefits: Form 1065 line 19. Omit when blank.
 - otherDeductions: Form 1065 line 21. Omit when blank.

@@ -72,6 +72,7 @@ import { sideSummary, totalTaxesOf } from "./compute";
 import {
   ENTITY_FIELDS,
   RETURN_FIELDS,
+  SCH_C_LINE_KEYS,
   emptyEntityNumbers,
   emptyNumbers,
   type DerivedBefore,
@@ -1515,6 +1516,7 @@ function buildModel(
     !off(schCGross - n(after.cogs) - n(after.totalExpenses) - n(after.homeOffice), 0)
   ) {
     after = { ...after, businessNetIncome: null, grossReceipts: null, cogs: null, totalExpenses: null, homeOffice: null, schCWages: null, schCDepreciation: null };
+    for (const k of SCH_C_LINE_KEYS) after[k] = null;
     nomineeNote = `A Schedule C with ${fmt(schCGross)} of receipts netted to $0 is income issued under the owner's SSN and picked up on the entity's return — not a business of its own, so it's left out`;
   }
 
@@ -2551,6 +2553,11 @@ function buildModel(
         cogs: s.writeOffs && cogs > 0 ? cogs : null,
         totalIncome: eGross - (s.writeOffs ? cogs : 0),
         wages: s.writeOffs ? e.wages : null,
+        repairs: s.writeOffs ? e.repairs : null,
+        rents: s.writeOffs ? e.rents : null,
+        interest: s.writeOffs ? e.interest : null,
+        depreciation: s.writeOffs ? e.depreciation : null,
+        advertising: s.writeOffs ? e.advertising : null,
         guaranteedPayments: s.healthInsurance && guaranteed > 0 ? guaranteed : null,
         taxesLicenses: s.writeOffs ? e.taxesLicenses : null,
         pension: s.writeOffs ? e.pension : null,
@@ -2634,6 +2641,11 @@ function buildModel(
         totalIncome: eGross - (s.writeOffs ? cogs : 0),
         officerComp: s.salary && comp > 0 ? comp : null,
         wages: s.writeOffs ? e.wages : null,
+        repairs: s.writeOffs ? e.repairs : null,
+        rents: s.writeOffs ? e.rents : null,
+        interest: s.writeOffs ? e.interest : null,
+        depreciation: s.writeOffs ? e.depreciation : null,
+        advertising: s.writeOffs ? e.advertising : null,
         taxesLicenses: s.writeOffs ? e.taxesLicenses : null,
         pension: s.retirement && pension > 0 ? pension : null,
         employeeBenefits: s.writeOffs ? e.employeeBenefits : null,
@@ -3036,6 +3048,8 @@ function fillNumbers(
     out.schCWages = s.expenses ? after.schCWages : null;
     out.schCDepreciation = s.expenses ? after.schCDepreciation : null;
     out.homeOffice = s.homeOffice ? after.homeOffice : null;
+    // the Part II lines go with the expenses (the video's write-offs; no identity reads them)
+    for (const k of SCH_C_LINE_KEYS) out[k] = s.expenses ? after[k] : null;
   }
   out.qualifiedDividends = after.qualifiedDividends;
   out.capitalGain = after.capitalGain;

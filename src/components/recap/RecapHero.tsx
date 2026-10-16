@@ -57,6 +57,7 @@ export default function RecapHero({
   savings,
   initiallyOpen = false,
   onOpen,
+  cue,
   children,
 }: {
   firstName: string;
@@ -65,6 +66,8 @@ export default function RecapHero({
   initiallyOpen?: boolean;
   /** Fires as the lock gives way — the moment to mount the rest of the recap. */
   onOpen: () => void;
+  /** How to go on, under the numbers: scroll by default; the deck says press space. */
+  cue?: React.ReactNode;
   /** The headline numbers that take the lock's place once it's open. */
   children?: React.ReactNode;
 }) {
@@ -428,8 +431,12 @@ export default function RecapHero({
               {open ? (
                 <div className={initiallyOpen ? "" : "animate-rise [animation-delay:180ms]"}>
                   {children}
-                  <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.22em] text-faint">
-                    Scroll for the full recap <span className="animate-blink">▼</span>
+                  <p className="mt-8 flex flex-wrap items-center justify-center gap-x-2 font-mono text-[11px] uppercase tracking-[0.22em] text-faint">
+                    {cue ?? (
+                      <>
+                        Scroll for the full recap <span className="animate-blink">▼</span>
+                      </>
+                    )}
                   </p>
                 </div>
               ) : null}
@@ -463,7 +470,9 @@ export default function RecapHero({
         <span className="animate-blink font-mono text-[11px] text-magenta [animation-duration:1.1s]">▮</span>
       </div>
 
-      {/* the sound toggle — the one control that isn't part of the hold */}
+      {/* the sound toggle — the one control that isn't part of the hold. The
+          sound is the reveal's, so it goes once that's played (the deck's
+          controls take this corner). */}
       {!initiallyOpen ? (
         <button
           type="button"
@@ -471,8 +480,9 @@ export default function RecapHero({
           onClick={toggleSound}
           aria-pressed={sound === true}
           aria-label={sound ? "Turn sound off" : "Turn sound on"}
+          tabIndex={open ? -1 : 0}
           className={`absolute bottom-[18px] right-[18px] z-[5] flex cursor-pointer items-center gap-2 rounded-lg border border-edge-mid bg-night/80 px-3 py-2 font-mono text-[11px] tracking-[0.14em] backdrop-blur-[8px] transition-[opacity,color] duration-300 hover:text-fog print:hidden ${
-            sound === null ? "opacity-0" : sound ? "text-[#9A93AB]" : "text-dusk"
+            sound === null || open ? "pointer-events-none opacity-0" : sound ? "text-[#9A93AB]" : "text-dusk"
           }`}
         >
           <svg viewBox="0 0 24 24" aria-hidden className="h-[13px] w-[13px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

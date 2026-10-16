@@ -19,7 +19,7 @@ export default async function RecapPage({
   const { open } = await searchParams;
   const recap = await getRecapByToken(token);
   if (!recap || recap.revoked) notFound();
-  // `?open` skips the seal (RecapGate): for checking numbers from the portal,
-  // and for anyone printing the page. The client's link never carries it.
+  // `?open` skips the seal (RecapHero): for checking numbers from the portal.
+  // The client's link never carries it. The handout is the /pdf route.
   return <RecapView recap={recap} sealed={open === undefined} share={await shareFor(recap)} />;
 }

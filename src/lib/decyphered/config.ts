@@ -24,8 +24,16 @@ export const BRAND = {
  */
 export const RATE_METHOD: "cents_per_dollar" | "own_total_income" | "headline_income" = "cents_per_dollar";
 
-/** Schedule C Part II line → creator-friendly bucket. Unused until the write-offs scene returns. */
+/**
+ * Schedule C Part II line → creator-friendly bucket. The recap's reader
+ * supplies the lines (fromRecap.ts), for a Schedule C or the entity's own
+ * return; the "top write-offs" scene shows the biggest buckets.
+ */
 export const LINE_GROUPS: Record<string, string> = {
+  // ADDED (port): the entity return's own lines, and the catch-alls
+  officer_comp: "Owner payroll",
+  rents: "Rent & leases",
+  other_expenses: "Other business costs",
   advertising: "Marketing & ads",
   car_truck: "Car & mileage",
   commissions_fees: "Marketing & ads",
@@ -99,4 +107,5 @@ export const PERSONALITIES: Record<string, { name: string; line: string }> = {
 };
 
 export const MAX_STRATEGIES_SHOWN = 4;
-export const TOP_WRITEOFFS_SHOWN = 3;
+// CHANGED (port): five, the "My top 5 write-offs" scene (was 3)
+export const TOP_WRITEOFFS_SHOWN = 5;

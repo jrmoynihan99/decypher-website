@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import CipherRain from "@/components/effects/CipherRain";
 import NeuralWeb from "@/components/effects/NeuralWeb";
 import { MoneyFlow } from "@/components/portal/widgets/ui";
+import RecapDeck, { Keycap, type Slide } from "@/components/recap/RecapDeck";
 import RecapHero from "@/components/recap/RecapHero";
 import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
+import { useCoarsePointer } from "@/hooks/useCoarsePointer";
 import { prefersReducedMotion } from "@/lib/decrypt";
 import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
@@ -18,13 +20,15 @@ import { money } from "@/lib/widget-format";
 /**
  * The client-facing recap — the page the link opens.
  *
- * It opens sealed: RecapHero holds the screen until the client presses and
- * holds to decypher it, and the decyphered headline ("Maya, you saved
- * $31,045") stays as the page's hero. The rest of the recap mounts below at
- * that moment and reads like the home page — full-bleed sections, a
- * decrypting heading each, frosted panels over the moving background — so
- * it is one design from the seal down. `sealed={false}` (the page's `?open`)
- * renders it all open.
+ * It's a deck (RecapDeck): one section per slide, stepped through with the
+ * space bar, the arrows or a swipe, crossfading between. It opens sealed:
+ * RecapHero is the first slide and holds the screen until the client
+ * presses and holds to decypher it; the decyphered headline ("Maya, you
+ * saved $31,045") is the title slide, and only then do the controls appear
+ * and the rest follow. Each slide reads like the home page — a full-bleed
+ * section, a decrypting heading, frosted panels over the moving background
+ * — so it is one design from the seal down. `sealed={false}` (the page's
+ * `?open`) renders the seal already open.
  *
  * The order is a sandwich: what the year would have cost before DeCypher,
  * the savings, then what it cost after. The before and the after are the
@@ -51,6 +55,10 @@ export default function RecapView({
   share?: RecapShare | null;
 }) {
   const [open, setOpen] = useState(!sealed);
+  // The deck remounts a slide each time it's shown. Once they've moved past
+  // the seal, coming back renders it open — the hold is a one-time thing.
+  const [heroLeft, setHeroLeft] = useState(false);
+  const coarse = useCoarsePointer();
   const c = computeRecap(recap);
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
   const stateLabel = recap.stateCode ? (STATE_NAMES[recap.stateCode] ?? recap.stateCode) : "State";
@@ -290,29 +298,30 @@ export default function RecapView({
       : []),
   ];
 
-  return (
-    <>
-      <style>{`@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
-      <CipherRain />
-      <div className="relative z-[1] min-h-svh">
-        <NeuralWeb
-          className="print:hidden"
-          style={{
-            WebkitMaskImage:
-              "linear-gradient(to bottom, transparent 0, #000 160px, #000 calc(100% - 240px), transparent 100%)",
-            maskImage:
-              "linear-gradient(to bottom, transparent 0, #000 160px, #000 calc(100% - 240px), transparent 100%)",
-          }}
-        />
-
+  const slides: Slide[] = [
+    {
+      key: "hero",
+      label: "the reveal",
+      body: (
         <RecapHero
           firstName={firstName}
           taxYear={recap.taxYear}
           savings={totalSavings}
-          initiallyOpen={!sealed}
+          initiallyOpen={!sealed || heroLeft}
           onOpen={() => setOpen(true)}
+          cue={
+            coarse ? (
+              <>
+                Tap next for the full recap <span className="animate-blink">▶</span>
+              </>
+            ) : (
+              <>
+                Press <Keycap>space</Keycap> for the full recap
+              </>
+            )
+          }
         >
-          {/* only the before up here: the after is the payoff further down */}
+          {/* only the before up here: the after is the payoff further on */}
           <div className="mx-auto w-fit min-w-[260px] rounded-[20px] border border-white/10 bg-night/90 px-9 py-5 text-center">
             <div className="font-mono text-[10.5px] uppercase tracking-[1.6px] text-muted">Before DeCypher</div>
             <div className="mt-2 font-display text-[40px] font-bold leading-none tracking-[-1px] tabular-nums text-danger">
@@ -320,83 +329,138 @@ export default function RecapView({
             </div>
           </div>
         </RecapHero>
-
-        {open ? (
-          <>
-            {/* ── agenda + the year, a slim strip under the hero ── */}
-            <section className="px-5 pb-8 pt-4">
-              <Reveal className="mx-auto flex max-w-[1040px] flex-col items-center gap-4">
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <span className="mr-1 font-mono text-[10.5px] uppercase tracking-[0.2em] text-faint">Agenda</span>
-                  {["Your tax summary", "Q&A, if needed", "Housekeeping items"].map((item, i) => (
-                    <span key={item} className="inline-flex items-baseline gap-2.5 rounded-full border border-white/12 bg-white/[0.03] px-4 py-2">
-                      <span className="font-mono text-[11px] text-magenta">0{i + 1}</span>
-                      <span className="font-display text-[14px] font-semibold text-fog">{item}</span>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <Pill label={`${recap.taxYear} income`} value={money(c.currentYearIncome)} />
-                  {c.priorYearIncome !== null ? (
-                    <Pill label={`${recap.taxYear - 1} income`} value={money(c.priorYearIncome)} />
-                  ) : null}
-                  {growth !== null && isFinite(growth) ? (
-                    <Pill
-                      label="Year over year"
-                      value={`${growth >= 0 ? "+" : ""}${Math.round(growth * 100)}%`}
-                      tone={growth >= 0 ? "pos" : "neg"}
-                    />
-                  ) : null}
-                </div>
-              </Reveal>
-            </section>
-
-            {sections.map((s, i) => (
-              <section
-                key={s.label}
-                id={s.id}
-                className={`relative px-5 ${s.stage ? "flex min-h-svh flex-col justify-center py-24 sm:py-28" : "py-20 sm:py-24"}`}
-              >
-                <SectionHeading eyebrow={`[ 0${i + 1} · ${s.label} ]`} title={s.title} sub={s.sub} />
-                <div className={`mx-auto mt-12 w-full sm:mt-14 ${s.stage ? "max-w-[1120px]" : "max-w-[1040px]"}`}>{s.body}</div>
-              </section>
-            ))}
-
-            {/* ── footer ── */}
-            <footer className="px-5 pb-16 pt-6">
-              <div className="mx-auto max-w-[1040px] border-t border-white/10 pt-10 text-center">
-                <div className="font-display text-[17px] font-semibold text-fog">
-                  DeCypher <span className="text-grad">Financials</span>
-                </div>
-                <p className="mt-3 font-mono text-[11px] leading-relaxed text-dusk">
-                  Prepared by DeCypher Financials ·{" "}
-                  <a href="https://wedecypher.co" className="text-mist underline decoration-white/20 underline-offset-2 hover:text-fog">
-                    wedecypher.co
-                  </a>
-                </p>
-                <div className="mt-7 flex flex-wrap items-center justify-center gap-4 print:hidden">
-                  <a
-                    href={`/recap/${recap.token}/pdf`}
-                    className="rounded-full border border-white/15 px-5 py-2.5 font-display text-[13.5px] font-semibold text-fog no-underline transition-colors hover:border-mist"
-                  >
-                    Download PDF
-                  </a>
-                  {sealed ? (
-                    // a fresh load is the reset: nothing about the seal is remembered
-                    <button
-                      type="button"
-                      onClick={() => window.location.assign(window.location.pathname)}
-                      className="cursor-pointer border-0 bg-transparent p-0 font-mono text-[11px] uppercase tracking-[0.18em] text-dusk transition-colors hover:text-fog"
-                    >
-                      ↺ Replay the reveal
-                    </button>
-                  ) : null}
-                </div>
+      ),
+    },
+    {
+      /* ── the year's income up top, then what we'll cover ── */
+      key: "agenda",
+      label: "agenda",
+      fit: true,
+      body: (
+        <section className="relative px-5 py-16 sm:py-20">
+          <SectionHeading
+            eyebrow={`[ agenda · ${recap.taxYear} ]`}
+            title={`Your ${recap.taxYear} income.`}
+            sub="What the year brought in, before any tax on it. Then the three things we'll walk through."
+          />
+          <div className="mx-auto mt-12 w-full max-w-[1040px] sm:mt-14">
+            <Reveal className="flex flex-wrap justify-center gap-3">
+              <Tile label={`${recap.taxYear} income`} strong>
+                <CountUp value={c.currentYearIncome} />
+              </Tile>
+              {c.priorYearIncome !== null ? (
+                <Tile label={`${recap.taxYear - 1} income`}>
+                  <CountUp value={c.priorYearIncome} delay={300} />
+                </Tile>
+              ) : null}
+              {growth !== null && isFinite(growth) ? (
+                <Tile label="Year over year" tone={growth >= 0 ? "pos" : "neg"}>
+                  {`${growth >= 0 ? "+" : ""}${Math.round(growth * 100)}%`}
+                </Tile>
+              ) : null}
+            </Reveal>
+            <Reveal delay={0.15} className="mt-10">
+              <div className="mb-4 flex items-center gap-4">
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-faint">Agenda</span>
+                <span aria-hidden className="h-px flex-1 bg-white/10" />
               </div>
-            </footer>
-          </>
-        ) : null}
-      </div>
+              <ol className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
+                {AGENDA.map((item, i) => (
+                  <li key={item.title}>
+                    <Panel className="h-full !px-6 !py-6">
+                      <span className="font-mono text-[12px] text-magenta">0{i + 1}</span>
+                      <div className="mt-3 font-display text-[19px] font-semibold leading-tight text-fog">{item.title}</div>
+                      <p className="mb-0 mt-2 text-[14px] leading-relaxed text-mist">{item.note}</p>
+                    </Panel>
+                  </li>
+                ))}
+              </ol>
+            </Reveal>
+            <Reveal delay={0.3} className="mt-8">
+              <div
+                role="status"
+                className="mx-auto flex w-fit max-w-full animate-alert-pulse flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full border border-magenta/35 bg-magenta/[0.05] px-5 py-3 text-center motion-reduce:animate-none"
+              >
+                <span
+                  aria-hidden
+                  className="h-[7px] w-[7px] flex-none animate-pulse-soft rounded-full bg-magenta shadow-[0_0_10px_rgba(255,45,120,.9)]"
+                />
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-magenta">Heads up</span>
+                <span className="text-[14px] text-fog">{AGENDA_ALERT}</span>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      ),
+    },
+    ...sections.map(
+      (s, i): Slide => ({
+        key: s.label,
+        label: s.label,
+        id: s.id,
+        fit: true,
+        body: (
+          <section className="relative px-5 py-16 sm:py-20">
+            <SectionHeading eyebrow={`[ 0${i + 1} · ${s.label} ]`} title={s.title} sub={s.sub} />
+            <div className={`mx-auto mt-12 w-full sm:mt-14 ${s.stage ? "max-w-[1120px]" : "max-w-[1040px]"}`}>{s.body}</div>
+          </section>
+        ),
+      }),
+    ),
+  ];
+
+  // the slide footer: who prepared it, the handout, the way back to the seal
+  const footer = (
+    <div className="flex h-11 items-center gap-x-4 font-mono text-[11px] text-dusk">
+      <span className="hidden lg:inline">
+        Prepared by DeCypher Financials ·{" "}
+        <a href="https://wedecypher.co" className="text-mist underline decoration-white/20 underline-offset-2 hover:text-fog">
+          wedecypher.co
+        </a>
+      </span>
+      <a
+        href={`/recap/${recap.token}/pdf`}
+        className="uppercase tracking-[0.18em] text-mist no-underline transition-colors hover:text-fog"
+      >
+        ↓ <span className="hidden sm:inline">Download </span>PDF
+      </a>
+      {sealed ? (
+        // a fresh load is the reset: nothing about the seal is remembered
+        <button
+          type="button"
+          onClick={() => window.location.assign(window.location.pathname)}
+          className="cursor-pointer border-0 bg-transparent p-0 font-mono text-[11px] uppercase tracking-[0.18em] text-dusk transition-colors hover:text-fog"
+        >
+          ↺ Replay<span className="hidden sm:inline"> the reveal</span>
+        </button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+      <style>{`@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
+      {/* the background is the deck's, not any slide's: it never restarts */}
+      <CipherRain />
+      <RecapDeck
+        slides={slides}
+        unlocked={open}
+        footer={footer}
+        onIndexChange={(i) => {
+          if (i > 0) setHeroLeft(true);
+        }}
+        backdrop={
+          <NeuralWeb
+            className="print:hidden"
+            style={{
+              WebkitMaskImage:
+                "linear-gradient(to bottom, transparent 0, #000 120px, #000 calc(100% - 160px), transparent 100%)",
+              maskImage:
+                "linear-gradient(to bottom, transparent 0, #000 120px, #000 calc(100% - 160px), transparent 100%)",
+            }}
+          />
+        }
+      />
     </>
   );
 }
@@ -575,12 +639,45 @@ function ColumnHead({ children }: { children: React.ReactNode }) {
   return <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.2em] text-faint">{children}</div>;
 }
 
-function Pill({ label, value, tone = "plain" }: { label: string; value: string; tone?: "plain" | "pos" | "neg" }) {
+/** What the meeting covers, on the agenda slide. */
+const AGENDA = [
+  {
+    title: "Your tax summary",
+    note: "The year before DeCypher, the year after, the savings, and where each dollar of it came from.",
+  },
+  { title: "Q&A, if needed", note: "Anything on the return you want to walk through, line by line." },
+  { title: "Housekeeping items", note: "What's due at filing, the strategy going forward, and your next steps." },
+] as const;
+
+/** The alert under the agenda, before the numbers start. */
+const AGENDA_ALERT = "Don’t shoot the messenger.";
+
+/**
+ * A headline figure on the agenda slide: the year's income, the year before,
+ * the change. The same plate as Figure; `strong` is the one to look at.
+ */
+function Tile({
+  label,
+  tone = "plain",
+  strong = false,
+  children,
+}: {
+  label: string;
+  tone?: "plain" | "pos" | "neg";
+  strong?: boolean;
+  children: React.ReactNode;
+}) {
   const color = tone === "pos" ? "text-teal" : tone === "neg" ? "text-danger" : "text-fog";
   return (
-    <div className="inline-flex items-baseline gap-2.5 rounded-full border border-white/12 bg-white/[0.03] px-4 py-2">
-      <span className="font-mono text-[10.5px] uppercase tracking-[1.2px] text-muted">{label}</span>
-      <span className={`font-display text-[15px] font-semibold tabular-nums ${color}`}>{value}</span>
+    <div
+      className={`min-w-[240px] flex-1 rounded-[18px] border bg-panel/85 px-6 py-6 text-center md:max-w-[400px] md:bg-white/[0.045] md:backdrop-blur-xl ${
+        strong ? "border-magenta/50 shadow-[0_0_48px_-14px_rgba(255,45,120,.55)]" : "border-white/10"
+      }`}
+    >
+      <div className={`font-display font-bold leading-none tracking-[-0.02em] tabular-nums ${color} ${strong ? "text-[40px]" : "text-[32px]"}`}>
+        {children}
+      </div>
+      <div className={`mt-3 font-mono text-[10.5px] uppercase tracking-[0.16em] ${strong ? "text-magenta" : "text-muted"}`}>{label}</div>
     </div>
   );
 }

@@ -43,6 +43,7 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | Cost of goods sold (Sch C) | Sch C line 4 — a write-off, zeroed with the expenses (Client G: 19,763) | — | — |
 | Wages paid (Sch C) | Sch C line 26 — with depreciation, decides whether the QBI limit over the threshold is zero | — | — |
 | Depreciation (Sch C) | Sch C line 13 | — | — |
+| Schedule C expense lines | Sch C Part II lines 8–27a, each read when printed (advertising, car and truck, commissions, contract labor, employee benefits, insurance, interest, legal and professional, office, pension, rent, repairs, supplies, taxes and licenses, travel, meals, utilities, other) — the DeCyphered video's "top 5 write-offs"; zeroed on the before with the expenses, in no identity | — | — |
 | Qualified dividends | 1040 line 3a — taxed by the capital gains worksheet (Client G: 1,317) | — | — |
 | Capital gain or (loss) | 1040 line 7 | — | — |
 | QBI loss carryforward | Form 8995 line 3, as a positive number (Client G: 21,039) | — | — |
@@ -228,6 +229,7 @@ Per-entity extract (`ENTITY_FIELDS` in `schema.ts`):
 | Total income | line 6 | 790,817 | 836,958 |
 | Compensation of officers | line 7 | 76,971 | — |
 | Salaries and wages | line 8 | 46,026 | — |
+| Repairs, rents, interest, depreciation, advertising | lines 9, 11, 13, 14, 16, each read when printed — the DeCyphered video's top write-offs (with officer compensation, wages, taxes and licenses, pension and benefits); zeroed on the before | — | — |
 | Taxes and licenses | line 12 | 21,423 | — |
 | Pension plans | line 17 | 17,500 | — |
 | Other deductions | line 20 | 155,835 | — |
@@ -318,6 +320,7 @@ Per-entity extract, the 1065 lines:
 | Gross receipts | 1065 line 1a | 241,298 | 241,298 |
 | Total income | line 8 | 241,298 | 241,298 |
 | Guaranteed payments | line 10 | 8,290 | — |
+| Repairs, rents, interest, depreciation | lines 11, 13, 15, 16c, each read when printed — the DeCyphered video's top write-offs; zeroed on the before | — | — |
 | Other deductions | line 21 | 57,631 | — |
 | Total deductions | line 22 | 86,415 | — |
 | Ordinary business income | line 23 | 154,883 | 241,298 |
