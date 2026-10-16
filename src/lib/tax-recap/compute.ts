@@ -80,7 +80,9 @@ export function sideSummary(r: ReturnNumbers, e: EntityNumbers | null = null): R
   // the printed state tax is gross of it; the shareholder's real state bill
   // is net, the same convention as the federal refundable credits.
   const state = n(r.stateTotalTax) - n(r.statePteCreditRefundable);
-  const entity = e ? n(e.stateTax) + n(e.pteTax) : 0;
+  // The corporation's own bills: the state's tax and elective tax, and a
+  // city's corporation tax when it files one (New York City's NYC-3L).
+  const entity = e ? n(e.stateTax) + n(e.pteTax) + n(e.cityTax) : 0;
   const penalties = n(r.federalPenalty) + n(r.statePenalty);
   return {
     w2Income: w2,
@@ -153,7 +155,21 @@ export type RecapComputed = {
   scorp: boolean;
   /** Which kind of entity, for the recap's labels; null for a sole proprietor. */
   entityKind: EntityKind;
+  /** True when the corporation files a city's own return too (New York City's NYC-3L): its tax is inside `entityTaxes`, and the labels say so. */
+  cityTax: boolean;
 };
+
+/** The entity row's label on the recap: what the corporation itself pays, by its kind — and the city when it files a city return too. */
+export function entityRowLabel(c: Pick<RecapComputed, "entityKind" | "cityTax">, stateLabel: string): string {
+  if (c.entityKind === "partnership") return `${stateLabel} LLC tax & fee`;
+  return c.cityTax ? `${stateLabel} & city S-corp tax` : `${stateLabel} S-corp tax & PTET`;
+}
+
+/** The entity line's label on the filing page. */
+export function entityFilingLabel(c: Pick<RecapComputed, "entityKind" | "cityTax">): string {
+  if (c.entityKind === "partnership") return "LLC / partnership";
+  return c.cityTax ? "S-corp (state & city)" : "S-corp (PTET)";
+}
 
 export function computeRecap(
   input: Pick<RecapInput, "before" | "after" | "priorYearIncome"> &
@@ -204,8 +220,9 @@ export function computeRecap(
   // vouchers, so it counts as paid alongside the return's own payments.
   let entity: FilingLine | null = null;
   if (ea) {
-    const paid = n(ea.statePayments) + n(ea.pteTax);
-    entity = filingLine(paid, ea.stateRefund, ea.stateAmountDue, after.entityTaxes - paid);
+    const paid = n(ea.statePayments) + n(ea.pteTax) + n(ea.cityPayments);
+    const due = has(ea.stateAmountDue) || has(ea.cityAmountDue) ? n(ea.stateAmountDue) + n(ea.cityAmountDue) : null;
+    entity = filingLine(paid, ea.stateRefund, due, after.entityTaxes - paid);
   }
 
   const receipts = scorp
@@ -239,6 +256,7 @@ export function computeRecap(
     priorYearIncome: input.priorYearIncome,
     scorp,
     entityKind,
+    cityTax: n(ea?.cityTax) > 0 || n(eb?.cityTax) > 0,
   };
 }
 

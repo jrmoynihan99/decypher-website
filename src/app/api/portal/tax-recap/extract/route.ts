@@ -16,7 +16,8 @@ import {
 
 /**
  * Read one return. Multipart form data:
- *   kind       "before" | "after" | "entity" (the corporation's 1120-S)
+ *   kind       "before" | "after" | "entity" (the corporation's 1120-S) |
+ *              "city" (the city's own return for it, NYC-3L)
  *   file       the ProSeries PDF (up to ~4MB)
  *     — or —
  *   uploadId   id of a file staged in pieces via ../upload (up to 24MB)
@@ -56,9 +57,9 @@ export async function POST(req: Request) {
   }
 
   const kind = form.get("kind");
-  if (kind !== "before" && kind !== "after" && kind !== "entity") {
+  if (kind !== "before" && kind !== "after" && kind !== "entity" && kind !== "city") {
     return NextResponse.json(
-      { ok: false, message: "`kind` must be before, after or entity" },
+      { ok: false, message: "`kind` must be before, after, entity or city" },
       { status: 400 },
     );
   }
@@ -132,8 +133,8 @@ export async function POST(req: Request) {
 
   try {
     const result =
-      kind === "entity"
-        ? await extractEntityReturn(bytes, pageTexts, pageMap)
+      kind === "entity" || kind === "city"
+        ? await extractEntityReturn(bytes, pageTexts, pageMap, kind)
         : await extractReturn(bytes, kind, pageTexts, pageMap, hints);
     return NextResponse.json({
       ok: true,

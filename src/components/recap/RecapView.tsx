@@ -11,7 +11,7 @@ import { prefersReducedMotion } from "@/lib/decrypt";
 import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
-import { computeRecap, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
+import { computeRecap, entityFilingLabel, entityRowLabel, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
 import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
 
@@ -85,7 +85,7 @@ export default function RecapView({
       title: `What ${recap.taxYear} would have cost.`,
       sub: `Your income with nothing taken off it: no write-offs, no strategies${kidsOut ? ", no dependents claimed" : ""}.`,
       stage: true,
-      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" stateLabel={stateLabel} entityKind={c.entityKind} />,
+      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" stateLabel={stateLabel} entityKind={c.entityKind} cityTax={c.cityTax} />,
     },
     {
       label: "the difference",
@@ -125,7 +125,7 @@ export default function RecapView({
       sub: `Your books done and every strategy applied: the ${c.scorp ? "returns" : "return"} you’re filing.`,
       stage: true,
       body: (
-        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} stateLabel={stateLabel} entityKind={c.entityKind} />
+        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} stateLabel={stateLabel} entityKind={c.entityKind} cityTax={c.cityTax} />
       ),
     },
     ...(attribution.length
@@ -197,7 +197,7 @@ export default function RecapView({
                 <FilingRow label="Federal" line={c.filing.federal} />
                 <FilingRow label={stateLabel} line={c.filing.state} />
                 {c.filing.entity ? (
-                  <FilingRow label={c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"} line={c.filing.entity} />
+                  <FilingRow label={entityFilingLabel(c)} line={c.filing.entity} />
                 ) : null}
               </div>
             </Panel>
@@ -455,6 +455,7 @@ function Stage({
   was,
   stateLabel,
   entityKind,
+  cityTax,
 }: {
   side: RecapSide;
   /** The bar's one scale on both sides: the before return's total income. */
@@ -464,6 +465,8 @@ function Stage({
   was?: RecapSide;
   stateLabel: string;
   entityKind: EntityKind;
+  /** The corporation files a city return too, so its row says so. */
+  cityTax: boolean;
 }) {
   const dash = (v: number) => (v === 0 ? "—" : signed(v));
   return (
@@ -506,8 +509,7 @@ function Stage({
           <div>
             <Row label="Federal taxes" value={money(side.federalTaxes)} />
             <Row label={`${stateLabel} taxes`} value={dash(side.stateTaxes)} />
-            {entityKind === "scorp" ? <Row label={`${stateLabel} S-corp tax & PTET`} value={dash(side.entityTaxes)} /> : null}
-            {entityKind === "partnership" ? <Row label={`${stateLabel} LLC tax & fee`} value={dash(side.entityTaxes)} /> : null}
+            {entityKind ? <Row label={entityRowLabel({ entityKind, cityTax }, stateLabel)} value={dash(side.entityTaxes)} /> : null}
             <Row label="Penalties" value={dash(side.penalties)} />
             <Row label="Total taxes owed" value={money(side.totalTaxes)} total tone={tone} />
           </div>

@@ -89,8 +89,12 @@ function isFederalPage(text: string): boolean {
   return FEDERAL_RUNNING_HEAD.test(head) && PAGE_NUMBER.test(head);
 }
 
-/** Which return a PDF is: the shareholder's 1040 or the corporation's 1120-S. */
-export type ReturnKind = "individual" | "entity";
+/**
+ * Which return a PDF is: the shareholder's 1040, the corporation's 1120-S
+ * (with its state return), or a city's own return for the corporation (New
+ * York City's NYC-3L / NYC-4S), which ProSeries prints as a separate file.
+ */
+export type ReturnKind = "individual" | "entity" | "city";
 
 /**
  * Full printed line labels the recap actually reads. These are specific
@@ -171,6 +175,33 @@ const STATE_ENTITY: RegExp[] = [
 ];
 
 /**
+ * A city's return for the corporation (New York City Form NYC-3L): the tax
+ * computation (Schedule A), entire net income (Schedule B), the business
+ * allocation (Schedule H), and the S corporation attachment. Page 1 of the
+ * NYC-3L prints its labels as images and only the numbers reach the text
+ * layer, so a city print is sent whole unless it's long (see CITY_WHOLE_UPTO).
+ */
+const STRONG_CITY: RegExp[] = [
+  /allocated net income/i,
+  /computation and allocation of entire net income/i,
+  /business allocation percentage/i,
+  /calculation of federal taxable income for s corporations/i,
+  /total remittance due/i,
+  /federal return information/i,
+  /alternative tax schedule/i,
+];
+
+/** A city print under this many pages goes whole: the schedules are few and page 1 can't be matched on wording. */
+const CITY_WHOLE_UPTO = 24;
+
+/** The city print's vouchers (NYC-200V, NYC-400) and letters go. */
+const EXCLUDE_CITY: RegExp[] = [
+  /payment voucher|estimated tax by business corporations|\bNYC-200V\b|\bNYC-400\b/i,
+  /instructions for filing/i,
+  /\bdear\b/i,
+];
+
+/**
  * The tax-computation lines a state return ends on. Any one of these is far
  * too common to qualify a page by itself, but the state pages the recap
  * reads are precisely the ones that carry SEVERAL: a total tax, what was
@@ -196,6 +227,17 @@ const STATE_TOTALS: RegExp[] = [
 
 /** How many of the above a state page needs before it earns its place. */
 const STATE_TOTALS_NEEDED = 2;
+
+/**
+ * Or this many filled-in amounts in the print's data fonts. A state page
+ * that computes something carries several; a supplementary schedule one or
+ * two. New York's IT-201 is the case: its label font is shifted rather than
+ * garbled (so `isGarbledText` doesn't flag it) and the wording the rules
+ * above look for comes out as "1<6WD[RQOLQHDPRXQW" — which is how the tax
+ * computation page, the one the state total is on, was being dropped while
+ * the pages either side of it got through on other rules.
+ */
+const STATE_VALUES_NEEDED = 3;
 
 /**
  * State pages that earn their place on their own wording: the state-source
@@ -225,6 +267,10 @@ const STATE_NONRESIDENT: RegExp[] = [
   /deduction method/i,
   /special nonresident tax/i,
   /maryland income factor/i,
+  // New York IT-201 page 3: the tax computation and the city tax. Its
+  // section headings are the only lines of it the text layer prints legibly.
+  /tax calculation, credits, and other taxes/i,
+  /new york city and yonkers taxes/i,
 ];
 
 /**
@@ -316,18 +362,71 @@ const normalize = (text: string) => text.replace(/\s+/g, " ");
 const ENTITY_TITLE = /U\.?S\.? Income Tax Return for an S Corporation|U\.?S\.? Return of Partnership Income/i;
 const ENTITY_FORM = /\bForm\s*1120-?S\b|\bForm\s*1065\b|Partner.s Share of Income, Deductions/i;
 const INDIVIDUAL_TITLE = /U\.?S\.? Individual Income Tax Return/i;
+/**
+ * A city's own return for the corporation: New York City's general
+ * corporation tax (NYC-3L, NYC-4S) or unincorporated business tax (NYC-204).
+ * Its attachment names "Form 1120S" as its source, which is why the federal
+ * title, not the form reference, decides between a city print and the
+ * 1120-S itself.
+ */
+const CITY_TITLE = /\bNYC-3L\b|\bNYC-4S(?:EZ)?\b|\bNYC-204\b|general corporation tax return|unincorporated business tax return|\bNYC-ATT-S-CORP\b/i;
+
+/**
+ * What the file's own name says it is, for a print whose pages can't say
+ * (a scan, or a text layer scrambled throughout — see `textLayerUnusable`).
+ * The firm's exports are named "<client> - <year> 1040 INDIVIDUAL TAX
+ * RETURN.pdf", "<entity> - <year> 1120S S-CORP TAX RETURN.pdf", "<entity> -
+ * <year> NYC TAX RETURN.pdf"; any name that carries a form number or the
+ * words works. Null when the name says nothing.
+ */
+export function kindFromFileName(name: string): ReturnKind | null {
+  const t = name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").toUpperCase();
+  if (/\bNYC\b|\bCITY\b/.test(t)) return "city";
+  if (/\b1120\s?S\b|\bS\s?CORP(?:ORATION)?\b|\b1065\b|\bPARTNERSHIP\b|\bK\s?1\b/.test(t)) return "entity";
+  if (/\b1040\b|\bINDIVIDUAL\b|\bPERSONAL\b/.test(t)) return "individual";
+  return null;
+}
+
+/** Which federal form an entity print's name says it is; null when it doesn't say. */
+export function entityFormFromFileName(name: string): "1120-S" | "1065" | null {
+  const t = name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").toUpperCase();
+  if (/\b1065\b|\bPARTNERSHIP\b/.test(t)) return "1065";
+  if (/\b1120\s?S\b|\bS\s?CORP(?:ORATION)?\b/.test(t)) return "1120-S";
+  return null;
+}
+
+/**
+ * Whether the text layer is unusable throughout: every page with text on
+ * it is garbled. A print made through a generic PDF driver rather than
+ * ProSeries' own export sets each page in one embedded font whose glyphs
+ * are numbered by first use, with nothing mapping them back to letters —
+ * labels and numbers alike come out as noise, on every page. Nothing can be
+ * matched, found or painted out on such a print, so it is read like a scan.
+ * A ProSeries export with a few garbled pages (a font quirk on Schedule C
+ * or the FTB forms) is not this: its other pages read fine.
+ */
+export function textLayerUnusable(pageTexts: string[]): boolean {
+  // Judged on the pages `isGarbledText` can judge (200+ characters); a
+  // near-empty page (a voucher stub, a continuation sheet) says nothing.
+  const withText = pageTexts.filter((t) => t.replace(/\s+/g, "").length >= 200);
+  return withText.length > 0 && withText.every(isGarbledText);
+}
 
 /**
  * Which return this is, from its own pages: an entity's print opens on
  * Form 1120-S or Form 1065 (whose own page 1 may have an unreadable text
- * layer — the K-1 that follows names the form), a client's on Form 1040.
- * Null when neither shows up in the first pages (a scan, or something else
- * entirely).
+ * layer — the K-1 that follows names the form), a client's on Form 1040, a
+ * city's on its own form. When none shows up in the first pages (a scan,
+ * a print whose text layer is scrambled throughout), the file's name is
+ * asked (`kindFromFileName`); null when it says nothing either.
  */
-export function detectReturnKind(pageTexts: string[]): ReturnKind | null {
+export function detectReturnKind(pageTexts: string[], fileName = ""): ReturnKind | null {
   const head = pageTexts.slice(0, 12).map(normalize);
-  const entity = head.some((t) => ENTITY_TITLE.test(t) || ENTITY_FORM.test(t));
+  const entityTitle = head.some((t) => ENTITY_TITLE.test(t));
+  const entity = entityTitle || head.some((t) => ENTITY_FORM.test(t));
   const individual = head.some((t) => INDIVIDUAL_TITLE.test(t) || /this is your total income/i.test(t));
+  const city = head.some((t) => CITY_TITLE.test(t));
+  if (city && !entityTitle && !individual) return "city";
   if (entity && !individual) return "entity";
   if (individual && !entity) return "individual";
   if (entity && individual) {
@@ -337,17 +436,17 @@ export function detectReturnKind(pageTexts: string[]): ReturnKind | null {
       if (INDIVIDUAL_TITLE.test(t)) return "individual";
     }
   }
-  return null;
+  return fileName ? kindFromFileName(fileName) : null;
 }
 
-/** Which federal return an entity's print is, from its pages; null when it can't be told. */
-export function detectEntityForm(pageTexts: string[]): "1120-S" | "1065" | null {
+/** Which federal return an entity's print is, from its pages, else from its file name; null when neither can tell. */
+export function detectEntityForm(pageTexts: string[], fileName = ""): "1120-S" | "1065" | null {
   for (const raw of pageTexts) {
     const t = normalize(raw);
     if (/Return of Partnership Income|\bForm\s*1065\b|Partner.s Share of Income, Deductions/i.test(t)) return "1065";
     if (/Income Tax Return for an S Corporation|\bForm\s*1120-?S\b|Shareholder.s Share of Income, Deductions/i.test(t)) return "1120-S";
   }
-  return null;
+  return fileName ? entityFormFromFileName(fileName) : null;
 }
 
 /**
@@ -368,10 +467,11 @@ export function selectPages(
   // A scan has no text to match on, so there is nothing to filter with.
   if (chars < MIN_TEXT_CHARS) return allPages(n, "no-text-layer");
   if (n < MIN_PAGES_TO_FILTER) return allPages(n, "short-document");
+  if (kind === "city" && n <= CITY_WHOLE_UPTO) return allPages(n, "short-document");
 
-  const exclude = kind === "entity" ? EXCLUDE_ENTITY : EXCLUDE;
-  const strong = kind === "entity" ? STRONG_ENTITY : STRONG;
-  const stateOwn = kind === "entity" ? STATE_ENTITY : STATE_NONRESIDENT;
+  const exclude = kind === "entity" ? EXCLUDE_ENTITY : kind === "city" ? EXCLUDE_CITY : EXCLUDE;
+  const strong = kind === "entity" ? STRONG_ENTITY : kind === "city" ? STRONG_CITY : STRONG;
+  const stateOwn = kind === "entity" ? STATE_ENTITY : kind === "city" ? STRONG_CITY : STATE_NONRESIDENT;
 
   const kept: number[] = [];
   /** Text of every kept page, so a later copy of the same page is skipped. */
@@ -401,7 +501,8 @@ export function selectPages(
     const needed = isFederalPage(text)
       ? strong.some((re) => re.test(text))
       : STATE_TOTALS.filter((re) => re.test(text)).length >= STATE_TOTALS_NEEDED ||
-        stateOwn.some((re) => re.test(text));
+        stateOwn.some((re) => re.test(text)) ||
+        (valueCounts !== null && (valueCounts[i] ?? 0) >= STATE_VALUES_NEEDED);
     if (needed) {
       kept.push(i + 1);
       seen.add(text);
@@ -409,9 +510,15 @@ export function selectPages(
   }
 
   // The one line the recap cannot be built without: the 1040's total tax,
-  // or the entity's ordinary income (on the 1120-S or 1065, or its K-1).
-  // Not finding it means the matching missed, not that the return lacks it.
-  const must = kind === "entity" ? /ordinary business income \(loss\)/i : /this is your total tax/i;
+  // or the entity's ordinary income (on the 1120-S or 1065, or its K-1),
+  // or the city return's allocation. Not finding it means the matching
+  // missed, not that the return lacks it.
+  const must =
+    kind === "entity"
+      ? /ordinary business income \(loss\)/i
+      : kind === "city"
+        ? /allocated net income|business allocation percentage/i
+        : /this is your total tax/i;
   const foundMust = kept.some((p) => must.test(normalize(pageTexts[p - 1] ?? "")));
   if (kept.length < MIN_KEPT || !foundMust) return allPages(n, "too-few-matches");
 

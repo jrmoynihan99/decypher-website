@@ -14,6 +14,7 @@ import {
   validateYearCard,
   type Bracket,
   type ByStatus,
+  type CityRules,
   type EntityRules,
   type FederalCard,
   type PartnershipRules,
@@ -1060,49 +1061,7 @@ function EntityEditor({ value, onChange }: { value: EntityRules; onChange: (v: E
         <p className="mt-1 text-[11.5px] leading-snug text-dusk">
           One row is a flat minimum. Several are tiers by the corporation&rsquo;s gross receipts: the first row the receipts fall under applies; the last row is &ldquo;and over&rdquo;.
         </p>
-        <div className="mt-3 max-w-[420px]">
-          <div className="grid grid-cols-[1fr_1fr_28px] gap-2 border-b border-edge pb-2">
-            <Mono className="text-dusk">Receipts below</Mono>
-            <Mono className="text-dusk">Minimum</Mono>
-            <span />
-          </div>
-          {minimum.map((row, i) => {
-            const last = i === minimum.length - 1;
-            return (
-              <div key={i} className="grid grid-cols-[1fr_1fr_28px] items-center gap-2 border-b border-edge py-1.5 last:border-b-0">
-                {last ? (
-                  <span className="px-2.5 font-mono text-[11.5px] text-dusk">and over</span>
-                ) : (
-                  <Num value={row.below} nullable onChange={(v) => setMin(minimum.map((r, j) => (j === i ? { ...r, below: v } : r)))} ariaLabel={`Minimum tax row ${i + 1} receipts below`} />
-                )}
-                <Num value={row.amount} onChange={(v) => setMin(minimum.map((r, j) => (j === i ? { ...r, amount: v ?? 0 } : r)))} ariaLabel={`Minimum tax row ${i + 1} amount`} />
-                <button
-                  type="button"
-                  disabled={minimum.length <= 1}
-                  onClick={() => {
-                    const rows = minimum.filter((_, j) => j !== i);
-                    rows[rows.length - 1] = { ...rows[rows.length - 1], below: null };
-                    setMin(rows);
-                  }}
-                  aria-label={`Remove minimum tax row ${i + 1}`}
-                  className="cursor-pointer text-center text-[14px] text-dusk hover:text-danger disabled:opacity-30"
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => {
-              const lastRow = minimum[minimum.length - 1];
-              setMin([...minimum.slice(0, -1), { ...lastRow, below: 0 }, { below: null, amount: lastRow.amount }]);
-            }}
-            className={`${linkBtn} mt-3`}
-          >
-            + Add tier
-          </button>
-        </div>
+        <TierRows rows={minimum} onChange={setMin} what="Minimum tax" />
       </div>
 
       <div>
@@ -1171,6 +1130,95 @@ function EntityEditor({ value, onChange }: { value: EntityRules; onChange: (v: E
           </div>
         ) : null}
       </div>
+
+      <div>
+        <Check
+          value={!!value.city}
+          onChange={(on) => onChange({ ...value, city: on ? { name: "", form: "", rate: 0, minimum: [{ below: null, amount: 0 }] } : null })}
+          label="The corporation files a city's own return too"
+          hint="New York City's general corporation tax (Form NYC-3L): a rate on the net income allocated to the city by the return's own business allocation percentage, at least a minimum tiered by the city receipts. The city return is dropped on the builder as a third file; the allocation is read off it. The capital-base and alternative taxes aren't modeled."
+        />
+        {value.city ? <CityEditor value={value.city} onChange={(city) => onChange({ ...value, city })} /> : null}
+      </div>
+    </div>
+  );
+}
+
+/** A city's own tax on the corporation (New York City's NYC-3L). */
+function CityEditor({ value, onChange }: { value: CityRules; onChange: (v: CityRules) => void }) {
+  const minimum = value.minimum.length ? value.minimum : [{ below: null, amount: 0 }];
+  return (
+    <div className="mt-3 space-y-4 rounded-[16px] border border-edge px-4 py-3">
+      <div className="grid max-w-[520px] gap-4 sm:grid-cols-3">
+        <Labeled label="City">
+          <input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value.slice(0, 40) })} placeholder="New York City" className={inputCls} />
+        </Labeled>
+        <Labeled label="Form" hint="e.g. NYC-3L">
+          <input value={value.form} onChange={(e) => onChange({ ...value, form: e.target.value.slice(0, 20) })} className={inputCls} />
+        </Labeled>
+        <Labeled label="Rate on allocated net income" hint="New York City: 8.85%">
+          <Num value={value.rate} pct onChange={(v) => onChange({ ...value, rate: v ?? 0 })} />
+        </Labeled>
+      </div>
+      <div>
+        <Mono className="text-mist">Minimum tax</Mono>
+        <p className="mt-1 text-[11.5px] leading-snug text-dusk">
+          Tiers by the receipts allocated to the city (New York City: $25 under $100,000 up to $5,000 over $25,000,000); the last row is &ldquo;and over&rdquo;.
+        </p>
+        <TierRows rows={minimum} onChange={(minimum) => onChange({ ...value, minimum })} what="City minimum tax" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tiers by receipts: "receipts below" and the amount, the last row "and
+ * over". The S corporation's minimum tax and a city's share the shape.
+ */
+function TierRows({ rows, onChange, what }: { rows: EntityRules["minimum"]; onChange: (rows: EntityRules["minimum"]) => void; what: string }) {
+  return (
+    <div className="mt-3 max-w-[420px]">
+      <div className="grid grid-cols-[1fr_1fr_28px] gap-2 border-b border-edge pb-2">
+        <Mono className="text-dusk">Receipts below</Mono>
+        <Mono className="text-dusk">Minimum</Mono>
+        <span />
+      </div>
+      {rows.map((row, i) => {
+        const last = i === rows.length - 1;
+        return (
+          <div key={i} className="grid grid-cols-[1fr_1fr_28px] items-center gap-2 border-b border-edge py-1.5 last:border-b-0">
+            {last ? (
+              <span className="px-2.5 font-mono text-[11.5px] text-dusk">and over</span>
+            ) : (
+              <Num value={row.below} nullable onChange={(v) => onChange(rows.map((r, j) => (j === i ? { ...r, below: v } : r)))} ariaLabel={`${what} row ${i + 1} receipts below`} />
+            )}
+            <Num value={row.amount} onChange={(v) => onChange(rows.map((r, j) => (j === i ? { ...r, amount: v ?? 0 } : r)))} ariaLabel={`${what} row ${i + 1} amount`} />
+            <button
+              type="button"
+              disabled={rows.length <= 1}
+              onClick={() => {
+                const kept = rows.filter((_, j) => j !== i);
+                kept[kept.length - 1] = { ...kept[kept.length - 1], below: null };
+                onChange(kept);
+              }}
+              aria-label={`Remove ${what.toLowerCase()} row ${i + 1}`}
+              className="cursor-pointer text-center text-[14px] text-dusk hover:text-danger disabled:opacity-30"
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => {
+          const lastRow = rows[rows.length - 1];
+          onChange([...rows.slice(0, -1), { ...lastRow, below: 0 }, { below: null, amount: lastRow.amount }]);
+        }}
+        className={`${linkBtn} mt-3`}
+      >
+        + Add tier
+      </button>
     </div>
   );
 }

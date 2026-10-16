@@ -82,7 +82,7 @@ export type FailureInput = {
   mismatches: Mismatch[];
   after: ReturnNumbers;
   entity: EntityNumbers | null;
-  extraction: { after: ReturnExtract | null; entity: EntityExtract | null };
+  extraction: { after: ReturnExtract | null; entity: EntityExtract | null; city?: EntityExtract | null };
   /** The reader's and cross-check's warnings, per return. */
   warnings: { after: string[]; entity: string[] };
   pages: { after: { total: number; sent: number } | null; entity: { total: number; sent: number } | null };
@@ -184,7 +184,7 @@ export function sanitizeFailureInput(raw: unknown): FailureInput {
     mismatches: sanitizeMismatches(r.mismatches),
     after: sanitizeNumbers(r.after),
     entity: sanitizeEntityNumbers(r.entity),
-    extraction: { after: sanitizeExtract(ex.after), entity: sanitizeEntityExtract(ex.entity) },
+    extraction: { after: sanitizeExtract(ex.after), entity: sanitizeEntityExtract(ex.entity), city: sanitizeEntityExtract(ex.city) },
     warnings: { after: strings(w.after, 30, 1200), entity: strings(w.entity, 30, 1200) },
     pages: { after: pagesOf(p.after), entity: pagesOf(p.entity) },
   };

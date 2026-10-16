@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  CITY_FIELD_KEYS,
   ENTITY_FIELDS,
   ENTITY_FIELD_KEYS,
   RETURN_FIELDS,
@@ -177,6 +178,35 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+/** The entity schema, with `lines` limited to the given keys (the city reader asks for its six lines only). */
+const entityOutputSchema = (keys: readonly string[]) => ({
+  type: "object",
+  properties: {
+    entityName: { type: "string", description: "The entity's name as printed on the form. Empty string if not found." },
+    taxYear: { type: "integer", description: "The tax year of the return. 0 if not found." },
+    returnForm: {
+      type: "string",
+      enum: ["1120-S", "1065", ""],
+      description: "Which federal return the entity files: 1120-S for an S corporation, 1065 for a partnership. Empty string if it can't be told.",
+    },
+    stateCode: { type: "string", description: "Two-letter code of the state the city is in. Empty string if unknown." },
+    stateForm: { type: "string", description: "The city form the figures came from, e.g. NYC-3L. Empty string if none." },
+    notes: {
+      type: "string",
+      description: "Anything the reviewer should know: unusual items, lines you were unsure about. Empty string if nothing.",
+    },
+    lines: {
+      type: "array",
+      description: "One entry per field that has a printed value. Omit fields whose line is blank. Each key at most once.",
+      items: lineSchema(keys),
+    },
+  },
+  required: ["entityName", "taxYear", "returnForm", "stateCode", "stateForm", "notes", "lines"],
+  additionalProperties: false,
+});
+
+const CITY_OUTPUT_SCHEMA = entityOutputSchema(CITY_FIELD_KEYS);
+
 const ENTITY_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -316,7 +346,9 @@ State lines. The state return can be for any state; identify the main individual
 - Massachusetts Form 1: stateTaxOnIncome is line 22 (tax on 5.0% income); stateTotalTax is line 32 (income tax after credits — NOT line 37 if it differs, and never line 51); statePayments is line 51 (withholding plus the refundable credits on line 48, as the form totals them); stateWithholding is line 38; stateAmountOwed is line 55 as printed; statePenalty is the M-2210 amount, interest and penalty printed beside line 55; stateTotalDue is line 55 plus those; stateBusinessIncome is line 6a plus line 7 (business income plus the S corporation / partnership income). Report stateAdjustments only when Schedule Y or line 15 carries something beyond lines 11a/11b.
 - stateExemptionCredits: the state's exemption credits after any phase-out, when they are a credit off the tax (California 540 line 32). Omit for other states.
 - stateMedical: the state's medical expense deduction (NJ-1040 line 31). Omit when blank.
-- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31, 540NR line 37). Omit when blank.
+- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31, 540NR line 37; New York IT-201 line 39). Omit when blank.
+- stateLocalTax: a city income tax the state return carries for a city resident — New York IT-201 line 54 (NYC resident tax after NYC credits, the city taxes block on page 3). Omit when the filer isn't a city resident (lines 47–54 blank) and for every other state.
+- New York IT-201: stateTotalTax is line 61 (New York State, New York City, Yonkers and sales taxes together — line 46 alone is NOT it); stateTaxOnIncome is line 39; stateLocalTax is line 54; stateDeduction is line 34; stateAdjustments is (line 24 − line 19) − line 32, omitted when there are no additions or subtractions; statePayments is line 76; stateWithholding is lines 72, 73 and 74 added up; stateRefund is line 78; stateAmountOwed is line 80; statePenalty is lines 81 + 82; stateTotalDue is line 80. The IT-201's labels print as scrambled letters on these PDFs — go by the line numbers and the page layout.
 - statePteCreditAvailable: FTB 3804-CR Part II line 3, the pass-through entity elective tax credit available. Omit when there is no such form.
 - statePteCredit: FTB 3804-CR Part II line 4, the credit claimed on this return (it also appears on Form 540 line 43 or 44 with code 242). Omit when there is no such form.
 - statePteCreditRefundable: a refundable pass-through entity tax credit claimed in the payments section of the state return, AFTER the total tax line — New Jersey NJ-1040 line 63, "Pass-Through Business Alternative Income Tax Credit". Report stateTotalTax (NJ-1040 line 54) and statePayments (line 66) as printed; this credit is taken out afterwards. Omit when there is none.
@@ -399,6 +431,22 @@ State lines: the state's own entity return — California Form 100S for an S cor
 
 Also report the entity's name as printed on the federal form, the tax year, which form it is, the two-letter state code and the state form. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
 
+const CITY_SYSTEM = `You read a city's own corporate income tax return for a small S corporation, printed from Intuit ProSeries — New York City Form NYC-3L (General Corporation Tax Return) or NYC-4S — and report specific line values as JSON.
+
+${CONVENTIONS}
+- The print may include payment vouchers (NYC-200V, NYC-400 estimated tax), the return's schedules, and the NYC-ATT-S-CORP attachment. Page 1 of the NYC-3L (Schedule A) may print its labels as images: read it by its layout — the computation of tax runs down the right-hand column.
+- Report returnForm as "1120-S" (the attachment says the figures come from the federal Form 1120S), stateCode as "NY", and stateForm as the city form's name ("NYC-3L").
+
+Lines:
+- cityNetIncome: NYC-3L Schedule A line 1, the allocated net income (the same figure as Schedule B line 26, total allocated net income).
+- cityAllocationPct: Schedule H line 7, the business allocation percentage, as a plain number with its decimals (54.21 for 54.21%). It also appears as the issuer's allocation percentage on Schedule A line 22 and Schedule E line 15 when the two are the same; prefer Schedule H.
+- cityReceipts: Schedule A line 4, the New York City gross receipts the minimum tax is set by (the same as Schedule H line 6, column A).
+- cityTax: Schedule A line 11, the net tax after credits (line 6 is the tax before credits: the largest of the income tax, the capital tax, the alternative tax and the minimum).
+- cityPayments: Schedule A line 14, prepayments. Omit when blank.
+- cityAmountDue: Schedule A line 21, the total remittance due (line 15 is the balance due before interest and penalty). Report 0 when printed as 0; omit when blank.
+
+Also report the corporation's name as printed and the tax year. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
+
 /**
  * What the browser worked out from the unredacted text layer and the model
  * can't see for itself once the identity is painted over — which W-2s the
@@ -407,10 +455,14 @@ Also report the entity's name as printed on the federal form, the tax year, whic
  */
 export const HINTS_MAX = 2000;
 
-function userPrompt(kind: "before" | "after" | "entity", hints: string | null): string {
+type ReadKind = "before" | "after" | "entity" | "city";
+
+function userPrompt(kind: ReadKind, hints: string | null): string {
   const base =
     kind === "entity"
       ? `This is the entity's return (Form 1120-S or Form 1065, with its state return) for the client's business, as filed. Read the lines described in your instructions from this PDF and return the JSON.`
+      : kind === "city"
+        ? `This is the city's own return for the client's corporation (New York City Form NYC-3L or NYC-4S), as filed. Read the lines described in your instructions from this PDF and return the JSON.`
       : kind === "before"
         ? `This is the BEFORE return: the same client's return prepared with income only and no deductions or strategies applied. Read the lines described in your instructions from this PDF and return the JSON.`
         : `This is the AFTER return: the client's final return with every deduction and strategy applied. Read the lines described in your instructions from this PDF and return the JSON.`;
@@ -468,12 +520,12 @@ function checkPdf(pdf: Buffer) {
 /** One structured read of a PDF: the parsed JSON (folded to fields) and the usage. */
 async function readPdf(
   pdf: Buffer,
-  kind: "before" | "after" | "entity",
+  kind: ReadKind,
   system: string,
   schema: Record<string, unknown>,
   hints: string | null,
 ): Promise<{ parsed: unknown; usage: ReadUsage }> {
-  const label = kind === "entity" ? "entity return" : `${kind} return`;
+  const label = kind === "entity" ? "entity return" : kind === "city" ? "city return" : `${kind} return`;
   // Streamed so a long read (a 40-page client copy takes a while) can't trip
   // an idle-connection timeout somewhere between here and the API.
   const model = modelName();
@@ -612,14 +664,22 @@ export async function extractReturn(
   return { extract, warnings, usage };
 }
 
-/** The corporation's return: Form 1120-S, its K-1, and the state S corporation return. */
+/**
+ * The corporation's return: Form 1120-S, its K-1, and the state S
+ * corporation return — or, as `kind` "city", the city's own return for it
+ * (NYC-3L), read into the same record's city lines.
+ */
 export async function extractEntityReturn(
   pdf: Buffer,
   pageTexts: string[] | null,
   pageMap: number[] | null = null,
+  kind: "entity" | "city" = "entity",
 ): Promise<EntityExtractResult> {
   checkPdf(pdf);
-  const { parsed, usage } = await readPdf(pdf, "entity", ENTITY_SYSTEM, ENTITY_OUTPUT_SCHEMA, null);
+  const { parsed, usage } =
+    kind === "city"
+      ? await readPdf(pdf, "city", CITY_SYSTEM, CITY_OUTPUT_SCHEMA, null)
+      : await readPdf(pdf, "entity", ENTITY_SYSTEM, ENTITY_OUTPUT_SCHEMA, null);
   const raw = sanitizeEntityExtract(parsed);
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 
@@ -628,7 +688,7 @@ export async function extractEntityReturn(
   const { unverified, noText } = verified;
 
   const warnings: string[] = [];
-  const formName = extract.returnForm ?? "entity return";
+  const formName = kind === "city" ? (extract.stateForm ?? "city return") : (extract.returnForm ?? "entity return");
   if (unverified.length) {
     const labels = unverified.map((k) => ENTITY_FIELDS.find((f) => f.key === k)?.label ?? k);
     warnings.push(`Couldn't find these numbers in the ${formName} text, check them by hand: ${labels.join(", ")}`);
@@ -637,7 +697,7 @@ export async function extractEntityReturn(
   if (extract.notes) warnings.push(`Reader notes (${formName}): ${extract.notes}`);
 
   console.log(
-    `[tax-recap] read entity return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
+    `[tax-recap] read ${kind} return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
       `${pageTexts?.length ?? "?"} pages sent, ${usage.inputTokens} in / ${usage.outputTokens} out, ${unverified.length} unverified`,
   );
 

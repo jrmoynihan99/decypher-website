@@ -2,6 +2,7 @@ import {
   detectEntityForm,
   detectReturnKind,
   isGarbledText,
+  textLayerUnusable,
   selectPages,
   selectionSummary,
   type PageSelection,
@@ -72,8 +73,14 @@ export type PreparedPdf = {
   sentBytes: number;
   /** Null when the whole document is going; otherwise why it was trimmed. */
   trimmed: { pctPagesDropped: number } | null;
-  /** Set when filtering was skipped, for the reviewer-facing note. */
-  fallback: PageSelection["fallback"] | "slice-failed";
+  /**
+   * Set when filtering was skipped, for the reviewer-facing note.
+   * "garbled-text-layer": the text layer is scrambled on every page (a
+   * print made through a generic PDF driver, not ProSeries' export), so the
+   * file went whole and as printed, like a scan, with no page text to check
+   * against.
+   */
+  fallback: PageSelection["fallback"] | "slice-failed" | "garbled-text-layer";
   /** Which return this is, from its own pages; null when it couldn't be told. */
   kind: ReturnKind | null;
   /** Original page numbers of the sent pages whose text layer is garbled (every word on them painted out). */
@@ -117,6 +124,12 @@ export type PdfAnalysis = {
   bands: Map<number, Box[]>;
   /** Per page: whether its text layer is garbled (pages.ts `isGarbledText`). */
   garbled: boolean[];
+  /**
+   * True when every page's text is garbled and no data font could be told
+   * apart: the text layer is scrambled throughout (pages.ts
+   * `textLayerUnusable`), and the print is handled like a scan.
+   */
+  unreadable: boolean;
   /** The fonts the identity was printed in anywhere in the print — ProSeries' data fonts. */
   valueFonts: string[];
   /** Per page: how many filled-in amounts it carries in those fonts (identity numbers don't count). */
@@ -288,11 +301,12 @@ function tokensOf(values: Run[]): string[] {
   return [...out];
 }
 
-/** SSNs in the three ways ProSeries prints them, EINs, long digit runs, emails, phones, dates. */
+/** SSNs in the three ways ProSeries prints them, EINs, long digit runs (and the one-digit-per-box way city forms print them), emails, phones, dates. */
 const PATTERNS: RegExp[] = [
   /\b\d{3}[- ]\d{2}[- ]\d{4}\b/,
   /\b\d{2}-\d{7}\b/,
   /\b\d{9,}\b/,
+  /\b\d(?: \d){8}\b/,
   /\S+@\S+\.\S+/,
   /\(?\d{3}\)?[- ]?\d{3}-\d{4}/,
   /\b\d{2}[-/]\d{2}[-/]\d{4}\b/,
@@ -457,7 +471,9 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
   const bytes = await file.arrayBuffer();
   const pages = await readPages(bytes);
   const texts = pages ? pages.map((p) => p.text) : [];
-  const kind = pages ? detectReturnKind(texts) : null;
+  // The pages say what the return is; when they can't (a scan, a text layer
+  // scrambled throughout), the file's name is asked.
+  const kind = pages ? detectReturnKind(texts, file.name) : null;
 
   let name: string | null = null;
   let entityName: string | null = null;
@@ -519,7 +535,7 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
       }
     }
   }
-  const entityForm = kind === "entity" ? detectEntityForm(texts) : null;
+  const entityForm = kind === "entity" ? detectEntityForm(texts, file.name) : null;
   // The 540's header prints the first four letters of the surname as a code.
   const last = name?.split(" ").pop();
   if (last && last.length >= 4) tokens.add(last.slice(0, 4).toUpperCase());
@@ -538,6 +554,9 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
   const valueCounts = (pages ?? []).map((page) =>
     page.runs.reduce((count, r) => count + (valueFonts.has(r.font) && isAmount(r.str) ? 1 : 0), 0),
   );
+  // Scrambled throughout, with no data font to tell a value by: nothing on
+  // this print can be read, found or painted out. Handled like a scan.
+  const unreadable = valueFonts.size === 0 && textLayerUnusable(texts);
 
   return {
     file,
@@ -551,6 +570,7 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
     tokens: tokenList,
     bands,
     garbled,
+    unreadable,
     valueFonts: [...valueFonts],
     valueCounts,
   };
@@ -588,6 +608,10 @@ export async function preparePdf(
   });
 
   if (!a.pages) return whole("no-text-layer", []);
+  // A print scrambled throughout goes whole and as printed, like a scan,
+  // with blank page texts so the server's cross-check says "scan" rather
+  // than flagging every number.
+  if (a.unreadable) return whole("garbled-text-layer", a.texts.map(() => ""));
   const texts = a.texts;
 
   // The amount counts only mean something once a data font is known; with

@@ -16,7 +16,7 @@ import {
   Panel,
 } from "@/components/portal/widgets/ui";
 import { money } from "@/lib/widget-format";
-import { computeRecap, validateAll } from "@/lib/tax-recap/compute";
+import { computeRecap, entityFilingLabel, validateAll } from "@/lib/tax-recap/compute";
 import {
   DERIVE_VERSION,
   attributeStrategies,
@@ -24,9 +24,10 @@ import {
   type DeriveMeta,
   type Mismatch,
 } from "@/lib/tax-recap/derive";
-import { entityEins, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
+import { entityEins, entityFormFromFileName, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
 import type { TableSet } from "@/lib/tax-recap/tables";
 import {
+  CITY_FIELD_KEYS,
   DEFAULT_NEXT_STEPS,
   DEFAULT_STRATEGIES,
   ENTITY_FIELDS,
@@ -35,6 +36,7 @@ import {
   RETURN_FIELD_KEYS,
   asMoney,
   displayName,
+  emptyEntityNumbers,
   emptyNumbers,
   numbersFromEntityExtract,
   numbersFromExtract,
@@ -84,7 +86,8 @@ import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
  * fixing a number after the fact shouldn't cost a re-read.
  */
 
-type Kind = "before" | "after" | "entity";
+/** The returns the tool reads: the 1040 (after, and a before print), the entity's 1120-S/1065, and a city's own return for the entity (NYC-3L). */
+type Kind = "before" | "after" | "entity" | "city";
 type RawNumbers = Record<ReturnFieldKey, string>;
 type RawEntity = Record<EntityFieldKey, string>;
 /** upload → review → done. A saved recap reopened for editing starts at review. */
@@ -140,6 +143,19 @@ type Picked = {
   file: File;
   analysis: PdfAnalysis | null;
   status: "checking" | "ready" | "unreadable";
+};
+
+/**
+ * The city return's lines (NYC-3L) laid over the 1120-S's: one entity
+ * record is what the engine and the review grid work from, and the city
+ * reader fills only its own six lines.
+ */
+const withCity = (entity: EntityNumbers | null, city: EntityExtract | null): EntityNumbers | null => {
+  if (!city) return entity;
+  const c = numbersFromEntityExtract(city);
+  const out: EntityNumbers = { ...(entity ?? emptyEntityNumbers()) };
+  for (const key of CITY_FIELD_KEYS) if (c[key] !== null) out[key] = c[key];
+  return out;
 };
 
 const metaOf = (extract: ReturnExtract, entityForm: EntityForm | null = null): DeriveMeta => ({
@@ -232,7 +248,9 @@ const kindLabel = (k: ReturnKind | null, form: EntityForm | null = null) =>
     ? `Form ${form ?? "1120-S / 1065"}`
     : k === "individual"
       ? "Form 1040"
-      : "Not recognised";
+      : k === "city"
+        ? "City return (NYC-3L)"
+        : "Not recognised";
 
 /** The origin never changes while the page is open; nothing to subscribe to. */
 const subscribeNever = () => () => {};
@@ -314,6 +332,7 @@ export default function TaxRecapBuilder({
     },
     after: { ...idleSide(), extract: initial?.extraction.after ?? null },
     entity: { ...idleSide(), entity: initial?.extraction.entity ?? null },
+    city: { ...idleSide(), entity: initial?.extraction.city ?? null },
   });
   const [numbers, setNumbers] = useState<
     Record<"before" | "after", RawNumbers>
@@ -363,7 +382,8 @@ export default function TaxRecapBuilder({
   const reading =
     sides.before.status === "reading" ||
     sides.after.status === "reading" ||
-    sides.entity.status === "reading";
+    sides.entity.status === "reading" ||
+    sides.city.status === "reading";
 
   /**
    * A refusal is recorded the moment it happens (lib/tax-recap/failures-store):
@@ -386,6 +406,7 @@ export default function TaxRecapBuilder({
     result: { reasons: string[]; mismatches: Mismatch[] },
     afterExtract: ReturnExtract | null,
     entityExtract: EntityExtract | null,
+    cityExtract: EntityExtract | null = null,
   ) => {
     setFailure(null);
     const info = readInfoRef.current;
@@ -402,8 +423,8 @@ export default function TaxRecapBuilder({
           mismatches: result.mismatches,
           after: aNum,
           entity: eNum,
-          extraction: { after: afterExtract, entity: entityExtract },
-          warnings: { after: info.after?.warnings ?? [], entity: info.entity?.warnings ?? [] },
+          extraction: { after: afterExtract, entity: entityExtract, city: cityExtract },
+          warnings: { after: info.after?.warnings ?? [], entity: [...(info.entity?.warnings ?? []), ...(info.city?.warnings ?? []).map((w) => `City return: ${w}`)] },
           pages: {
             after: info.after ? { total: info.after.total, sent: info.after.sent } : null,
             entity: info.entity ? { total: info.entity.total, sent: info.entity.sent } : null,
@@ -472,6 +493,7 @@ export default function TaxRecapBuilder({
       ...s,
       after: idleSide(),
       entity: idleSide(),
+      city: idleSide(),
       before: s.before.file ? s.before : idleSide(),
     }));
     for (const item of fresh) {
@@ -502,7 +524,31 @@ export default function TaxRecapBuilder({
   const removePicked = (id: string) => {
     setPicked((p) => p.filter((x) => x.id !== id));
     setPickError(null);
-    setSides((s) => ({ ...s, after: idleSide(), entity: idleSide() }));
+    setSides((s) => ({ ...s, after: idleSide(), entity: idleSide(), city: idleSide() }));
+  };
+
+  /**
+   * A file whose pages and name say nothing about what it is (a scan, a
+   * print with its text layer scrambled throughout, named without the
+   * form): staff say, and the analysis carries it from there like a kind
+   * the pages had given.
+   */
+  const setPickedKind = (id: string, kind: ReturnKind) => {
+    setPickError(null);
+    setPicked((p) =>
+      p.map((x) =>
+        x.id === id && x.analysis
+          ? {
+              ...x,
+              analysis: {
+                ...x.analysis,
+                kind,
+                entityForm: kind === "entity" ? (x.analysis.entityForm ?? entityFormFromFileName(x.file.name)) : null,
+              },
+            }
+          : x,
+      ),
+    );
   };
 
   const pickBefore = (file: File | null) =>
@@ -530,7 +576,7 @@ export default function TaxRecapBuilder({
     // Reads the page text, trims the return to the pages the recap needs and
     // paints out the identity fields — all here, before anything leaves.
     const prepared = await preparePdf(source.analysis ?? source.file, {
-      kind: kind === "entity" ? "entity" : "individual",
+      kind: kind === "entity" || kind === "city" ? kind : "individual",
       extraTokens,
     });
     if (process.env.NODE_ENV !== "production") {
@@ -551,7 +597,7 @@ export default function TaxRecapBuilder({
         pages: prepared.totalPages,
         sentPages: prepared.sentPages,
         localName:
-          kind === "entity"
+          kind === "entity" || kind === "city"
             ? prepared.identity.entityName
             : prepared.identity.name,
         redaction: {
@@ -562,12 +608,15 @@ export default function TaxRecapBuilder({
       },
     }));
 
-    const what = kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : "the return";
+    const what =
+      kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : kind === "city" ? "the city return" : "the return";
     const readingMsg = prepared.trimmed
       ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
       : prepared.fallback === "no-text-layer"
         ? `Reading a scanned copy of ${what} — no text layer, so numbers can't be cross-checked…`
-        : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
+        : prepared.fallback === "garbled-text-layer"
+          ? `Reading all ${prepared.totalPages} pages of ${what} as printed — its text layer is scrambled, so it's read like a scan…`
+          : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
 
     const fd = new FormData();
     fd.append("kind", kind);
@@ -679,7 +728,9 @@ export default function TaxRecapBuilder({
       warnings.push(
         prepared.fallback === "no-text-layer"
           ? "Scanned copy: the identity fields couldn't be located, so the pages were sent as printed. An export from ProSeries would be redacted before sending"
-          : "The identity fields couldn't be painted out on this print, so the pages were sent as printed",
+          : prepared.fallback === "garbled-text-layer"
+            ? "This print's text layer is scrambled on every page — it was made through a generic PDF printer, not ProSeries' own export — so it was read like a scan: the identity fields couldn't be painted out and the pages went as printed, and no number could be cross-checked. Export the return from ProSeries to get both back"
+            : "The identity fields couldn't be painted out on this print, so the pages were sent as printed",
       );
     }
     readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
@@ -701,12 +752,13 @@ export default function TaxRecapBuilder({
       },
     }));
 
-  /** Sort the dropped files into the 1040 and, if there is one, the 1120-S. */
-  const sortPicked = (): { after: Picked; entity: Picked | null } | null => {
+  /** Sort the dropped files into the 1040, the 1120-S if there is one, and the city's return for it if there is one. */
+  const sortPicked = (): { after: Picked; entity: Picked | null; city: Picked | null } | null => {
     const ready = picked.filter((p) => p.status !== "checking");
     if (ready.length !== picked.length) return null;
     const individuals = ready.filter((p) => p.analysis?.kind === "individual");
     const entities = ready.filter((p) => p.analysis?.kind === "entity");
+    const cities = ready.filter((p) => p.analysis?.kind === "city");
     const unknown = ready.filter((p) => !p.analysis?.kind);
     if (individuals.length > 1) {
       setPickError(
@@ -717,6 +769,16 @@ export default function TaxRecapBuilder({
     if (entities.length > 1) {
       setPickError(
         "Two entity returns (1120-S or 1065) were dropped — keep the one for this client's business.",
+      );
+      return null;
+    }
+    if (cities.length > 1) {
+      setPickError("Two city returns were dropped — keep the one for this client's business.");
+      return null;
+    }
+    if (cities.length && !entities.length) {
+      setPickError(
+        "A city return (NYC-3L) was dropped without the corporation's 1120-S — add it; the city's tax is read alongside the federal return.",
       );
       return null;
     }
@@ -738,7 +800,7 @@ export default function TaxRecapBuilder({
       );
       return null;
     }
-    return { after, entity: entities[0] ?? null };
+    return { after, entity: entities[0] ?? null, city: cities[0] ?? null };
   };
 
   const readReturns = async () => {
@@ -829,6 +891,38 @@ export default function TaxRecapBuilder({
         return null;
       }
     };
+    // The city's own return for the corporation (NYC-3L): read into the
+    // same entity record's city lines, laid over the 1120-S's below.
+    const readCity = async (): Promise<EntityExtract | null> => {
+      if (!sorted.city) return null;
+      if (
+        sides.city.status === "done" &&
+        sides.city.entity &&
+        sides.city.file === sorted.city.file
+      ) {
+        return sides.city.entity;
+      }
+      try {
+        const r = await readOne("city", sorted.city, tokens);
+        const ex = r.extract as EntityExtract;
+        const named = ex.entityName ? ex : { ...ex, entityName: r.entityName ?? "" };
+        setSides((s) => ({
+          ...s,
+          city: {
+            ...s.city,
+            status: "done",
+            message: "",
+            problems: [],
+            entity: named,
+            warnings: r.warnings,
+          },
+        }));
+        return named;
+      } catch (e) {
+        fail("city", e);
+        return null;
+      }
+    };
     const readBefore = async (): Promise<ReturnExtract | null> => {
       if (!beforeFile) return null;
       if (
@@ -866,16 +960,18 @@ export default function TaxRecapBuilder({
       }
     };
 
-    const [a, ent, b] = await Promise.all([
+    const [a, ent, city, b] = await Promise.all([
       readAfter(),
       readEntity(),
+      readCity(),
       readBefore(),
     ]);
     if (!a) return;
     if (sorted.entity && !ent) return;
+    if (sorted.city && !city) return;
 
     const aNum = numbersFromExtract(a);
-    let eNum: EntityNumbers | null = ent ? numbersFromEntityExtract(ent) : null;
+    let eNum: EntityNumbers | null = withCity(ent ? numbersFromEntityExtract(ent) : null, city);
     const entityForm = ent?.returnForm ?? sorted.entity?.analysis?.entityForm ?? null;
     if (
       eNum &&
@@ -925,7 +1021,7 @@ export default function TaxRecapBuilder({
           problems: result.reasons,
         },
       }));
-      void recordFailure("derive", metaOf(a, entityForm), aNum, eNum, result, a, ent);
+      void recordFailure("derive", metaOf(a, entityForm), aNum, eNum, result, a, ent, city);
       return;
     }
     setSides((s) => ({
@@ -993,7 +1089,7 @@ export default function TaxRecapBuilder({
     const result = deriveBefore(aNum, meta, tables, eNum);
     if (!result.ok) {
       setRederiveError(result.reasons);
-      void recordFailure("rederive", meta, aNum, eNum, result, a, sides.entity.entity);
+      void recordFailure("rederive", meta, aNum, eNum, result, a, sides.entity.entity, sides.city.entity);
       return;
     }
     setRederiveError(null);
@@ -1027,7 +1123,7 @@ export default function TaxRecapBuilder({
     setStateCode("");
     setPicked([]);
     setPickError(null);
-    setSides({ before: idleSide(), after: idleSide(), entity: idleSide() });
+    setSides({ before: idleSide(), after: idleSide(), entity: idleSide(), city: idleSide() });
     setNumbers({ before: toRaw(emptyNumbers()), after: toRaw(emptyNumbers()) });
     setEntityNumbers({ before: toRawEntity(null), after: toRawEntity(null) });
     setEntityDerived(null);
@@ -1150,6 +1246,7 @@ export default function TaxRecapBuilder({
         before: sides.before.extract,
         after: sides.after.extract,
         entity: sides.entity.entity,
+        city: sides.city.entity,
       },
       derivedBefore: sides.before.derived,
       analysis,
@@ -1234,6 +1331,7 @@ export default function TaxRecapBuilder({
             : []),
           ...sides.after.warnings.map((w) => `After return: ${w}`),
           ...sides.entity.warnings.map((w) => `${formLabel}: ${w}`),
+          ...sides.city.warnings.map((w) => `City return: ${w}`),
         ]
       : [];
   const canSave =
@@ -1350,6 +1448,7 @@ export default function TaxRecapBuilder({
                 error={pickError}
                 onAdd={addFiles}
                 onRemove={removePicked}
+                onKind={setPickedKind}
                 action={
                   <>
                     <button
@@ -1439,14 +1538,34 @@ export default function TaxRecapBuilder({
         ) : (
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              {(["after", "entity", "before"] as Kind[]).map((k) => {
+              {(["after", "entity", "city", "before"] as Kind[]).map((k) => {
                 const s = sides[k];
-                if (k === "before" && s.derived) {
+                if (k === "city") {
+                  const ex = s.entity;
+                  if (!ex) return null;
+                  const n = CITY_FIELD_KEYS.filter((key) => ex.fields[key].value !== null).length;
+                  const unverified = CITY_FIELD_KEYS.filter((key) => ex.fields[key].verified === false).length;
                   return (
-                    <Chip key={k} tone="pos">
+                    <Chip key={k} tone={unverified ? "warn" : "pos"}>
+                      {ex.stateForm ?? "City return"} read: {n} lines
+                      {s.pages ? ` from ${s.pages} pages` : ""}
+                      {unverified ? `, ${unverified} to check` : ""}
+                    </Chip>
+                  );
+                }
+                if (k === "before" && s.derived) {
+                  // Engine v11 on: the after return either reproduced from
+                  // the tables outright, or some household lines were
+                  // carried across as fixed amounts (named in the notes).
+                  const proof = s.derived.proof;
+                  const carried = proof && !proof.verified ? proof.residuals.length : 0;
+                  return (
+                    <Chip key={k} tone={carried ? "warn" : "pos"}>
                       Before column: computed
-                      {hasEntity ? " from both returns" : " from it"}, engine
-                      check passed
+                      {hasEntity ? " from both returns" : " from it"},{" "}
+                      {carried
+                        ? `projected — ${carried} line${carried === 1 ? "" : "s"} carried`
+                        : "verified to the dollar"}
                     </Chip>
                   );
                 }
@@ -1769,6 +1888,12 @@ export default function TaxRecapBuilder({
                     <span>{w}</span>
                   </li>
                 ))}
+                {sides.city.warnings.map((w, i) => (
+                  <li key={`c${i}`} className="flex gap-2">
+                    <Mono className="mt-0.5 flex-none text-ember">{sides.city.entity?.stateForm ?? "city"}</Mono>
+                    <span>{w}</span>
+                  </li>
+                ))}
                 {warnings.map((w, i) => (
                   <li key={`v${i}`} className="flex gap-2">
                     <Mono className="mt-0.5 flex-none text-ember">
@@ -1853,7 +1978,7 @@ export default function TaxRecapBuilder({
                   />
                   {computed.entityKind === "scorp" ? (
                     <LineRow
-                      label="S-corp state tax & PTET saved"
+                      label={computed.cityTax ? "S-corp state & city tax saved" : "S-corp state tax & PTET saved"}
                       value={money(computed.breakdown.entitySaved)}
                       size="sm"
                     />
@@ -1905,7 +2030,7 @@ export default function TaxRecapBuilder({
                   />
                   {computed.filing.entity ? (
                     <LineRow
-                      label={`${computed.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)"}: ${money(computed.filing.entity.owed)} owed − ${money(computed.filing.entity.paid)} paid`}
+                      label={`${entityFilingLabel(computed)}: ${money(computed.filing.entity.owed)} owed − ${money(computed.filing.entity.paid)} paid`}
                       value={dueLabel(computed.filing.entity.due)}
                       size="sm"
                       tone={computed.filing.entity.due > 0 ? "neg" : "pos"}
@@ -2329,6 +2454,7 @@ function HeroDrop({
   error,
   onAdd,
   onRemove,
+  onKind,
   action,
 }: {
   picked: Picked[];
@@ -2338,6 +2464,8 @@ function HeroDrop({
   error: string | null;
   onAdd: (files: FileList | File[]) => void;
   onRemove: (id: string) => void;
+  /** Staff saying what an unrecognised file is. */
+  onKind: (id: string, kind: ReturnKind) => void;
   /** The create button, shown under the file list once there's something to read. */
   action: React.ReactNode;
 }) {
@@ -2346,6 +2474,7 @@ function HeroDrop({
   const anyError =
     sides.after.status === "error" ||
     sides.entity.status === "error" ||
+    sides.city.status === "error" ||
     !!error;
   const allDone = picked.length > 0 && sides.after.status === "done";
   const tone = anyError
@@ -2364,7 +2493,7 @@ function HeroDrop({
     if (!disabled) inputRef.current?.click();
   };
   const empty = !picked.length && !reading;
-  const busy = [sides.after, sides.entity].filter(
+  const busy = [sides.after, sides.entity, sides.city].filter(
     (s) => s.status === "reading",
   );
   const preview =
@@ -2416,16 +2545,22 @@ function HeroDrop({
               className="mx-auto h-12 w-12 animate-spin-grad rounded-full border-[3px] border-magenta/20 border-t-magenta sm:mx-0"
             />
             <div className="mt-5 font-display text-[19px] font-semibold text-fog">
-              {busy.length > 1 ? "Reading both returns" : "Reading the return"}
+              {busy.length > 1 ? "Reading the returns" : "Reading the return"}
             </div>
-            {(["after", "entity"] as Kind[]).map((k) =>
+            {(["after", "entity", "city"] as Kind[]).map((k) =>
               sides[k].status === "reading" || sides[k].status === "done" ? (
                 <div
                   key={k}
                   className="mt-1.5 min-h-[20px] text-[13.5px] text-teal"
                 >
                   {sides[k].status === "done"
-                    ? `${k === "entity" ? (picked.find((p) => p.analysis?.kind === "entity")?.analysis?.entityForm ?? "1120-S / 1065") : "1040"} read ✓`
+                    ? `${
+                        k === "entity"
+                          ? (picked.find((p) => p.analysis?.kind === "entity")?.analysis?.entityForm ?? "1120-S / 1065")
+                          : k === "city"
+                            ? "City return"
+                            : "1040"
+                      } read ✓`
                     : sides[k].message}
                 </div>
               ) : null,
@@ -2453,7 +2588,7 @@ function HeroDrop({
           <ul className="space-y-2">
             {picked.map((p) => {
               const side =
-                p.analysis?.kind === "entity" ? sides.entity : sides.after;
+                p.analysis?.kind === "entity" ? sides.entity : p.analysis?.kind === "city" ? sides.city : sides.after;
               const done = side.status === "done" && side.file === p.file;
               const errored = side.status === "error" && side.file === p.file;
               return (
@@ -2516,6 +2651,29 @@ function HeroDrop({
                       <div className="mt-1 text-[12.5px] text-danger">
                         {side.message}
                       </div>
+                    ) : null}
+                    {p.status !== "checking" && p.analysis && !p.analysis.kind ? (
+                      // Neither the pages nor the file's name said what this
+                      // is (a scan, or a print scrambled throughout): staff do.
+                      <label className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-dusk">
+                        <span>Its pages can&rsquo;t say what it is. Read it as</span>
+                        <select
+                          disabled={disabled}
+                          defaultValue=""
+                          onChange={(e) => {
+                            const v = e.target.value as ReturnKind | "";
+                            if (v) onKind(p.id, v);
+                          }}
+                          className="rounded-[8px] border border-edge-mid bg-transparent px-2 py-1 text-[12px] text-fog"
+                        >
+                          <option value="" disabled>
+                            choose…
+                          </option>
+                          <option value="individual">Form 1040</option>
+                          <option value="entity">Form 1120-S or 1065</option>
+                          <option value="city">City return (NYC-3L)</option>
+                        </select>
+                      </label>
                     ) : null}
                   </div>
                   <button
@@ -2592,7 +2750,8 @@ function HeroDrop({
           </div>
           <div className="mt-1.5 text-[13.5px] text-muted">
             The final 1040 exported from ProSeries — and the 1120-S or 1065 with
-            it when the business is an S corporation or a partnership
+            it when the business is an S corporation or a partnership, plus the
+            city&rsquo;s own return for it (NYC-3L) when there is one
           </div>
           <span className={`${btnPrimary} mt-6 !px-7 !py-3 !text-[15px]`}>
             Choose from computer

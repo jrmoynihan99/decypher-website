@@ -710,13 +710,18 @@ const REFUSALS = [
     assert: (r) => r.derived.notes.some((s) => /section 179 deduction \(column \(j\)\) nets it/.test(s)),
   },
   {
-    // The officer's W-2 not placed: the $12,384 beyond the officer's pay
-    // can't be told from a spouse on the payroll, and the refusal says so.
-    name: "Client I without the officer's W-2 line typed (refuses, naming the lines)",
+    // The officer's W-2 not placed (engine v11): the $12,384 beyond the
+    // officer's pay is taken as another employer's and kept — the same
+    // before as with the line typed — and the note says how to correct it.
+    name: "Client I without the officer's W-2 line typed (derives, the $12,384 taken as another employer's)",
     meta: CLIENT_I.meta,
     after: { ...CLIENT_I.after, w2TaxpayerEntity: null },
     entity: CLIENT_I.entity,
-    expect: /\$12,384 more than the officer's pay/,
+    expect: null,
+    federal: 122564,
+    state: 942,
+    verified: true,
+    assert: (r) => r.before.w2Income === 12384 && r.derived.notes.some((s) => /\$12,384 is taken as wages from another employer/.test(s)),
   },
   {
     // Maryland's 505NR needs the Maryland income; without it, says so.
@@ -742,29 +747,58 @@ const REFUSALS = [
       r.derived.notes.some((s) => /Someone else claims the filer/.test(s)),
   },
   {
-    // The same return with line 12a not read: the $1,615 deduction can't be
-    // explained, and the refusal says what to read.
-    name: "Client B 2024 with line 12a unread (refuses, naming it)",
+    // The same return with line 12a not read (engine v11): the $1,615
+    // deduction is $12,985 under the standard one, carried across as it
+    // is — so the before keeps a $1,615 deduction instead of the $14,600 a
+    // dependent with $19,442 of earned income gets, and taxable income is
+    // 61,565 − 1,615 − 3,720 of QBI = 56,230. Projected, with the line
+    // named and line 12a among the reasons.
+    name: "Client B 2024 with line 12a unread (derives projected, the deduction carried)",
     meta: CLIENT_B_2024.meta,
     after: { ...CLIENT_B_2024.after, dependentOfAnother: null },
-    expect: /a filer someone else claims \(line 12a, not read\)/,
+    expect: null,
+    verified: false,
+    assert: (r) =>
+      r.before.taxableIncome === 56230 &&
+      r.derived.proof.residuals.some((m) => /deduction/i.test(m.line) && m.read === 1615 && m.computed === 14600) &&
+      r.derived.notes.some((s) => /a filer someone else claims \(line 12a, not read\)/.test(s)),
   },
   {
-    // Without the W-2 lines the $57,000 beyond the officer's pay can't be
-    // placed, and the refusal has to say which lines to type.
-    name: "Client H without the W-2 lines read (refuses, naming the lines to type)",
+    // Without any W-2 lines (engine v11): the $57,000 beyond the officer's
+    // pay is taken as the taxpayer's from another employer and kept on the
+    // before. Wrong for this return (it's the spouse's, from the business)
+    // — which is what the note is for — and Massachusetts says so too: the
+    // per-person FICA deduction on one person's $72,000 is $2,000, not the
+    // $3,148 printed, so the state carries a line and the recap is
+    // projected, not verified.
+    name: "Client H without the W-2 lines read (derives projected, the $57,000 kept, the note naming the lines to type)",
     meta: CLIENT_H.meta,
     after: { ...CLIENT_H.after, w2Taxpayer: null, w2Spouse: null, w2TaxpayerEntity: null, w2SpouseEntity: null },
     entity: CLIENT_H.entity,
-    expect: /W-2 wages from the business.*recompute the before column/,
+    expect: null,
+    verified: false,
+    assert: (r) =>
+      r.before.w2Income === 57000 &&
+      r.derived.notes.some((s) => /\$57,000 is taken as wages from another employer/.test(s) && /W-2 wages from the business.*recompute the before column/.test(s)) &&
+      r.derived.proof.residuals.some((m) => /Social Security \/ Medicare deduction/.test(m.line) && m.read === 3148 && m.computed === 2000),
   },
   {
-    // Whose they are but not who paid them: the same answer.
-    name: "Client H with whose W-2s read but not who paid them (refuses)",
+    // Whose they are but not who paid them: the $57,000 is the spouse's,
+    // taken as another employer's — the same before as the "from another
+    // employer" case below, and verified, since each person's FICA
+    // deduction then comes out as printed.
+    name: "Client H with whose W-2s read but not who paid them (derives verified, the spouse's $57,000 kept)",
     meta: CLIENT_H.meta,
     after: { ...CLIENT_H.after, w2TaxpayerEntity: null, w2SpouseEntity: null },
     entity: CLIENT_H.entity,
-    expect: /\$15,000 the taxpayer's, \$57,000 the spouse's/,
+    expect: null,
+    federal: 226971,
+    verified: true,
+    assert: (r) =>
+      r.before.w2Income === 57000 &&
+      r.before.w2Spouse === 57000 &&
+      r.before.w2Taxpayer === null &&
+      r.derived.notes.some((s) => /\$15,000 the taxpayer's, \$57,000 the spouse's/.test(s)),
   },
   {
     // The spouse's W-2 from another employer: it stays on the before, with
@@ -816,20 +850,28 @@ const REFUSALS = [
   },
   {
     // The same on her real California return, which claims the $153
-    // personal credit a dependent can't: the card says so, and refuses.
-    name: "Client A as someone's dependent on her California return (refuses: a dependent gets no personal credit)",
+    // personal credit a dependent can't: the card says so, and (engine
+    // v11) carries the $153 across as a California line rather than refuse.
+    name: "Client A as someone's dependent on her California return (derives projected: the $153 personal credit carried)",
     meta: clientA.meta,
     after: { ...clientA.after, dependentOfAnother: 1 },
-    expect: /California/,
+    expect: null,
+    federal: 41287,
+    verified: false,
+    // Her after return has no exemption-credit line read, so the $153 shows
+    // on the California total: printed 2,567 against 2,720 without the credit.
+    assert: (r) => r.derived.proof.residuals.some((m) => /California total tax/.test(m.line) && m.read === 2567 && m.computed === 2720),
   },
   {
     // Earned income small enough for the limit to bite: Client A with $1,000
     // of profit would have a $1,350 deduction, so her printed $15,750 one
-    // can't be the dependent's — the refusal says so.
-    name: "a filer whose deduction isn't the dependent's limited one (refuses, naming it)",
+    // can't be the dependent's — carried across, and named.
+    name: "a filer whose deduction isn't the dependent's limited one (derives projected, the deduction carried)",
     meta: clientA.meta,
     after: { ...clientA.after, dependentOfAnother: 1, businessNetIncome: 1000, grossReceipts: 1000, totalExpenses: 0, homeOffice: 0, totalIncome: 1000, agi: 929, seTax: 141, taxableIncome: 0, incomeTax: 0, qbiDeduction: 0, federalTotalTax: 141 },
-    expect: /dependent's standard deduction/,
+    expect: null,
+    verified: false,
+    assert: (r) => r.derived.proof.residuals.some((m) => /deduction/i.test(m.line)) && r.derived.notes.some((s) => /dependent's standard deduction/.test(s)),
   },
   {
     name: "a partner's return without the 1065",
@@ -889,18 +931,29 @@ const REFUSALS = [
     state: 848,
   },
   {
-    // A tax on income that is neither line still refuses.
-    name: "Client B with a state tax on income that's neither line (refuses)",
+    // A tax on income that is neither line: the line is recorded and the
+    // recap is projected; the total still reproduces, so the before's
+    // California tax is unchanged.
+    name: "Client B with a state tax on income that's neither line (derives projected, the line recorded)",
     meta: PAIRINGS[1].meta,
     after: { ...PAIRINGS[1].after, stateTaxOnIncome: 900 },
-    expect: /tax on income/,
+    expect: null,
+    federal: 29652,
+    state: 848,
+    verified: false,
+    assert: (r) => r.derived.proof.residuals.some((m) => /California tax on income/.test(m.line) && m.read === 900),
   },
   {
-    // The same bad state line, but found on the page: not set aside, refused.
-    name: "Client B with a bad state adjustment the page does carry (refuses)",
+    // The same bad state line, but found on the page: not set aside. The
+    // California total then misses and the difference is carried across,
+    // so the recap says projected and names the total.
+    name: "Client B with a bad state adjustment the page does carry (derives projected, California total carried)",
     meta: PAIRINGS[1].meta,
     after: { ...PAIRINGS[1].after, stateAdjustments: -36602 },
-    expect: /California/,
+    expect: null,
+    federal: 29652,
+    verified: false,
+    assert: (r) => r.derived.proof.residuals.some((m) => /California total tax/.test(m.line) && m.read === 336),
   },
   {
     // A fast read of Client E (2026-10-01): one partner's Schedule E row read
@@ -955,16 +1008,31 @@ const REFUSALS = [
     expect: /State-source income .* wasn't read/,
   },
   {
-    name: "refundable credit on line 32",
+    // A refundable credit the engine doesn't compute (an earned income
+    // credit, say): carried across to the before as it is, so the before's
+    // Federal Taxes are $966 lower than Client A's print and the recap says so.
+    name: "refundable credit on line 32 (derives projected, the $966 carried)",
     meta: clientA.meta,
     after: { ...clientA.after, federalRefundableCredits: 966, federalPayments: 10566 },
-    expect: /refundable/i,
+    expect: null,
+    federal: 41287,
+    verified: false,
+    assert: (r) =>
+      r.before.federalRefundableCredits === 966 &&
+      r.derived.proof.residuals.some((m) => /Refundable credits/.test(m.line) && m.read === 966 && m.computed === 0),
   },
   {
-    name: "itemized deductions",
+    // A deduction that isn't the standard one with no Schedule A read:
+    // the $5,317 beyond it (21,067 − 15,750) is carried, and so is the tax
+    // worksheet gap on line 16.
+    name: "itemized deductions, Schedule A unread (derives projected, the deduction carried)",
     meta: clientA.meta,
     after: { ...clientA.after, taxableIncome: 40000, incomeTax: 4563 },
-    expect: /standard deduction/i,
+    expect: null,
+    verified: false,
+    assert: (r) =>
+      r.derived.proof.residuals.some((m) => /deduction/i.test(m.line) && m.read === 21067 && m.computed === 15750) &&
+      r.derived.notes.some((s) => /Schedule A wasn't read/.test(s)),
   },
   {
     // Every state is seeded, so the "no card" path needs a code that isn't one.
@@ -981,22 +1049,36 @@ const REFUSALS = [
     expect: /No tax tables/,
   },
   {
-    // A 2025 return run against the 2024 card: the brackets don't reproduce its tax.
-    name: "a return run against the wrong year's tables",
+    // A 2025 return run against the 2024 card: the brackets don't reproduce
+    // its tax. The engine no longer refuses — it carries the gap and says
+    // projected, naming income tax — which is why the Tax Tables page
+    // reports carried lines on a known pairing as the card's fault.
+    name: "a return run against the wrong year's tables (derives projected, naming income tax)",
     meta: { ...clientA.meta, taxYear: 2024 },
     after: clientA.after,
-    expect: /the 2024 tables give/,
+    expect: null,
+    verified: false,
+    assert: (r) =>
+      r.derived.proof.residuals.some((m) => /Income tax/.test(m.line)) &&
+      r.derived.notes.some((s) => /the 2024 tables give/.test(s)),
   },
   {
-    name: "income tax that doesn't match the brackets (capital gains)",
+    name: "income tax that doesn't match the brackets (derives projected, the $401 gap carried)",
     meta: clientA.meta,
     after: { ...clientA.after, incomeTax: 4800, federalTotalTax: 15807 },
-    expect: /Income tax .* reads \$4,800/,
+    expect: null,
+    verified: false,
+    // The before's tax is its own bracket figure less the same $401.
+    assert: (r) =>
+      r.derived.proof.residuals.some((m) => /Income tax/.test(m.line) && m.read === 4800 && m.computed === 5201) &&
+      r.before.incomeTax === 18544 - 401,
   },
   {
-    // With wages on the Schedule C the W-2 limit is a real figure the engine
-    // doesn't have; with none (see Client G above) the limit is zero and it derives.
-    name: "before income over the QBI threshold, with wages on the Schedule C",
+    // With wages on the Schedule C: on the before they're a write-off,
+    // gone with the rest, so the wage limit is zero there and the engine
+    // derives (engine v11); the wages count at the split's steps where the
+    // write-offs are on. Verified: the after is Client A's own return.
+    name: "before income over the QBI threshold, with wages on the Schedule C (derives, limit zero on the before)",
     meta: clientA.meta,
     after: {
       ...clientA.after,
@@ -1005,12 +1087,17 @@ const REFUSALS = [
       homeOffice: 20220,
       schCWages: 24000,
     },
-    expect: /over the 2025 single threshold/,
+    expect: null,
+    verified: true,
+    assert: (r) =>
+      r.before.qbiDeduction === null &&
+      r.derived.notes.some((s) => /over the 2025 single threshold/.test(s) && /\$24,000 of wages Schedule C does pay count toward the limit/.test(s)),
   },
 ];
 
 let failed = 0;
-const money = (v) => (v === null ? "—" : `$${v.toLocaleString("en-US")}`);
+const money = (v) => (v === null || v === undefined ? "—" : `$${v.toLocaleString("en-US")}`);
+const has = (v) => typeof v === "number" && isFinite(v);
 
 for (const p of PAIRINGS) {
   console.log(`\n${p.name}`);
@@ -1020,6 +1107,12 @@ for (const p of PAIRINGS) {
     failed++;
     console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
     continue;
+  }
+  // A real pairing has to reproduce outright: a line carried here means
+  // the card is wrong, not the return.
+  if (!r.derived.proof.verified) {
+    failed++;
+    console.log("  NOT VERIFIED — lines carried:\n   - " + r.derived.proof.residuals.map((m) => `${m.line}: read ${money(m.read)}, tables ${money(m.computed)}`).join("\n   - "));
   }
   console.log("  " + "line".padEnd(26) + "derived".padStart(10) + "CPA print".padStart(11) + "  ");
   // A line the engine's convention moves off the CPA's print on purpose
@@ -1542,6 +1635,380 @@ for (const p of PAIRINGS) {
   }
 }
 
+/* ── Client K / Business K LLC 2025, married filing jointly, CA 540 + CA 100S ──
+   AFTER only — the first live return through engine v11 (2026-10-16), from
+   the Failures inbox record of its v11 refusal. Three things the engine
+   carries rather than refuses on:
+    - officer compensation ($176,363) is $263 more than the Medicare wages
+      ($166,646) plus the premiums ($9,454): a 2% shareholder fringe benefit;
+    - the QBI deduction ($88,262) is $80 over Form 8995-A's wage limit
+      (50% × 176,363 = 88,182): REIT dividends, most likely;
+    - the 100S's net income for tax ($794,131) is $3,046 under ordinary income
+      plus the $59,500 added back: a California adjustment.
+   Also: Schedule E line 26 read as $0 with nothing behind it (no rentals), a
+   $898 pass-through Schedule C, NIIT that says $27,553 of the $30,423 of
+   other income is investment income, Form 8962 over ten months, an $8,550
+   HSA California adds back, the PTE credit capped at the $73,439 of tax.
+   Before, as derived: federal 517,944, California 167,167, the corporation's
+   24,152 franchise tax; savings 422,895 over the after's 286,368. */
+{
+  console.log("\nClient K 2025 (married filing jointly, CA 540, S corporation on CA 100S — engine v11, projected)");
+  const meta = { taxYear: 2025, filingStatus: "Married filing jointly", stateCode: "CA", stateForm: "540", entityForm: "1120-S", unverified: ["ptcSlcsp"] };
+  const after = numbers({
+    w2Income: 152600,
+    scorpIncome: 704048,
+    rentalIncome: 0,
+    totalIncome: 887071,
+    qualifiedDividends: 14896,
+    capitalGain: 4353,
+    capitalGainLongTerm: 43663,
+    agi: 869067,
+    dependentCount: 2,
+    qbiDeduction: 88262,
+    qbiIncome: 703948,
+    qbiW2Wages: 176363,
+    qbiUbia: 107626,
+    hsaDeduction: 8550,
+    itemizedDeductions: 52970,
+    saltPaid: 78650,
+    saltDeducted: 10000,
+    medicalExpenses: 18090,
+    taxableIncome: 727835,
+    incomeTax: 190950,
+    otherTaxes: 1047,
+    federalTotalTax: 200601,
+    federalPayments: 109996,
+    federalWithholding: 7596,
+    federalAmountOwed: 90605,
+    nonrefundableCredits: 856,
+    niit: 1047,
+    grossReceipts: 898,
+    totalExpenses: 898,
+    stateTotalTax: 0,
+    statePayments: 29393,
+    stateWithholding: 6393,
+    stateRefund: 29393,
+    stateAdjustments: 16365,
+    stateDeduction: 31146,
+    additionalTaxes: 9460,
+    sehiDeduction: 9454,
+    sehiPaid: 9454,
+    medicareWages: 166646,
+    ptcFamilySize: 4,
+    ptcPovertyLine: 31200,
+    ptcMonths: 10,
+    ptcPremiums: 18090,
+    ptcSlcsp: 15110,
+    ptcAdvance: 9460,
+    ptcAllowed: 0,
+    ptcRepayment: 9460,
+    stateTaxOnIncome: 73439,
+    stateExemptionCredits: 0,
+    statePteCreditAvailable: 73855,
+    statePteCredit: 73439,
+  });
+  const entity = entityNumbers({
+    grossReceipts: 1613162,
+    totalIncome: 1613162,
+    officerComp: 176363,
+    taxesLicenses: 72598,
+    pension: 44025,
+    otherDeductions: 518001,
+    totalDeductions: 875485,
+    ordinaryIncome: 737677,
+    k1Ordinary: 737677,
+    k1Section179: 33629,
+    ownershipPct: 100,
+    distributions: 1187600,
+    stateNetIncome: 794131,
+    stateAddBack: 59500,
+    stateTax: 11912,
+    pteTax: 73855,
+    stateTotalTax: 11912,
+    statePayments: 11912,
+    stateAmountDue: 0,
+  });
+  const r = deriveBefore(after, meta, undefined, entity);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    const want = { scorpIncome: 1613162, agi: 1643585, federalTotalTax: 517944, stateTotalTax: 167167, rentalIncome: null };
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(12) + money(w).padStart(12) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    const entityOk = r.entityBefore?.stateTax === 24152 && r.entityBefore?.stateNetIncome === 1610116;
+    if (!entityOk) failed++;
+    console.log(`  ${entityOk ? "ok" : "WRONG"}  100S before: franchise ${money(r.entityBefore?.stateTax)} on ${money(r.entityBefore?.stateNetIncome)} (want 24,152 on 1,610,116: the $3,046 adjustment carried)`);
+    const p = r.derived.proof;
+    const lines = p.residuals.map((m) => m.line).join(" | ");
+    const proofOk =
+      !p.verified &&
+      p.residuals.length === 3 &&
+      p.residuals.some((m) => /Officer compensation/.test(m.line) && m.read === 176363 && m.computed === 176100) &&
+      p.residuals.some((m) => /QBI deduction/.test(m.line) && m.read === 88262 && m.computed === 88182) &&
+      p.residuals.some((m) => /California S corporation net income/.test(m.line) && m.read === 794131 && m.computed === 797177);
+    if (!proofOk) failed++;
+    console.log(`  ${proofOk ? "ok" : "WRONG"}  projected with three lines carried: ${lines}`);
+    const niiOk = r.derived.notes.some((s) => /Net investment income taken as \$27,553/.test(s));
+    const rentalOk = r.derived.notes.some((s) => /read as \$0 with no rental lines behind it/.test(s));
+    if (!niiOk || !rentalOk) failed++;
+    console.log(`  ${niiOk && rentalOk ? "ok" : "WRONG"}  notes: NIIT's investment income inferred, the $0 rental line set aside`);
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).savings;
+    const ok = savings === 422895;
+    if (!ok) failed++;
+    console.log(`  savings ${money(savings)} vs engine by hand $422,895 ${ok ? "ok" : "MISMATCH"}`);
+    const analysis = attributeStrategies(after, meta, undefined, entity);
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    // Two dependents, but the child tax credit has phased out on both sides and a joint return has no status riding on them.
+    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}, no kids line):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
+  }
+}
+
+/* ── Client J / Business J LLC 2025, single, NY IT-201 + CT-3-S + NYC-3L ──
+   AFTER only — a New York City resident with an S corporation that files
+   the city's own return, dropped as a third file (engine v11, 2026-10-16).
+   Numbers from the Failures inbox record of the v11 refusal (the IT-201's
+   tax page had been dropped by the page selector), with that page's lines
+   and the NYC-3L's added from the prints.
+    - New York City resident tax: IT-201 line 54, $15,802 on $410,904 of
+      taxable income; the card's NYC brackets reproduce it, and give $36,875
+      on the before's $954,595.
+    - NYC-3L: 8.85% of $358,145 allocated at 54.21% = $194,150 → $17,182;
+      on the before $962,595 → $521,823 → $46,181. The $300 CT-3-S minimum
+      stays (receipts under $1M either way).
+    - New York's tax benefit recapture isn't on the card: line 39 reads
+      $28,147 (6.85% flat on all taxable income) against the schedule's
+      $25,748. The $2,399 is carried, and is exact here: both sides are in
+      the fully-recaptured 6.85% zone (AGI over $265,400, taxable under
+      $1,077,550), where the recapture is the same constant.
+   Before: federal 307,280, New York 102,265 (62,991 + 2,399 + 36,875 city),
+   the corporation's 300 + 46,181; savings 309,621 over the after's 146,405. */
+{
+  console.log("\nClient J 2025 (single, NY IT-201 with NYC resident tax, S corporation on CT-3-S + NYC-3L — engine v11, projected)");
+  const meta = { taxYear: 2025, filingStatus: "Single", stateCode: "NY", stateForm: "IT-201", entityForm: "1120-S" };
+  const after = numbers({
+    w2Income: 76500,
+    w2Taxpayer: 76500,
+    scorpIncome: 358145,
+    rentalIncome: 358145, // Schedule E line 41 read for line 26: screened out
+    totalIncome: 434645,
+    agi: 418904,
+    qbiDeduction: 50000,
+    qbiIncome: 358145,
+    qbiW2Wages: 100000,
+    qbiUbia: 7834,
+    hsaDeduction: 4300,
+    itemizedDeductions: 39114,
+    saltPaid: 39114,
+    saltDeducted: 39114,
+    medicalExpenses: 0,
+    taxableIncome: 329790,
+    incomeTax: 84974,
+    otherTaxes: 0,
+    federalTotalTax: 84974,
+    federalPayments: 72540,
+    federalWithholding: 13340,
+    federalAmountOwed: 12434,
+    stateTotalTax: 43949,
+    stateTaxOnIncome: 28147,
+    stateLocalTax: 15802,
+    statePayments: 35773,
+    stateWithholding: 8042,
+    stateAmountOwed: 8176,
+    stateTotalDue: 8176,
+    stateDeduction: 8000,
+    sehiDeduction: 11441,
+    sehiPaid: 11441,
+    medicareWages: 88559,
+  });
+  const entity = entityNumbers({
+    grossReceipts: 962595,
+    totalIncome: 962595,
+    officerComp: 100000,
+    taxesLicenses: 7568,
+    pension: 25000,
+    otherDeductions: 460787,
+    totalDeductions: 604450,
+    ordinaryIncome: 358145,
+    k1Ordinary: 358145,
+    ownershipPct: 100,
+    distributions: 295428,
+    stateTax: 300,
+    stateTotalTax: 300,
+    statePayments: 300,
+    cityNetIncome: 194150,
+    cityAllocationPct: 54.21,
+    cityReceipts: 521793,
+    cityTax: 17182,
+    cityAmountDue: 17182,
+  });
+  const r = deriveBefore(after, meta, undefined, entity);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    const want = { scorpIncome: 962595, federalTotalTax: 307280, stateTaxOnIncome: 62991, stateLocalTax: 36875, stateTotalTax: 102265, rentalIncome: null };
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(12) + money(w).padStart(12) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    const eb = r.entityBefore;
+    const entityOk = eb?.stateTax === 300 && eb?.cityNetIncome === 521823 && eb?.cityTax === 46181 && eb?.cityAmountDue === 46181 && eb?.cityAllocationPct === 54.21;
+    if (!entityOk) failed++;
+    console.log(`  ${entityOk ? "ok" : "WRONG"}  corporation before: CT-3-S ${money(eb?.stateTax)}, NYC-3L ${money(eb?.cityTax)} on ${money(eb?.cityNetIncome)} allocated at ${eb?.cityAllocationPct}% (want 300 / 46,181 on 521,823 at 54.21)`);
+    const p = r.derived.proof;
+    const proofOk =
+      !p.verified &&
+      p.residuals.length === 2 &&
+      p.residuals.some((m) => /New York tax on income/.test(m.line) && m.read === 28147 && m.computed === 25748) &&
+      p.residuals.some((m) => /New York total tax/.test(m.line) && m.read === 43949 && m.computed === 41550);
+    if (!proofOk) failed++;
+    console.log(`  ${proofOk ? "ok" : "WRONG"}  projected with the recapture carried: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`);
+    const notesOk =
+      r.derived.notes.some((s) => /New York City: the corporation's own NYC-3L tax at 8\.85%/.test(s) && /\$17,182 on the after, \$46,181 on the before/.test(s)) &&
+      r.derived.notes.some((s) => /New York City resident tax on the IT-201: \$15,802 on the after, \$36,875 on the before/.test(s));
+    if (!notesOk) failed++;
+    console.log(`  ${notesOk ? "ok" : "WRONG"}  notes name the city's two taxes on both sides`);
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).savings;
+    const ok = savings === 309621;
+    if (!ok) failed++;
+    console.log(`  savings ${money(savings)} vs engine by hand $309,621 ${ok ? "ok" : "MISMATCH"}`);
+    const analysis = attributeStrategies(after, meta, undefined, entity);
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
+    // Schedule SE on the $358,145 K-1: 92.35% = 330,747; 12.4% to the $176,100
+    // wage base = 21,836, 2.9% = 9,592; plus 0.9% on 130,747 over $200,000 = 1,177.
+    const sc = analysis?.scorpSavings?.amount ?? null;
+    const scOk = sc === 32605;
+    if (!scOk) failed++;
+    console.log(`  S-corp SE tax avoided ${money(sc)} vs by hand $32,605 ${scOk ? "ok" : "MISMATCH"}`);
+  }
+}
+
+/* ── Client L / Business L LLC 2025, single, CA 540 + CA 100S, with a Schedule C beside the corporation ──
+   AFTER only — the print whose text layer is scrambled on every page
+   (2026-10-16); numbers read off the pages by hand. The first return with
+   a real Schedule C ($65,000 of receipts, no expenses) next to an S
+   corporation K-1 ($354,500), which the engine used to refuse as "two
+   businesses". W-2 wages $207,647: $65,000 is the officer's pay, the
+   $142,647 beyond it another employer's (no W-2 copies in the print).
+    - Schedule SE on the $65,000 against $207,647 of wages: the Social
+      Security base is used up, so 60,028 × 2.9% = $1,741, as printed.
+    - Additional Medicare tax: the engine has box 1 wages ($207,647) where
+      Form 8959 has box 5 ($209,576, a 401(k) deferral on the other job):
+      $609 against $626 printed — the $17 is carried on the federal total.
+    - Form 8995-A lists only the corporation: $354,500 of QBI, $65,000 of
+      wages → $32,500. The Schedule C has no wages or property, so over
+      the threshold it gets nothing, which is why it isn't on the form.
+   Before: the K-1 is the $1,205,825 of receipts, the officer's pay leaves,
+   the $142,647 stays; Schedule SE then has $33,453 of base left (176,100 −
+   142,647): 33,453 × 12.4% + 60,028 × 2.9% = $5,889. */
+{
+  console.log("\nClient L 2025 (single, CA 540, S corporation on CA 100S, Schedule C beside it — engine v11, projected)");
+  const meta = { taxYear: 2025, filingStatus: "Single", stateCode: "CA", stateForm: "540", entityForm: "1120-S" };
+  const after = numbers({
+    w2Income: 207647,
+    w2Taxpayer: 207647,
+    businessNetIncome: 65000,
+    grossReceipts: 65000,
+    scorpIncome: 354500,
+    totalIncome: 627147,
+    agi: 626276,
+    qbiDeduction: 32500,
+    qbiIncome: 354500,
+    qbiW2Wages: 65000,
+    qbiUbia: 0,
+    taxableIncome: 578026,
+    incomeTax: 171856,
+    otherTaxes: 2367,
+    federalTotalTax: 174223,
+    federalPayments: 209715,
+    federalWithholding: 39715,
+    federalRefund: 25042,
+    federalPenalty: 5450,
+    seTax: 1741,
+    stateTotalTax: 58391,
+    statePayments: 61567,
+    stateWithholding: 16567,
+    stateRefund: 2004,
+    statePenalty: 2004,
+    stateDeduction: 5706,
+    stateTaxOnIncome: 58391,
+    stateExemptionCredits: 0,
+  });
+  const entity = entityNumbers({
+    grossReceipts: 1205825,
+    totalIncome: 1205825,
+    officerComp: 65000,
+    otherDeductions: 756756,
+    totalDeductions: 851325,
+    ordinaryIncome: 354500,
+    k1Ordinary: 354500,
+    ownershipPct: 100,
+    distributions: 54848,
+    stateNetIncome: 354500,
+    stateTax: 5318,
+    stateTotalTax: 5318,
+    stateAmountDue: 5564,
+  });
+  const r = deriveBefore(after, meta, undefined, entity);
+  if (!r.ok) {
+    failed++;
+    console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
+  } else {
+    const want = { w2Income: 142647, businessNetIncome: 65000, grossReceipts: 65000, scorpIncome: 1205825, totalIncome: 1413472, seTax: 5889, agi: 1410527, qbiDeduction: null, taxableIncome: 1394777, incomeTax: 473088 };
+    for (const [key, w] of Object.entries(want)) {
+      const got = r.before[key];
+      const ok = got === w;
+      if (!ok) failed++;
+      console.log("  " + key.padEnd(26) + money(got).padStart(12) + money(w).padStart(12) + (ok ? "  ok" : "  MISMATCH"));
+    }
+    const eb = r.entityBefore;
+    const entityOk = eb?.stateTax === 18087 && eb?.ordinaryIncome === 1205825;
+    if (!entityOk) failed++;
+    console.log(`  ${entityOk ? "ok" : "WRONG"}  100S before: ${money(eb?.stateTax)} on ${money(eb?.ordinaryIncome)} (want 18,087 on 1,205,825)`);
+    const p = r.derived.proof;
+    const proofOk =
+      !p.verified &&
+      p.residuals.length === 1 &&
+      p.residuals.some((m) => /Federal total tax/.test(m.line) && m.read === 174223 && m.computed === 174206);
+    if (!proofOk) failed++;
+    console.log(`  ${proofOk ? "ok" : "WRONG"}  projected with one line carried: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`);
+    const notesOk =
+      r.derived.notes.some((s) => /\$142,647 is taken as wages from another employer/.test(s)) &&
+      r.derived.notes.some((s) => /Schedule C beside the corporation carries no expenses to zero/.test(s) && /\$5,889 on the before/.test(s));
+    if (!notesOk) failed++;
+    console.log(`  ${notesOk ? "ok" : "WRONG"}  notes: the outside W-2 kept, the Schedule C carried with its SE tax re-figured`);
+    const savings = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).savings;
+    console.log(`  savings ${money(savings)} (before ${money(computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).before.totalTaxes)})`);
+    const analysis = attributeStrategies(after, meta, undefined, entity);
+    const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
+    const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
+    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    if (!sumOk) failed++;
+    console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
+    for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
+    // No Schedule C expenses, so no Schedule C step on the split.
+    const noSchCStep = !(analysis?.attribution ?? []).some((a) => a.key === "expenses" || a.key === "homeOffice");
+    if (!noSchCStep) failed++;
+    console.log(`  ${noSchCStep ? "ok" : "WRONG"}  no Schedule C write-off step (it has no expenses)`);
+  }
+}
+
 /* ── The S corporation cards on their own: the corporation's tax and elective tax ──
    California is proven on Business D's prints; New Jersey's figures are the
    Division of Taxation's published minimum-tax tiers and BAIT schedule, not
@@ -1618,15 +2085,18 @@ for (const p of PAIRINGS) {
   }
 }
 
-console.log("\nRefusals");
+console.log("\nRefusals, and returns that derive with a line carried");
 for (const c of REFUSALS) {
   const r = deriveBefore(c.after, c.meta, undefined, c.entity ?? null);
-  // `expect: null` is the opposite case: a return that has to derive.
+  // `expect: null` is the opposite case: a return that has to derive —
+  // `verified` says whether the after return has to reproduce outright
+  // (true) or is expected to carry a line (false).
   const ok =
     c.expect === null
       ? r.ok &&
         (c.federal === undefined || r.before.federalTotalTax === c.federal) &&
         (c.state === undefined || r.before.stateTotalTax === c.state) &&
+        (c.verified === undefined || r.derived.proof.verified === c.verified) &&
         (c.noNote === undefined || !r.derived.notes.some((s) => c.noNote.test(s))) &&
         (c.assert === undefined || c.assert(r))
       : !r.ok && r.reasons.some((s) => c.expect.test(s));
@@ -1634,7 +2104,14 @@ for (const c of REFUSALS) {
   console.log(`  ${ok ? "ok" : "WRONG"}  ${c.name}`);
   if (!r.ok) for (const s of r.reasons) console.log(`         → ${s}`);
   else if (c.expect !== null) console.log("         → derived when it should have refused");
-  else console.log(`         → derived; federal before ${money(r.before.federalTotalTax)}`);
+  else {
+    const p = r.derived.proof;
+    console.log(
+      `         → derived; federal before ${money(r.before.federalTotalTax)}${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)}` : ""}; ${
+        p.verified ? "verified" : `projected: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`
+      }`,
+    );
+  }
 }
 
 console.log(failed ? `\n${failed} problem(s)` : "\nAll good");

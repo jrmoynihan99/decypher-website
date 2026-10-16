@@ -402,6 +402,17 @@ export const STATES_2025: Record<string, StateCard> = {
     ),
     deduction: { kind: "standard", amount: by(8000, 16050, 11200, 8000, 16050) },
     exemption: { kind: "deduction", amount: 0, count: ONE, dependentAmount: 1000, phaseOut: null },
+    // New York City resident tax (IT-201 lines 47–54), on the same taxable
+    // income; applied only when the return carries it (line 54 read).
+    // Checked on Client J's 2025 return: $410,904 → $15,802.
+    local: {
+      name: "New York City",
+      brackets: brackets(
+        [[12000, 0.03078], [25000, 0.03762], [50000, 0.03819], [null, 0.03876]],
+        [[21600, 0.03078], [45000, 0.03762], [90000, 0.03819], [null, 0.03876]],
+        [[14400, 0.03078], [30000, 0.03762], [60000, 0.03819], [null, 0.03876]],
+      ),
+    },
     entity: {
       form: "CT-3-S",
       rate: 0,
@@ -415,8 +426,28 @@ export const STATES_2025: Record<string, StateCard> = {
         { below: null, amount: 4500 },
       ],
       pte: { brackets: b([[2000000, 0.0685], [5000000, 0.0965], [25000000, 0.103], [null, 0.109]]), credit: "refundable" },
+      // Form NYC-3L: 8.85% of the net income allocated to the city by the
+      // business allocation percentage, at least the fixed-dollar minimum
+      // by New York City receipts. The capital-base and alternative taxes
+      // aren't modeled (the income tax is the largest on any profitable
+      // return). Checked on Business J' 2025 return:
+      // $358,145 × 54.21% = $194,150 → $17,182.
+      city: {
+        name: "New York City",
+        form: "NYC-3L",
+        rate: 0.0885,
+        minimum: [
+          { below: 100001, amount: 25 },
+          { below: 250001, amount: 75 },
+          { below: 500001, amount: 175 },
+          { below: 1000001, amount: 500 },
+          { below: 5000001, amount: 1500 },
+          { below: 25000001, amount: 3500 },
+          { below: null, amount: 5000 },
+        ],
+      },
     },
-    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. NOT MODELED: the tax benefit recapture above $107,650 of AGI (the higher rates phase in on all income), so higher earners will refuse on New York tax; New York City residents' city tax (add it as a city tax for a given client); Yonkers. S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
+    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. NOT MODELED: the tax benefit recapture above $107,650 of AGI (the higher rates phase in on all income). Engine v11 carries the gap as a fixed amount, which is exact when both sides sit in the same fully-recaptured bracket (single: AGI over $265,400 and taxable income under $1,077,550 — Client J's $2,399); Yonkers and the MCTMT. New York City resident tax IS modeled (3.078% to 3.876%, applied when IT-201 line 54 is read), and so is the corporation's NYC general corporation tax from a Form NYC-3L dropped as a third file (8.85% of allocated net income, fixed-dollar minimum by city receipts). S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
   }),
 
   OH: card("Ohio", {

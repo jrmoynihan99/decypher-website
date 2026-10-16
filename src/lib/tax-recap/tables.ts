@@ -312,6 +312,21 @@ export type EntityRules = {
   rate: number;
   minimum: { below: number | null; amount: number }[];
   pte: { brackets: Bracket[]; credit: "nonrefundable" | "refundable" | "exclusion" } | null;
+  /**
+   * A city's own tax on the corporation, filed on its own return (New York
+   * City's general corporation tax, Form NYC-3L): `rate` on the net income
+   * allocated to the city by the return's own business allocation
+   * percentage, at least the fixed-dollar minimum for the receipts
+   * allocated there. Null where there is none.
+   */
+  city?: CityRules | null;
+};
+
+export type CityRules = {
+  name: string;
+  form: string;
+  rate: number;
+  minimum: { below: number | null; amount: number }[];
 };
 
 export type YearCard = { federal: FederalCard; states: Record<string, StateCard> };
@@ -1344,6 +1359,25 @@ export function validateYearCard(card: YearCard): string[] {
       if (e.pte) {
         const rows = { single: e.pte.brackets, mfj: e.pte.brackets, mfs: e.pte.brackets, hoh: e.pte.brackets, qss: e.pte.brackets };
         validateBrackets(rows, `${where} PTE elective tax`, out);
+      }
+      if (e.city) {
+        const c = e.city;
+        const label = `${where} ${c.name || "city"} corporation tax`;
+        if (!c.form.trim()) out.push(`${label} needs a form name (e.g. NYC-3L)`);
+        if (!fin(c.rate) || c.rate < 0 || c.rate >= 1) out.push(`${label} rate must be a percentage`);
+        if (!c.minimum.length) out.push(`${label} minimum needs at least one row`);
+        let prev = 0;
+        c.minimum.forEach((row, i) => {
+          const last = i === c.minimum.length - 1;
+          if (!fin(row.amount) || row.amount < 0) out.push(`${label} minimum, row ${i + 1}: needs an amount`);
+          if (last) {
+            if (row.below !== null) out.push(`${label} minimum: the last row must be "and over"`);
+          } else if (row.below === null || !fin(row.below) || row.below <= prev) {
+            out.push(`${label} minimum, row ${i + 1}: "receipts below" must be higher than the row above`);
+          } else {
+            prev = row.below;
+          }
+        });
       }
     }
     if (s.partnership) {

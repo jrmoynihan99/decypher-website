@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
-import { computeRecap, type EntityKind, type RecapSide } from "./compute";
+import { computeRecap, entityFilingLabel, entityRowLabel, type EntityKind, type RecapSide } from "./compute";
 import type { RecapDoc } from "./schema";
 import { US_STATES } from "./tables";
 
@@ -237,6 +237,8 @@ function stage(
     was?: RecapSide;
     stateLabel: string;
     entityKind: EntityKind;
+    /** The corporation files a city return too, so its row says so. */
+    cityTax: boolean;
   },
 ): number {
   let y = top;
@@ -294,9 +296,8 @@ function stage(
   const taxes = ledger(ctx, page, right, y, colW, [
     ["Federal taxes", money(s.federalTaxes)],
     [`${st} taxes`, dash(s.stateTaxes)],
-    // The entity's own state tax: its own row for an S corporation (tax plus the elective tax) or an LLC (annual tax plus fee).
-    ...(o.entityKind === "scorp" ? ([[`${st} S-corp tax & PTET`, dash(s.entityTaxes)]] as LedgerRow[]) : []),
-    ...(o.entityKind === "partnership" ? ([[`${st} LLC tax & fee`, dash(s.entityTaxes)]] as LedgerRow[]) : []),
+    // The entity's own state tax: its own row for an S corporation (tax plus the elective tax, and a city's tax when it files one) or an LLC (annual tax plus fee).
+    ...(o.entityKind ? ([[entityRowLabel(o, st), dash(s.entityTaxes)]] as LedgerRow[]) : []),
     ["Penalties", dash(s.penalties)],
     ["Total taxes owed", money(s.totalTaxes), { total: true, color: o.color }],
   ]);
@@ -381,6 +382,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       scale: c.before.grossIncome,
       stateLabel,
       entityKind: c.entityKind,
+      cityTax: c.cityTax,
     });
     y -= 14;
 
@@ -423,6 +425,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       was: c.before,
       stateLabel,
       entityKind: c.entityKind,
+      cityTax: c.cityTax,
     });
 
     // One line per strategy, adding up to the total.
@@ -481,7 +484,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       ["Federal", c.filing.federal],
       [stateLabel, c.filing.state],
       ...(c.filing.entity
-        ? ([[c.entityKind === "partnership" ? "LLC / partnership" : "S-corp (PTET)", c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
+        ? ([[entityFilingLabel(c), c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
         : []),
     ];
     // The year in three figures: owed, already paid, and what's left.

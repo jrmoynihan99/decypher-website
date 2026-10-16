@@ -74,6 +74,7 @@ function toDoc(id: string, d: FirebaseFirestore.DocumentData): RecapDoc {
       before: sanitizeExtract(extraction.before),
       after: sanitizeExtract(extraction.after),
       entity: sanitizeEntityExtract(extraction.entity),
+      city: sanitizeEntityExtract(extraction.city),
     },
     derivedBefore: sanitizeDerivedBefore(d.derivedBefore),
     analysis: sanitizeAnalysis(d.analysis),
@@ -99,7 +100,7 @@ export async function createRecap(input: RecapInput, actor: string): Promise<Rec
     revoked: false,
     // Denormalised for the list view and, later, the marketing aggregate —
     // one query, no per-row recompute. Always rewritten on update.
-    savings: computeRecap(input).savings,
+    savings: headlineSavings(input),
     createdAt: now,
     createdBy: actor,
     updatedAt: now,
@@ -142,7 +143,7 @@ export async function updateRecap(
   await r.update({
     ...merged,
     revoked: edits.revoked !== undefined ? edits.revoked : current.revoked,
-    savings: computeRecap(merged).savings,
+    savings: headlineSavings(merged),
     updatedAt: new Date(),
     updatedBy: actor,
   });
@@ -223,6 +224,17 @@ export async function listProofPairings(): Promise<ProofPairing[]> {
   return out;
 }
 
+/**
+ * The figure the client's page headlines: the savings between the two
+ * returns plus, for an S corporation, the self-employment tax the structure
+ * avoided — which sits outside the before/after comparison (see
+ * `attributeStrategies`) and so outside `computeRecap().savings`. The list
+ * and the stored `savings` field show the same number as the page.
+ */
+function headlineSavings(input: Pick<RecapInput, "before" | "after" | "priorYearIncome" | "entityBefore" | "entityAfter" | "analysis">): number {
+  return computeRecap(input).savings + (input.analysis?.scorpSavings?.amount ?? 0);
+}
+
 /** What the portal's list shows — no extraction blob, no per-line numbers. */
 export type RecapSummary = {
   id: string;
@@ -254,7 +266,7 @@ export async function listRecaps(limit = 100): Promise<RecapSummary[]> {
       revoked: doc.revoked,
       clientName: doc.clientName,
       taxYear: doc.taxYear,
-      savings: c.savings,
+      savings: headlineSavings(doc),
       totalBefore: c.before.totalTaxes,
       totalAfter: c.after.totalTaxes,
       createdAt: doc.createdAt,

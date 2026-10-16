@@ -376,7 +376,7 @@ export const RETURN_FIELDS = [
   {
     key: "stateTotalTax",
     label: "State total tax",
-    source: "State return total tax after credits (CA 540NR line 74)",
+    source: "State return total tax after credits (CA 540NR line 74; NY IT-201 line 61, state and city taxes together)",
     group: "state",
   },
   {
@@ -556,7 +556,14 @@ export const RETURN_FIELDS = [
   {
     key: "stateTaxOnIncome",
     label: "State tax on income",
-    source: "The state's tax line before credits and add-ons (NJ-1040 line 43; CA 540 line 31)",
+    source: "The state's tax line before credits and add-ons (NJ-1040 line 43; CA 540 line 31; NY IT-201 line 39)",
+    group: "state",
+    optional: true,
+  },
+  {
+    key: "stateLocalTax",
+    label: "City resident tax (on the state return)",
+    source: "A city income tax the state return carries for a city resident: New York IT-201 line 54 (NYC resident tax after NYC credits). Omit for a non-resident of the city and for other states",
     group: "state",
     optional: true,
   },
@@ -663,7 +670,17 @@ export const ENTITY_FIELDS = [
   { key: "statePayments", label: "State payments (entity)", source: "CA 100S line 36 / Form 568 line 12", group: "state", optional: true },
   { key: "stateAmountDue", label: "State amount due (entity)", source: "CA 100S line 45 / Form 568 line 21", group: "state", optional: true },
   { key: "stateRefund", label: "State refund (entity)", source: "CA 100S line 43 / Form 568 line 19", group: "state", optional: true },
+  /* ── a city's own return for the corporation (New York City Form NYC-3L), dropped as a third file ── */
+  { key: "cityNetIncome", label: "City allocated net income", source: "NYC-3L Schedule A line 1 (net income allocated to New York City, from Schedule B line 26)", group: "state", optional: true },
+  { key: "cityAllocationPct", label: "City business allocation %", source: "NYC-3L Schedule H line 7, as a plain number with its decimals (54.21 for 54.21%)", group: "state", optional: true },
+  { key: "cityReceipts", label: "City receipts (minimum tax base)", source: "NYC-3L Schedule A line 4, the New York City gross receipts the fixed-dollar minimum is set by", group: "state", optional: true },
+  { key: "cityTax", label: "City corporation tax", source: "NYC-3L Schedule A line 11 (net tax after credits; line 6 is the tax before them)", group: "state", optional: true },
+  { key: "cityPayments", label: "City payments (entity)", source: "NYC-3L Schedule A line 14 (prepayments)", group: "state", optional: true },
+  { key: "cityAmountDue", label: "City amount due (entity)", source: "NYC-3L Schedule A line 21 (total remittance due)", group: "state", optional: true },
 ] as const satisfies readonly EntityField[];
+
+/** Entity lines read from a city's own return rather than the 1120-S: what the city reader is asked for. */
+export const CITY_FIELD_KEYS = ["cityNetIncome", "cityAllocationPct", "cityReceipts", "cityTax", "cityPayments", "cityAmountDue"] as const satisfies readonly EntityFieldKey[];
 
 /** Which federal return the entity filed. */
 export type EntityForm = "1120-S" | "1065";
@@ -729,13 +746,27 @@ export type RecapNextStep = {
   options?: { label: string; href: string }[];
 };
 
+/** One line of the after return the engine's tables didn't reproduce: as printed vs as figured. */
+export type ProofLine = { line: string; read: number; computed: number };
+
+/**
+ * How the after return was reproduced before the before was derived.
+ * Verified: every line the engine checks came out as printed. Projected
+ * (engine v11 on): `residuals` are the household lines that didn't, each
+ * carried across both sides as a fixed amount — the savings still come from
+ * the business's own lines. Absent on recaps saved by earlier engines,
+ * which refused rather than carry.
+ */
+export type Proof = { verified: boolean; residuals: ProofLine[] };
+
 /**
  * Provenance of a before column that was computed rather than read: the
- * engine version (lib/tax-recap/derive.ts) and what it wants the reviewer to
- * know. Stored with the recap so the audit trail says where the numbers came
- * from when there is no before PDF.
+ * engine version (lib/tax-recap/derive.ts), what it wants the reviewer to
+ * know, and how well the after return reproduced. Stored with the recap so
+ * the audit trail says where the numbers came from when there is no before
+ * PDF.
  */
-export type DerivedBefore = { version: string; notes: string[] };
+export type DerivedBefore = { version: string; notes: string[]; proof?: Proof };
 
 /**
  * What the engine says about the saved numbers beyond the before column:
@@ -792,6 +823,8 @@ export type RecapInput = {
     before: ReturnExtract | null;
     after: ReturnExtract | null;
     entity: EntityExtract | null;
+    /** A city's own return for the corporation (NYC-3L), read as a third file; its lines are merged into `entityAfter`. */
+    city?: EntityExtract | null;
   };
   /** Set when `before` was derived from the after return; `extraction.before` is then null. */
   derivedBefore: DerivedBefore | null;
@@ -900,6 +933,21 @@ export function asMoney(v: unknown): number | null {
   return Math.round(n);
 }
 
+/**
+ * The few entity lines that are percentages, not dollars: an ownership
+ * share, a city's business allocation. Kept to two decimals — rounding
+ * 54.21% to 54% would move the city's allocated income by thousands.
+ */
+const PERCENT_KEYS = new Set<string>(["ownershipPct", "ownershipPct2", "cityAllocationPct"]);
+export function asPercent(v: unknown): number | null {
+  if (v === null || v === undefined || v === "" || typeof v === "boolean") return null;
+  const n = typeof v === "string" ? parseFloat(v.replace(/[^\d.-]/g, "")) : Number(v);
+  if (!isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100) / 100;
+}
+/** Dollars, or a percentage for the keys that are one. */
+const asLine = (key: string, v: unknown): number | null => (PERCENT_KEYS.has(key) ? asPercent(v) : asMoney(v));
+
 export function emptyNumbers(): ReturnNumbers {
   return Object.fromEntries(RETURN_FIELD_KEYS.map((k) => [k, null])) as ReturnNumbers;
 }
@@ -926,7 +974,7 @@ export function sanitizeEntityNumbers(raw: unknown): EntityNumbers | null {
   let any = false;
   for (const key of ENTITY_FIELD_KEYS) {
     if (key in r) {
-      out[key] = asMoney(r[key]);
+      out[key] = asLine(key, r[key]);
       if (out[key] !== null) any = true;
     }
   }
@@ -976,7 +1024,7 @@ function sanitizeFieldValues<K extends string>(rawFields: unknown, keys: K[]): R
       return [
         key,
         {
-          value: asMoney(f.value),
+          value: asLine(key, f.value),
           page: Number.isInteger(page) && page > 0 && page < 10_000 ? page : null,
           verified: typeof f.verified === "boolean" ? f.verified : null,
         } satisfies ExtractedValue,
@@ -1113,13 +1161,31 @@ export function sanitizeDerivedBefore(raw: unknown): DerivedBefore | null {
   const r = raw as Record<string, unknown>;
   const version = text(r.version, 40);
   if (!version) return null;
+  // The v11 engine's notes run longer (one per line carried), so the caps
+  // are roomier than the analysis notes'.
   const notes = Array.isArray(r.notes)
     ? r.notes
-        .map((s) => (typeof s === "string" ? s.trim().slice(0, 400) : ""))
+        .map((s) => (typeof s === "string" ? s.trim().slice(0, 700) : ""))
         .filter(Boolean)
-        .slice(0, 12)
+        .slice(0, 30)
     : [];
-  return { version, notes };
+  const p = (r.proof && typeof r.proof === "object" ? r.proof : null) as Record<string, unknown> | null;
+  const proof: Proof | undefined = p
+    ? {
+        verified: p.verified === true,
+        residuals: (Array.isArray(p.residuals) ? p.residuals : [])
+          .map((m) => {
+            const o = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
+            const line = text(o.line, 160);
+            const read = asMoney(o.read);
+            const computed = asMoney(o.computed);
+            return line && read !== null && computed !== null ? { line, read, computed } : null;
+          })
+          .filter((m): m is ProofLine => m !== null)
+          .slice(0, 30),
+      }
+    : undefined;
+  return proof ? { version, notes, proof } : { version, notes };
 }
 
 export class RecapInputError extends Error {
@@ -1161,6 +1227,7 @@ export function sanitizeRecapInput(raw: unknown): RecapInput {
       before: sanitizeExtract(extraction.before),
       after: sanitizeExtract(extraction.after),
       entity: sanitizeEntityExtract(extraction.entity),
+      city: sanitizeEntityExtract(extraction.city),
     },
     derivedBefore: sanitizeDerivedBefore(r.derivedBefore),
     analysis: sanitizeAnalysis(r.analysis),
