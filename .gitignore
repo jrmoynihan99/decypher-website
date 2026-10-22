@@ -52,3 +52,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# scratch files from verify runs (one leaked recap share tokens, 2026-10)
+.tmp-*
