@@ -7,7 +7,8 @@
    "filingStatus": "Married Filing Jointly",
    "stateCode": "CO",
    "stateForm": "104",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "CO"
   },
   "after": {
    "w2Income": 120731,
@@ -66,7 +67,8 @@
    "filingStatus": "Married filing jointly",
    "stateCode": "DE",
    "stateForm": "PIT-RES",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "DE"
   },
   "after": {
    "w2Income": 80000,
@@ -147,7 +149,8 @@
    "filingStatus": "Married filing jointly",
    "stateCode": "DE",
    "stateForm": "PIT-RES",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "DE"
   },
   "after": {
    "w2Income": 36667,
@@ -436,7 +439,8 @@
    "filingStatus": "Single",
    "stateCode": "NC",
    "stateForm": "D-400",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "NC"
   },
   "after": {
    "w2Income": 37500,
@@ -489,14 +493,15 @@
   ]
  },
  {
-  "name": "Case 09 · 2024 (both spouses' K-1s; one spouse's Schedule SE read)",
-  "proves": "a spouse's K-1 on an 1120-S; SE tax from line 23",
+  "name": "Case 09 · 2024 (both spouses' K-1s; one spouse's Schedule SE read; corporation filed in AZ, household CA)",
+  "proves": "a spouse's K-1 on an 1120-S; SE tax from line 23; the entity's own state",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
    "stateCode": "CA",
    "stateForm": "540",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "AZ"
   },
   "after": {
    "businessNetIncome": 100000,
@@ -559,7 +564,8 @@
   "verified": false,
   "notes": [
    "Both spouses hold",
-   "one Schedule SE"
+   "one Schedule SE",
+   "filed its own return in Arizona"
   ]
  },
  {
@@ -764,7 +770,8 @@
    "filingStatus": "Single",
    "stateCode": "CA",
    "stateForm": "540",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "CA"
   },
   "after": {
    "w2Income": 9325,
@@ -1260,7 +1267,8 @@
    "filingStatus": "Head of household",
    "stateCode": "SC",
    "stateForm": "SC1040",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "SC"
   },
   "after": {
    "w2Income": 84317,
@@ -1336,62 +1344,75 @@
   "verified": false
  },
  {
-  "name": "Case 23 · 2024 (S corporation loss, Schedule E's loss read without its sign)",
-  "proves": "a loss year refuses once, saying so",
+  "name": "Case 23 · 2025 (S corporation loss, Schedule E's loss read without its sign)",
+  "proves": "a loss year runs through the before (team, 2026-10-22)",
   "meta": {
-   "taxYear": 2024,
+   "taxYear": 2025,
    "filingStatus": "Single",
    "stateCode": "CA",
    "stateForm": "540",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "CA"
   },
   "after": {
-   "w2Income": 18750,
-   "scorpIncome": 4027,
-   "totalIncome": 14723,
-   "agi": 14723,
+   "w2Income": 20400,
+   "scorpIncome": 2946,
+   "totalIncome": 17454,
+   "agi": 17454,
    "qbiDeduction": 0,
-   "taxableIncome": 123,
-   "incomeTax": 11,
+   "qbiLossCarryforward": 4027,
+   "taxableIncome": 1704,
+   "incomeTax": 171,
    "otherTaxes": 0,
-   "federalTotalTax": 11,
-   "federalPayments": 602,
-   "federalWithholding": 415,
-   "federalRefundableCredits": 187,
-   "otherPayments": 187,
-   "federalRefund": 591,
-   "stateRefund": 211,
-   "stateDeduction": 5540,
+   "federalTotalTax": 171,
+   "federalPayments": 552,
+   "federalWithholding": 540,
+   "federalRefundableCredits": 12,
+   "federalRefund": 381,
+   "federalPenalty": 0,
+   "stateTotalTax": 0,
+   "statePayments": 292,
+   "stateWithholding": 176,
+   "stateRefund": 292,
+   "stateDeduction": 5706,
    "ptcFamilySize": 1,
-   "ptcPovertyLine": 14580,
+   "ptcPovertyLine": 15060,
    "ptcMonths": 12,
-   "ptcPremiums": 3722,
-   "ptcSlcsp": 4195,
-   "ptcAdvance": 3535,
-   "ptcAllowed": 3722,
-   "ptcNet": 187,
-   "stateTaxOnIncome": 92,
-   "stateExemptionCredits": 149
+   "ptcPremiums": 4039,
+   "ptcSlcsp": 4632,
+   "ptcAdvance": 4027,
+   "ptcAllowed": 4039,
+   "ptcNet": 12,
+   "stateTaxOnIncome": 123,
+   "stateExemptionCredits": 153
   },
   "entity": {
-   "grossReceipts": 51272,
-   "totalIncome": 51272,
-   "officerComp": 18750,
-   "taxesLicenses": 1434,
-   "advertising": 1030,
-   "otherDeductions": 34085,
-   "totalDeductions": 55299,
-   "ordinaryIncome": -4027,
-   "k1Ordinary": -4027,
+   "grossReceipts": 59760,
+   "totalIncome": 59760,
+   "officerComp": 20400,
+   "taxesLicenses": 2361,
+   "depreciation": 0,
+   "otherDeductions": 39945,
+   "totalDeductions": 62706,
+   "ordinaryIncome": -2946,
+   "k1Ordinary": -2946,
    "k1Section179": 0,
    "ownershipPct": 100,
-   "stateNetIncome": -4027,
+   "distributions": 0,
+   "stateNetIncome": -2146,
+   "stateAddBack": 800,
    "stateTax": 800,
    "stateTotalTax": 800,
    "statePayments": 800,
    "stateAmountDue": 0
   },
-  "expect": "ordinary loss .* printed without its sign"
+  "expect": null,
+  "federal": 5614,
+  "state": 1628,
+  "verified": false,
+  "notes": [
+   "without a sign"
+  ]
  },
  {
   "name": "Case 24 · 2025 (a partnership's SE loss on the same Schedule SE)",
@@ -1470,7 +1491,7 @@
  },
  {
   "name": "Case 25 · 2024 (Schedule C beside a partnership)",
-  "proves": "still refuses: waiting on how the team treats the partnership",
+  "proves": "still refuses until several businesses per return are modeled",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1549,13 +1570,14 @@
  },
  {
   "name": "Case 26 · 2025 (the 1040 built on an earlier 1120-S)",
-  "proves": "still refuses: the prints disagree",
+  "proves": "the 1040 wins the K-1 check (team, 2026-10-22); stops on the OR-40 pages the old page selector dropped",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Single",
    "stateCode": "OR",
    "stateForm": "OR-40",
-   "entityForm": "1120-S"
+   "entityForm": "1120-S",
+   "entityStateCode": "OR"
   },
   "after": {
    "w2Income": 40000,
@@ -1606,6 +1628,6 @@
    "cityTax": 5330,
    "cityAmountDue": 5330
   },
-  "expect": "doesn't match the K-1"
+  "expect": "State total tax wasn't read"
  }
 ]

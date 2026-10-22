@@ -135,12 +135,14 @@ export function sanitizeMeta(raw: unknown): DeriveMeta {
   const year = Number(r.taxYear);
   const stateCode = text(r.stateCode, 2).toUpperCase();
   const entityForm = text(r.entityForm, 10);
+  const entityStateCode = text(r.entityStateCode, 2).toUpperCase();
   return {
     taxYear: Number.isInteger(year) && year >= 2000 && year <= 2100 ? year : null,
     filingStatus: text(r.filingStatus, 60) || null,
     stateCode: /^[A-Z]{2}$/.test(stateCode) ? stateCode : null,
     stateForm: text(r.stateForm, 40) || null,
     entityForm: entityForm === "1120-S" || entityForm === "1065" ? entityForm : null,
+    entityStateCode: /^[A-Z]{2}$/.test(entityStateCode) ? entityStateCode : null,
     unverified: strings(r.unverified, 80, 60),
   };
 }

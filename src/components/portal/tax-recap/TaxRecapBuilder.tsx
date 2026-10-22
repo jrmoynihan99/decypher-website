@@ -158,12 +158,15 @@ const withCity = (entity: EntityNumbers | null, city: EntityExtract | null): Ent
   return out;
 };
 
-const metaOf = (extract: ReturnExtract, entityForm: EntityForm | null = null): DeriveMeta => ({
+const metaOf = (extract: ReturnExtract, entityForm: EntityForm | null = null, entity: EntityExtract | null = null): DeriveMeta => ({
   taxYear: extract.taxYear,
   filingStatus: extract.filingStatus,
   stateCode: extract.stateCode,
   stateForm: extract.stateForm,
   entityForm,
+  // The state the entity filed in, when it isn't the household's (a move
+  // mid-year): the entity's own tax follows that state's rules.
+  entityStateCode: entity?.stateCode ?? null,
   // Lines the page-text cross-check couldn't find: the engine may set them
   // aside when the after return only reproduces without them.
   unverified: RETURN_FIELD_KEYS.filter((k) => extract.fields[k]?.verified === false),
@@ -1016,14 +1019,14 @@ export default function TaxRecapBuilder({
       // A before print for the 1040 only; the corporation's before column
       // is typed, if it's wanted, from its own zero-write-off print.
       setEntityDerived(null);
-      setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm), tables, eNum));
+      setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum));
       setStage("review");
       return;
     }
 
     // No before PDF: derive it. A refusal keeps the reads and stays here
     // with the reasons and the two ways through.
-    const result = deriveBefore(aNum, metaOf(a, entityForm), tables, eNum);
+    const result = deriveBefore(aNum, metaOf(a, entityForm, ent), tables, eNum);
     if (!result.ok) {
       setSides((s) => ({
         ...s,
@@ -1034,7 +1037,7 @@ export default function TaxRecapBuilder({
           problems: result.reasons,
         },
       }));
-      void recordFailure("derive", metaOf(a, entityForm), aNum, eNum, result, a, ent, city);
+      void recordFailure("derive", metaOf(a, entityForm, ent), aNum, eNum, result, a, ent, city);
       return;
     }
     setSides((s) => ({
@@ -1052,7 +1055,7 @@ export default function TaxRecapBuilder({
       before: toRawEntity(result.entityBefore),
     }));
     setEntityDerived(result.entityBefore);
-    setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm), tables, eNum));
+    setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum));
     setStage("review");
   };
 
@@ -1093,7 +1096,7 @@ export default function TaxRecapBuilder({
     const a = sides.after.extract;
     if (!a) return;
     const meta: DeriveMeta = {
-      ...metaOf(a, sides.entity.entity?.returnForm ?? null),
+      ...metaOf(a, sides.entity.entity?.returnForm ?? null, sides.entity.entity),
       taxYear: /^\d{4}$/.test(taxYear.trim()) ? Number(taxYear) : a.taxYear,
       stateCode: stateCode.trim() || a.stateCode,
     };

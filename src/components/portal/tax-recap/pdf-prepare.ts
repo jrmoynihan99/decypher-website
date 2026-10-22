@@ -153,7 +153,7 @@ export function redactionBlock(a: PdfAnalysis): string | null {
     return `This PDF is a scan or a picture of the return: there's no text in it to find the client's name and SSN by, so they can't be painted out and it won't be sent. ${EXPORT_IT}`;
   }
   if (a.unreadable) {
-    return `This PDF's text is scrambled on every page — it was re-saved or printed through another program, not downloaded from ProSeries — so the client's name and SSN can't be found to paint out, and it won't be sent. ${EXPORT_IT}`;
+    return `This PDF's text is scrambled on every page — it was re-saved or printed through another program (a copy downloaded from TaxDome does this), not downloaded from ProSeries — so the client's name and SSN can't be found to paint out, and it won't be sent. ${EXPORT_IT}`;
   }
   return null;
 }
