@@ -18,7 +18,7 @@
 import { readFileSync } from "node:fs";
 import { attributeStrategies, deriveBefore, entityTax } from "../src/lib/tax-recap/derive.ts";
 import { computeRecap } from "../src/lib/tax-recap/compute.ts";
-import { emptyEntityNumbers, emptyNumbers } from "../src/lib/tax-recap/schema.ts";
+import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers } from "../src/lib/tax-recap/schema.ts";
 import { cardFor, validateYearCard } from "../src/lib/tax-recap/tables.ts";
 
 const numbers = (v) => ({ ...emptyNumbers(), ...v });
@@ -873,10 +873,20 @@ const REFUSALS = [
     // Still projected: Client A's California lines don't fit these numbers.
     name: "a dependent filer whose taxable income is $0 (the deduction isn't carried: $0 is a floor)",
     meta: clientA.meta,
-    after: { ...clientA.after, dependentOfAnother: 1, businessNetIncome: 1000, grossReceipts: 1000, totalExpenses: 0, homeOffice: 0, totalIncome: 1000, agi: 929, seTax: 141, taxableIncome: 0, incomeTax: 0, qbiDeduction: 0, federalTotalTax: 141 },
+    // (A Schedule C with an expense: one with none is only ever a payroll cleanup beside an S corporation.)
+    after: { ...clientA.after, dependentOfAnother: 1, businessNetIncome: 1000, grossReceipts: 1200, totalExpenses: 200, homeOffice: 0, totalIncome: 1000, agi: 929, seTax: 141, taxableIncome: 0, incomeTax: 0, qbiDeduction: 0, federalTotalTax: 141 },
     expect: null,
     verified: false,
     assert: (r) => !r.derived.proof.residuals.some((m) => /deduction/i.test(m.line)),
+  },
+  {
+    // The tax team's test (2026-10-22): a Schedule C with no expenses is only
+    // ever filed for an S corporation's payroll cleanup. With no corporation
+    // on the return it's a misread line 28, and the engine says so.
+    name: "a Schedule C with receipts and no expenses, no S corporation",
+    meta: clientA.meta,
+    after: { ...clientA.after, totalExpenses: 0, homeOffice: 0, grossReceipts: clientA.after.businessNetIncome },
+    expect: /payroll cleanup/,
   },
   {
     name: "a partner's return without the 1065",
@@ -885,13 +895,17 @@ const REFUSALS = [
     expect: /add the partnership's 1065/,
   },
   {
-    // New York's card is seeded with no partnership rules, so the LLC's own
-    // tax can't be figured there.
-    name: "a partnership in a state with no partnership rules (NY)",
+    // New York's card is seeded with no partnership rules. What the LLC
+    // pays its state is a fee on its receipts, the same on both sides, so
+    // it's carried across as read rather than refused (engine v13).
+    name: "a partnership in a state with no partnership rules (NY): its own tax carried as read",
     meta: { ...clientE.meta, stateCode: "NY", stateForm: "IT-201" },
     after: clientE.after,
     entity: clientE.entity,
-    expect: /no partnership rules/,
+    expect: null,
+    assert: (r) =>
+      r.derived.notes.some((s) => /no partnership rules[^]*carried across as read/.test(s)) &&
+      r.entityBefore.stateTax === clientE.entity.stateTax,
   },
   {
     // The reader put the Schedule E total on the S corporation line; the
@@ -1923,7 +1937,12 @@ for (const p of PAIRINGS) {
       the threshold it gets nothing, which is why it isn't on the form.
    Before: the K-1 is the $1,205,825 of receipts, the officer's pay leaves,
    the $142,647 stays; Schedule SE then has $33,453 of base left (176,100 −
-   142,647): 33,453 × 12.4% + 60,028 × 2.9% = $5,889. */
+   142,647): 33,453 × 12.4% + 60,028 × 2.9% = $5,889.
+   The tax team, 2026-10-22: a Schedule C with no expenses is only ever an S
+   corporation's payroll cleanup — here the $65,000 of officer pay, never on
+   a W-2, run through the Schedule C. So the W-2 is all another employer's,
+   and on the before the Schedule C leaves with the officer's pay: no
+   Schedule C, no SE tax (engine v13). */
 {
   console.log("\nClient L 2025 (single, CA 540, S corporation on CA 100S, Schedule C beside it — engine v11, projected)");
   const meta = { taxYear: 2025, filingStatus: "Single", stateCode: "CA", stateForm: "540", entityForm: "1120-S" };
@@ -1977,7 +1996,7 @@ for (const p of PAIRINGS) {
     failed++;
     console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
   } else {
-    const want = { w2Income: 142647, businessNetIncome: 65000, grossReceipts: 65000, scorpIncome: 1205825, totalIncome: 1413472, seTax: 5889, agi: 1410527, qbiDeduction: null, taxableIncome: 1394777, incomeTax: 473088 };
+    const want = { w2Income: 207647, businessNetIncome: null, grossReceipts: null, scorpIncome: 1205825, totalIncome: 1413472, seTax: null, agi: 1413472, qbiDeduction: null, taxableIncome: 1397722, incomeTax: 474177 };
     for (const [key, w] of Object.entries(want)) {
       const got = r.before[key];
       const ok = got === w;
@@ -1996,10 +2015,9 @@ for (const p of PAIRINGS) {
     if (!proofOk) failed++;
     console.log(`  ${proofOk ? "ok" : "WRONG"}  projected with one line carried: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`);
     const notesOk =
-      r.derived.notes.some((s) => /\$142,647 is taken as wages from another employer/.test(s)) &&
-      r.derived.notes.some((s) => /Schedule C beside the corporation carries no expenses to zero/.test(s) && /\$5,889 on the before/.test(s));
+      r.derived.notes.some((s) => /payroll cleanup/.test(s) && /as officer compensation/.test(s) && /\$207,647 of W-2 wages are another employer's/.test(s));
     if (!notesOk) failed++;
-    console.log(`  ${notesOk ? "ok" : "WRONG"}  notes: the outside W-2 kept, the Schedule C carried with its SE tax re-figured`);
+    console.log(`  ${notesOk ? "ok" : "WRONG"}  notes: the Schedule C is the officer's pay (payroll cleanup), the W-2 all another employer's`);
     const savings = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).savings;
     console.log(`  savings ${money(savings)} (before ${money(computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity }).before.totalTaxes)})`);
     const analysis = attributeStrategies(after, meta, undefined, entity);
@@ -2150,6 +2168,137 @@ for (const f of FAILURES) {
       `         → derived; federal before ${money(r.before.federalTotalTax)} (want ${money(f.federal)})${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)} (want ${money(f.state)})` : ""}; ${p.verified ? "verified" : `projected (${p.residuals.length} carried)`}`,
     );
   }
+}
+
+/* ── Several states and several businesses on one 1040 (engine v13) ─────────
+   Two of the failures above read again the way the v13 reader reads them:
+   the main state's own lines, and every other state return on its own.
+   Their numbers are off the returns' pages (the totals the v12 reader
+   summed). And one S corporation's return cut into two corporations with
+   the same lines between them — the before has to come out the same, every
+   business on its own.                                                     */
+console.log("\nSeveral states and several businesses (engine v13)");
+const failure = (prefix) => FAILURES.find((f) => f.name.startsWith(prefix));
+const stateLines = (v) => ({ ...emptyStateNumbers(), ...v });
+const STATE_KEYS = [
+  "stateTotalTax", "stateTaxOnIncome", "stateSourceIncome", "stateSourceBusinessIncome", "stateAdjustments", "stateDeduction", "stateExemptions",
+  "stateExemptionCredits", "stateLocalTax", "stateOtherStateCredit", "statePayments", "stateWithholding", "stateRefund", "stateAmountOwed",
+  "statePenalty", "stateTotalDue",
+];
+const mainStateOnly = (after, v) => numbers({ ...after, ...Object.fromEntries(STATE_KEYS.map((k) => [k, null])), ...v });
+const check = (name, ok, detail) => {
+  if (!ok) failed++;
+  console.log(`  ${ok ? "ok" : "WRONG"}  ${name}`);
+  if (detail) console.log(`         → ${detail}`);
+};
+{
+  // Case 06 (2025, married filing separately): a Virginia resident (760CG)
+  // with a Maine nonresident return (1040ME). Virginia's credit for the
+  // Maine tax (Schedule OSC, $175) is claimed with the payments, line 24.
+  const c = failure("Case 06");
+  const after = mainStateOnly(c.after, {
+    stateTotalTax: 5315, stateTaxOnIncome: 5315, statePayments: 4865, stateWithholding: 4690, stateAmountOwed: 450,
+    stateAdjustments: -1069, stateDeduction: 8750, stateExemptions: 930, stateOtherStateCredit: 175,
+  });
+  const maine = stateLines({
+    stateTotalTax: 210, stateTaxOnIncome: 5767, stateSourceIncome: 5000, stateAdjustments: -1069, stateDeduction: 13681, stateExemptions: 5150,
+    statePayments: 316, stateWithholding: 316, stateRefund: 106,
+  });
+  const more = { states: [{ stateCode: "ME", stateForm: "1040ME", numbers: maine }] };
+  const r = deriveBefore(after, c.meta, undefined, null, more);
+  const recap = r.ok
+    ? computeRecap({ before: r.before, after, priorYearIncome: null, stateCode: "VA", otherStates: [{ stateCode: "ME", stateForm: "1040ME", before: r.otherStatesBefore[0], after: maine }] })
+    : null;
+  check(
+    "Virginia resident + Maine nonresident: each state on its own row, Virginia's OSC credit netted from its tax",
+    r.ok && recap.after.stateRows[0] === 5140 && recap.after.stateRows[1] === 210 && r.otherStatesBefore[0].stateTotalTax >= 210 &&
+      r.derived.notes.some((s) => /credit for the tax paid to Maine/.test(s)) &&
+      recap.before.stateRows.length === 2,
+    r.ok
+      ? `VA ${recap.after.stateRows[0]} → ${recap.before.stateRows[0]}, ME ${recap.after.stateRows[1]} → ${recap.before.stateRows[1]}; ${r.derived.proof.verified ? "verified" : `projected (${r.derived.proof.residuals.length})`}`
+      : r.reasons[0],
+  );
+}
+{
+  // Case 16 (2025, single): moved into New York on May 1 (IT-203, with
+  // the New York City part-year tax) from California (540NR). The
+  // Schedule C splits $8,390 New York, $17,033 California; with the
+  // write-offs gone, each state's share of the business grows with it.
+  const c = failure("Case 16");
+  const after = mainStateOnly(c.after, {
+    stateTotalTax: 441, stateTaxOnIncome: 216, stateLocalTax: 225, stateSourceIncome: 8390, stateSourceBusinessIncome: 8390,
+    stateDeduction: 8000, statePayments: 34, stateAmountOwed: 407,
+  });
+  const california = stateLines({
+    stateTotalTax: 32, stateTaxOnIncome: 177, stateSourceIncome: 17033, stateSourceBusinessIncome: 17033, stateDeduction: 5706,
+    stateExemptionCredits: 110, statePayments: 62, stateRefund: 30,
+  });
+  const more = { states: [{ stateCode: "CA", stateForm: "540NR", numbers: california }] };
+  const r = deriveBefore(after, c.meta, undefined, null, more);
+  const ny = r.ok ? r.before.stateSourceIncome : null;
+  const ca = r.ok ? r.otherStatesBefore[0].stateSourceIncome : null;
+  check(
+    "New York part-year + California nonresident: each state's source income grows with the business, each taxed on its own",
+    r.ok && ny > 8390 && ca > 17033 && Math.abs(ny + ca - r.before.businessNetIncome) <= 2 && r.otherStatesBefore[0].stateTotalTax > 32 && r.before.stateTotalTax > 441,
+    r.ok
+      ? `NY source ${ny}, CA source ${ca} (Schedule C ${r.before.businessNetIncome}); NY ${r.before.stateTotalTax}, CA ${r.otherStatesBefore[0].stateTotalTax}; ${r.derived.proof.verified ? "verified" : `projected (${r.derived.proof.residuals.length})`}`
+      : r.reasons[0],
+  );
+  const a = attributeStrategies(after, c.meta, undefined, null, more);
+  const recap = r.ok
+    ? computeRecap({ before: r.before, after, priorYearIncome: null, stateCode: "NY", analysis: a, otherStates: [{ stateCode: "CA", stateForm: "540NR", before: r.otherStatesBefore[0], after: california }] })
+    : null;
+  const split = a ? a.attribution.reduce((s, x) => s + x.savings, 0) : null;
+  check("…and the strategy split adds up to the headline with both states in it", r.ok && a && split === recap.savings, `split ${split}, headline ${recap?.savings}`);
+}
+{
+  // Client D's corporation cut in two: the same receipts, deductions, pay
+  // and PTE election between two 1120-S returns, each wholly owned.
+  const d = PAIRINGS.find((p) => p.name.startsWith("Client D"));
+  const e = d.entity;
+  const half = (v) => (v === null ? null : Math.floor(v / 2));
+  const rest = (v) => (v === null ? null : v - Math.floor(v / 2));
+  const a = entityNumbers(Object.fromEntries(Object.entries(e).map(([k, v]) => [k, k === "ownershipPct" ? v : half(v)])));
+  const b = entityNumbers(Object.fromEntries(Object.entries(e).map(([k, v]) => [k, k === "ownershipPct" ? v : rest(v)])));
+  for (const x of [a, b]) {
+    x.totalIncome = x.grossReceipts - x.cogs;
+    x.ordinaryIncome = x.totalIncome - x.totalDeductions;
+    x.k1Ordinary = x.ordinaryIncome;
+    x.stateNetIncome = x.ordinaryIncome + x.stateAddBack;
+    x.stateTax = Math.round(x.stateNetIncome * 0.015);
+    x.pteTax = Math.round(x.stateNetIncome * 0.093);
+    x.stateTotalTax = x.stateTax;
+    x.statePayments = x.stateTax;
+  }
+  const one = deriveBefore(d.after, d.meta, undefined, d.entity);
+  const two = deriveBefore(d.after, { ...d.meta, entityForm: "1120-S" }, undefined, a, { entities: [{ numbers: b, form: "1120-S", stateCode: "CA", name: "Business D2" }] });
+  const entityTax = (r) => (r.ok ? [r.entityBefore, ...r.otherEntitiesBefore].reduce((s, x) => s + (x.stateTax ?? 0), 0) : null);
+  check(
+    "one S corporation cut into two: the same before, each corporation's own state tax",
+    one.ok && two.ok && two.before.federalTotalTax === one.before.federalTotalTax && two.before.stateTotalTax === one.before.stateTotalTax &&
+      Math.abs(entityTax(two) - entityTax(one)) <= 2 && two.otherEntitiesBefore.length === 1,
+    two.ok
+      ? `federal ${two.before.federalTotalTax} (one: ${one.before.federalTotalTax}), state ${two.before.stateTotalTax} (${one.before.stateTotalTax}), entities ${entityTax(two)} (${entityTax(one)})`
+      : two.reasons.join(" / "),
+  );
+}
+{
+  // Client D with a partnership beside the corporation: a 50% share of a
+  // small 1065 on Schedule E, on the owner's own Schedule SE.
+  const d = PAIRINGS.find((p) => p.name.startsWith("Client D"));
+  const p = entityNumbers({
+    grossReceipts: 10000, totalIncome: 10000, otherDeductions: 4000, totalDeductions: 4000, ordinaryIncome: 6000,
+    k1Ordinary: 3000, ownershipPct: 50, stateTax: 800, stateTotalTax: 800, statePayments: 800,
+  });
+  const after = numbers({ ...d.after, partnershipIncome: 3000, totalIncome: d.after.totalIncome + 3000, agi: d.after.agi + 3000 - 212, seTax: 424, otherTaxes: 424 });
+  const r = deriveBefore(after, { ...d.meta, entityForm: "1120-S" }, undefined, d.entity, { entities: [{ numbers: p, form: "1065", stateCode: "CA", name: "Partnership P" }] });
+  check(
+    "an S corporation and a partnership on one 1040: the partnership's own before beside the corporation's",
+    r.ok && r.before.partnershipIncome === 5000 && r.otherEntitiesBefore[0].k1Ordinary === 5000 && r.before.scorpIncome === 836958 && r.before.seTax > 424,
+    r.ok
+      ? `K-1s ${r.before.scorpIncome} + ${r.before.partnershipIncome}, SE tax ${r.before.seTax}; ${r.derived.proof.verified ? "verified" : `projected (${r.derived.proof.residuals.length})`}`
+      : r.reasons.join(" / "),
+  );
 }
 
 console.log(failed ? `\n${failed} problem(s)` : "\nAll good");

@@ -494,7 +494,7 @@
  },
  {
   "name": "Case 09 · 2024 (both spouses' K-1s; one spouse's Schedule SE read; corporation filed in AZ, household CA)",
-  "proves": "a spouse's K-1 on an 1120-S; SE tax from line 23; the entity's own state",
+  "proves": "a spouse's K-1 on an 1120-S; SE tax from line 23; the entity's own state; the two $50,000 Schedules C with no expenses are the owners' pay (a payroll cleanup) and leave with the write-offs (engine v13)",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -559,18 +559,19 @@
    "stateAmountDue": 0
   },
   "expect": null,
-  "federal": 139060,
-  "state": 43635,
+  "federal": 83913,
+  "state": 34538,
   "verified": false,
   "notes": [
    "Both spouses hold",
    "one Schedule SE",
-   "filed its own return in Arizona"
+   "filed its own return in Arizona",
+   "payroll cleanup"
   ]
  },
  {
   "name": "Case 10 · 2025 (Schedule C line 29 read as line 28)",
-  "proves": "expenses $0 when line 28 is blank",
+  "proves": "expenses $0 when line 28 is blank; a Schedule C with no expenses beside the corporation, the officer's pay already on the W-2 (Form 7206 line 11), is pay among the write-offs — a payroll cleanup (engine v13)",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Married filing jointly",
@@ -632,11 +633,12 @@
    "distributions": 167430
   },
   "expect": null,
-  "federal": 130541,
+  "federal": 96249,
   "state": null,
   "verified": false,
   "notes": [
-   "line 28 is blank"
+   "line 28 is blank",
+   "the officer's \\$104,205 is on the W-2"
   ]
  },
  {
@@ -1416,7 +1418,7 @@
  },
  {
   "name": "Case 24 · 2025 (a partnership's SE loss on the same Schedule SE)",
-  "proves": "refuses rather than invent box 3 wages",
+  "proves": "engine v13: the Schedule C and the partner's K-1 loss on one Schedule SE, the K-1 read as rental income moved back, the other partner's K-1 set aside",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Married filing jointly",
@@ -1487,11 +1489,20 @@
    "cityTax": 0,
    "cityAmountDue": 0
   },
-  "expect": "Self-employment tax on the after return reads"
+  "expect": null,
+  "federal": 82154,
+  "state": 36323,
+  "verified": true,
+  "notes": [
+   "the partnership's income \\(Schedule E Part II\\), not a rental",
+   "isn't on this 1040's Schedule E",
+   "doesn't say whose the \\$42,025 of W-2 wages are",
+   "no partnership rules"
+  ]
  },
  {
   "name": "Case 25 · 2024 (Schedule C beside a partnership)",
-  "proves": "still refuses until several businesses per return are modeled",
+  "proves": "engine v13: a Schedule C beside a partnership on one person's Schedule SE, the W-2 the spouse's",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1566,7 +1577,14 @@
    "k1Ordinary2": 3502,
    "ownershipPct2": 40
   },
-  "expect": "Schedule C and a partnership K-1"
+  "expect": null,
+  "federal": 166249,
+  "state": 55182,
+  "verified": false,
+  "notes": [
+   "Schedule C beside the partnership has its \\$287,102 of expenses zeroed",
+   "taken as the spouse's"
+  ]
  },
  {
   "name": "Case 26 · 2025 (the 1040 built on an earlier 1120-S)",

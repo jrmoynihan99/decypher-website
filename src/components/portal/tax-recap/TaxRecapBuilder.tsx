@@ -16,22 +16,25 @@ import {
   Panel,
 } from "@/components/portal/widgets/ui";
 import { money } from "@/lib/widget-format";
-import { computeRecap, entityFilingLabel, validateAll } from "@/lib/tax-recap/compute";
+import { computeRecap, taxRows, validateAll } from "@/lib/tax-recap/compute";
 import {
   DERIVE_VERSION,
   attributeStrategies,
   deriveBefore,
   type DeriveMeta,
+  type DeriveMore,
   type Mismatch,
 } from "@/lib/tax-recap/derive";
 import { entityEins, entityFormFromFileName, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
-import type { TableSet } from "@/lib/tax-recap/tables";
+import { US_STATES, type TableSet } from "@/lib/tax-recap/tables";
 import {
   CITY_FIELD_KEYS,
   DEFAULT_NEXT_STEPS,
   DEFAULT_STRATEGIES,
   ENTITY_FIELDS,
   ENTITY_FIELD_KEYS,
+  MAX_OTHER_ENTITIES,
+  OTHER_STATE_FIELD_KEYS,
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
   asMoney,
@@ -40,6 +43,7 @@ import {
   emptyNumbers,
   numbersFromEntityExtract,
   numbersFromExtract,
+  stateNumbersFromExtract,
   type DerivedBefore,
   type EntityExtract,
   type EntityFieldGroup,
@@ -47,12 +51,16 @@ import {
   type EntityFieldKey,
   type EntityNumbers,
   type FieldGroup,
+  type OtherStateFieldKey,
   type RecapAnalysis,
   type RecapDoc,
   type RecapNextStep,
+  type RecapOtherEntity,
+  type RecapOtherState,
   type ReturnExtract,
   type ReturnFieldKey,
   type ReturnNumbers,
+  type StateNumbers,
 } from "@/lib/tax-recap/schema";
 import { analyzePdf, preparePdf, redactionBlock, type PdfAnalysis } from "./pdf-prepare";
 import { VideoStatus, useVideoMaker } from "./VideoMaker";
@@ -137,6 +145,31 @@ const idleSide = (): SideState => ({
   redaction: null,
 });
 
+type RawState = Record<OtherStateFieldKey, string>;
+
+/**
+ * An entity return beyond the first (engine v13: a second S corporation, a
+ * partnership beside one): read on its own, edited on its own, and given
+ * its own before by the engine.
+ */
+type MoreEntity = {
+  side: SideState;
+  form: EntityForm | null;
+  name: string | null;
+  stateCode: string | null;
+  numbers: Record<"before" | "after", RawEntity>;
+  /** Its before as derived, so an edited cell can be told from a derived one. */
+  derived: EntityNumbers | null;
+};
+
+/** A state return beyond the main one, read off the 1040's print with its own lines and before. */
+type MoreState = {
+  stateCode: string;
+  stateForm: string | null;
+  numbers: Record<"before" | "after", RawState>;
+  derived: StateNumbers | null;
+};
+
 /** A file dropped on the tool, with what its own pages say it is. */
 type Picked = {
   id: string;
@@ -167,6 +200,7 @@ const metaOf = (extract: ReturnExtract, entityForm: EntityForm | null = null, en
   // The state the entity filed in, when it isn't the household's (a move
   // mid-year): the entity's own tax follows that state's rules.
   entityStateCode: entity?.stateCode ?? null,
+  entityName: entity?.entityName ?? null,
   // Lines the page-text cross-check couldn't find: the engine may set them
   // aside when the after return only reproduces without them.
   unverified: RETURN_FIELD_KEYS.filter((k) => extract.fields[k]?.verified === false),
@@ -204,6 +238,46 @@ const toEntityNumbers = (r: RawEntity): EntityNumbers | null => {
   return ENTITY_FIELD_KEYS.some((k) => out[k] !== null) ? out : null;
 };
 
+const toRawState = (n: StateNumbers | null): RawState =>
+  Object.fromEntries(OTHER_STATE_FIELD_KEYS.map((k) => [k, n === null || n[k] === null ? "" : String(n[k])])) as RawState;
+
+const toStateNumbers = (r: RawState): StateNumbers =>
+  Object.fromEntries(OTHER_STATE_FIELD_KEYS.map((k) => [k, r[k].trim() === "" ? null : asMoney(r[k])])) as StateNumbers;
+
+/** The other state returns' fields, in the grid's order (the 1040's own state lines, the ones another state's return has). */
+const OTHER_STATE_FIELDS = RETURN_FIELDS.filter((f) => (OTHER_STATE_FIELD_KEYS as readonly string[]).includes(f.key));
+
+const stateName = (code: string | null) => (code ? (US_STATES[code] ?? code) : "State");
+
+const moreEntityOf = (x: RecapOtherEntity, extract: EntityExtract | null, derived: boolean): MoreEntity => ({
+  side: { ...idleSide(), entity: extract },
+  form: x.form,
+  name: x.name,
+  stateCode: x.stateCode,
+  numbers: { before: toRawEntity(x.before), after: toRawEntity(x.after) },
+  derived: derived ? x.before : null,
+});
+
+const moreStateOf = (s: RecapOtherState, derived: boolean): MoreState => ({
+  stateCode: s.stateCode,
+  stateForm: s.stateForm,
+  numbers: { before: toRawState(s.before), after: toRawState(s.after) },
+  derived: derived ? s.before : null,
+});
+
+/** What the engine is handed beyond the 1040 and the first entity, from the grid as it stands. */
+const moreFrom = (entities: MoreEntity[], states: MoreState[]): DeriveMore => ({
+  // Every one, in order — one with nothing read is refused by name, so the
+  // befores come back lined up with the grid's sections.
+  entities: entities.map((x) => ({
+    numbers: toEntityNumbers(x.numbers.after) ?? emptyEntityNumbers(),
+    form: x.form,
+    stateCode: x.stateCode,
+    name: x.name,
+  })),
+  states: states.map((s) => ({ stateCode: s.stateCode, stateForm: s.stateForm, numbers: toStateNumbers(s.numbers.after) })),
+});
+
 const GROUPS: { id: FieldGroup; title: string }[] = [
   { id: "income", title: "Income" },
   { id: "federal", title: "Federal" },
@@ -231,6 +305,9 @@ const fmtBytes = (b: number) =>
   b > 1024 * 1024
     ? `${(b / 1024 / 1024).toFixed(1)} MB`
     : `${Math.round(b / 1024)} KB`;
+
+/** The 1040, a city return, the first entity return and the ones beyond it. */
+const MAX_FILES = 3 + MAX_OTHER_ENTITIES;
 
 /** Over this, a PDF is staged in pieces (see readOne). Under Vercel's ~4.5MB body cap. */
 const DIRECT_MAX = 3.5 * 1024 * 1024;
@@ -353,6 +430,13 @@ export default function TaxRecapBuilder({
   const [entityDerived, setEntityDerived] = useState<EntityNumbers | null>(
     initial?.derivedBefore ? initial.entityBefore : null,
   );
+  /** Entity returns beyond the first, and state returns beyond the main one (engine v13). */
+  const [moreEntities, setMoreEntities] = useState<MoreEntity[]>(
+    (initial?.otherEntities ?? []).map((x, i) => moreEntityOf(x, initial?.extraction.otherEntities?.[i] ?? null, !!initial?.derivedBefore)),
+  );
+  const [moreStates, setMoreStates] = useState<MoreState[]>(
+    (initial?.otherStates ?? []).map((s) => moreStateOf(s, !!initial?.derivedBefore)),
+  );
   const [analysis, setAnalysis] = useState<RecapAnalysis | null>(
     initial?.analysis ?? null,
   );
@@ -386,7 +470,8 @@ export default function TaxRecapBuilder({
     sides.before.status === "reading" ||
     sides.after.status === "reading" ||
     sides.entity.status === "reading" ||
-    sides.city.status === "reading";
+    sides.city.status === "reading" ||
+    moreEntities.some((x) => x.side.status === "reading");
 
   /**
    * A refusal is recorded the moment it happens (lib/tax-recap/failures-store):
@@ -410,6 +495,7 @@ export default function TaxRecapBuilder({
     afterExtract: ReturnExtract | null,
     entityExtract: EntityExtract | null,
     cityExtract: EntityExtract | null = null,
+    more: DeriveMore = {},
   ) => {
     setFailure(null);
     const info = readInfoRef.current;
@@ -426,6 +512,8 @@ export default function TaxRecapBuilder({
           mismatches: result.mismatches,
           after: aNum,
           entity: eNum,
+          // Everything else on the 1040, so a replay hands the engine the same.
+          more,
           extraction: { after: afterExtract, entity: entityExtract, city: cityExtract },
           warnings: { after: info.after?.warnings ?? [], entity: [...(info.entity?.warnings ?? []), ...(info.city?.warnings ?? []).map((w) => `City return: ${w}`)] },
           pages: {
@@ -496,7 +584,8 @@ export default function TaxRecapBuilder({
       analysis: null,
       status: "checking",
     }));
-    setPicked((p) => [...p, ...fresh].slice(0, 3));
+    // The 1040, a city return and the entity returns: one business's or several.
+    setPicked((p) => [...p, ...fresh].slice(0, MAX_FILES));
     // Reset the read sides: a new set of files means a new recap.
     setSides((s) => ({
       ...s,
@@ -505,6 +594,7 @@ export default function TaxRecapBuilder({
       city: idleSide(),
       before: s.before.file ? s.before : idleSide(),
     }));
+    setMoreEntities([]);
     for (const item of fresh) {
       analyzePdf(item.file)
         .then((analysis) =>
@@ -534,6 +624,7 @@ export default function TaxRecapBuilder({
     setPicked((p) => p.filter((x) => x.id !== id));
     setPickError(null);
     setSides((s) => ({ ...s, after: idleSide(), entity: idleSide(), city: idleSide() }));
+    setMoreEntities([]);
   };
 
   /**
@@ -574,12 +665,14 @@ export default function TaxRecapBuilder({
     source: { file: File; analysis: PdfAnalysis | null },
     shared: { tokens: string[]; short: string[] },
     w2Pages: EntityW2Page[] | null = null,
+    /** An entity return beyond the first: which of `moreEntities` it fills. */
+    slot?: number,
   ) => {
-    const say = (message: string) =>
-      setSides((s) => ({
-        ...s,
-        [kind]: { ...s[kind], file: source.file, status: "reading", message },
-      }));
+    const patch = (p: Partial<SideState>) =>
+      slot === undefined
+        ? setSides((s) => ({ ...s, [kind]: { ...s[kind], ...p } }))
+        : setMoreEntities((m) => m.map((x, i) => (i === slot ? { ...x, side: { ...x.side, ...p } } : x)));
+    const say = (message: string) => patch({ file: source.file, status: "reading", message });
 
     say("Opening the PDF…");
     // Reads the page text, trims the return to the pages the recap needs and
@@ -601,24 +694,18 @@ export default function TaxRecapBuilder({
         [kind]: prepared,
       };
     }
-    preparedRef.current[kind] = { data: prepared.data, name: source.file.name, pages: prepared.sentPages };
-    setSides((s) => ({
-      ...s,
-      [kind]: {
-        ...s[kind],
-        pages: prepared.totalPages,
-        sentPages: prepared.sentPages,
-        localName:
-          kind === "entity" || kind === "city"
-            ? prepared.identity.entityName
-            : prepared.identity.name,
-        redaction: {
-          redacted: prepared.identity.redacted,
-          boxes: prepared.identity.boxes,
-          preview: prepared.preview,
-        },
+    // The copies a refusal can keep are the 1040's and the first entity return's.
+    if (slot === undefined) preparedRef.current[kind] = { data: prepared.data, name: source.file.name, pages: prepared.sentPages };
+    patch({
+      pages: prepared.totalPages,
+      sentPages: prepared.sentPages,
+      localName: kind === "entity" || kind === "city" ? prepared.identity.entityName : prepared.identity.name,
+      redaction: {
+        redacted: prepared.identity.redacted,
+        boxes: prepared.identity.boxes,
+        preview: prepared.preview,
       },
-    }));
+    });
 
     const what =
       kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : kind === "city" ? "the city return" : "the return";
@@ -732,7 +819,7 @@ export default function TaxRecapBuilder({
         }`,
       );
     }
-    readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
+    if (slot === undefined) readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
     return {
       extract: data.extract,
       warnings,
@@ -751,12 +838,20 @@ export default function TaxRecapBuilder({
       },
     }));
 
-  /** Sort the dropped files into the 1040, the 1120-S if there is one, and the city's return for it if there is one. */
-  const sortPicked = (): { after: Picked; entity: Picked | null; city: Picked | null } | null => {
+  /**
+   * Sort the dropped files into the 1040, the entity returns (the first,
+   * and any beyond it: a client can own several businesses) and the city's
+   * return for the corporation if there is one. The S corporations go
+   * first, so a city return lays over one of them.
+   */
+  const sortPicked = (): { after: Picked; entity: Picked | null; more: Picked[]; city: Picked | null } | null => {
     const ready = picked.filter((p) => p.status !== "checking");
     if (ready.length !== picked.length) return null;
     const individuals = ready.filter((p) => p.analysis?.kind === "individual");
-    const entities = ready.filter((p) => p.analysis?.kind === "entity");
+    const isScorp = (p: Picked) => (p.analysis?.entityForm ?? entityFormFromFileName(p.file.name)) !== "1065";
+    const entities = ready
+      .filter((p) => p.analysis?.kind === "entity")
+      .sort((x, y) => Number(isScorp(y)) - Number(isScorp(x)));
     const cities = ready.filter((p) => p.analysis?.kind === "city");
     const unknown = ready.filter((p) => !p.analysis?.kind);
     if (individuals.length > 1) {
@@ -765,10 +860,8 @@ export default function TaxRecapBuilder({
       );
       return null;
     }
-    if (entities.length > 1) {
-      setPickError(
-        "Two entity returns (1120-S or 1065) were dropped — keep the one for this client's business.",
-      );
+    if (entities.length > 1 + MAX_OTHER_ENTITIES) {
+      setPickError(`More than ${1 + MAX_OTHER_ENTITIES} entity returns were dropped — the recap takes up to ${1 + MAX_OTHER_ENTITIES} businesses.`);
       return null;
     }
     if (cities.length > 1) {
@@ -799,7 +892,7 @@ export default function TaxRecapBuilder({
       );
       return null;
     }
-    return { after, entity: entities[0] ?? null, city: cities[0] ?? null };
+    return { after, entity: entities[0] ?? null, more: entities.slice(1), city: cities[0] ?? null };
   };
 
   const readReturns = async () => {
@@ -845,7 +938,8 @@ export default function TaxRecapBuilder({
         // own print, picks out the W-2s it issued; both texts are the
         // unredacted ones, which never leave the browser.
         const afterTexts = sorted.after.analysis?.texts ?? [];
-        const entityTexts = sorted.entity?.analysis?.texts ?? [];
+        // Every entity return's: a W-2 from any of the client's businesses is theirs.
+        const entityTexts = [sorted.entity, ...sorted.more].flatMap((p) => p?.analysis?.texts ?? []);
         const eins = entityEins(afterTexts, entityTexts);
         // An empty list (business known, no W-2 of its found) is reported
         // too, so the reviewer knows why the lines are blank.
@@ -904,6 +998,52 @@ export default function TaxRecapBuilder({
         return named;
       } catch (e) {
         fail("entity", e);
+        return null;
+      }
+    };
+    // The entity returns beyond the first, each into its own slot. One read
+    // already for the same file isn't sent again.
+    const previous = moreEntities;
+    const slots: MoreEntity[] = sorted.more.map((p) => {
+      const was = previous.find((x) => x.side.file === p.file && x.side.status === "done" && x.side.entity);
+      return (
+        was ?? {
+          side: { ...idleSide(), file: p.file },
+          form: p.analysis?.entityForm ?? entityFormFromFileName(p.file.name),
+          name: null,
+          stateCode: null,
+          numbers: { before: toRawEntity(null), after: toRawEntity(null) },
+          derived: null,
+        }
+      );
+    });
+    setMoreEntities(slots);
+    const readMore = async (i: number): Promise<EntityExtract | null> => {
+      if (slots[i].side.status === "done" && slots[i].side.entity) return slots[i].side.entity;
+      try {
+        const r = await readOne("entity", sorted.more[i], tokens, null, i);
+        const ex = r.extract as EntityExtract;
+        const named = ex.entityName ? ex : { ...ex, entityName: r.entityName ?? "" };
+        setMoreEntities((m) =>
+          m.map((x, j) =>
+            j === i
+              ? {
+                  ...x,
+                  side: { ...x.side, status: "done", message: "", problems: [], entity: named, warnings: r.warnings },
+                  form: named.returnForm ?? x.form,
+                  name: named.entityName || null,
+                  stateCode: named.stateCode,
+                }
+              : x,
+          ),
+        );
+        return named;
+      } catch (e) {
+        setMoreEntities((m) =>
+          m.map((x, j) =>
+            j === i ? { ...x, side: { ...x.side, status: "error", message: e instanceof Error ? e.message : "Couldn't read that return" } } : x,
+          ),
+        );
         return null;
       }
     };
@@ -976,15 +1116,46 @@ export default function TaxRecapBuilder({
       }
     };
 
-    const [a, ent, city, b] = await Promise.all([
+    const [a, ent, city, b, extras] = await Promise.all([
       readAfter(),
       readEntity(),
       readCity(),
       readBefore(),
+      Promise.all(sorted.more.map((_, i) => readMore(i))),
     ]);
     if (!a) return;
     if (sorted.entity && !ent) return;
     if (sorted.city && !city) return;
+    if (extras.some((x) => !x)) return;
+
+    // Everything else on the 1040: each other entity return with its own
+    // form and state, and each other state return the reader found.
+    const extraEntities: MoreEntity[] = slots.map((x, i) => {
+      const ex = extras[i] as EntityExtract;
+      return {
+        ...x,
+        side: { ...x.side, status: "done", entity: ex },
+        form: ex.returnForm ?? x.form,
+        name: ex.entityName || null,
+        stateCode: ex.stateCode,
+        numbers: { before: toRawEntity(null), after: toRawEntity(numbersFromEntityExtract(ex)) },
+        derived: null,
+      };
+    });
+    // A before print's own other states, lined up by code.
+    const beforeState = (code: string) => {
+      const x = b?.otherStates?.find((s) => s.stateCode === code);
+      return x ? stateNumbersFromExtract(x) : null;
+    };
+    const extraStates: MoreState[] = (a.otherStates ?? []).map((s) => ({
+      stateCode: s.stateCode,
+      stateForm: s.stateForm,
+      numbers: { before: toRawState(beforeState(s.stateCode)), after: toRawState(stateNumbersFromExtract(s)) },
+      derived: null,
+    }));
+    setMoreEntities(extraEntities);
+    setMoreStates(extraStates);
+    const more = moreFrom(extraEntities, extraStates);
 
     const aNum = numbersFromExtract(a);
     let eNum: EntityNumbers | null = withCity(ent ? numbersFromEntityExtract(ent) : null, city);
@@ -1019,14 +1190,14 @@ export default function TaxRecapBuilder({
       // A before print for the 1040 only; the corporation's before column
       // is typed, if it's wanted, from its own zero-write-off print.
       setEntityDerived(null);
-      setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum));
+      setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum, more));
       setStage("review");
       return;
     }
 
     // No before PDF: derive it. A refusal keeps the reads and stays here
     // with the reasons and the two ways through.
-    const result = deriveBefore(aNum, metaOf(a, entityForm, ent), tables, eNum);
+    const result = deriveBefore(aNum, metaOf(a, entityForm, ent), tables, eNum, more);
     if (!result.ok) {
       setSides((s) => ({
         ...s,
@@ -1037,9 +1208,11 @@ export default function TaxRecapBuilder({
           problems: result.reasons,
         },
       }));
-      void recordFailure("derive", metaOf(a, entityForm, ent), aNum, eNum, result, a, ent, city);
+      void recordFailure("derive", metaOf(a, entityForm, ent), aNum, eNum, result, a, ent, city, more);
       return;
     }
+    setMoreEntities(extraEntities.map((x, i) => ({ ...x, numbers: { ...x.numbers, before: toRawEntity(result.otherEntitiesBefore[i] ?? null) }, derived: result.otherEntitiesBefore[i] ?? null })));
+    setMoreStates(extraStates.map((s, i) => ({ ...s, numbers: { ...s.numbers, before: toRawState(result.otherStatesBefore[i] ?? null) }, derived: result.otherStatesBefore[i] ?? null })));
     setSides((s) => ({
       ...s,
       before: {
@@ -1055,7 +1228,7 @@ export default function TaxRecapBuilder({
       before: toRawEntity(result.entityBefore),
     }));
     setEntityDerived(result.entityBefore);
-    setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum));
+    setAnalysis(attributeStrategies(aNum, metaOf(a, entityForm, ent), tables, eNum, more));
     setStage("review");
   };
 
@@ -1077,6 +1250,8 @@ export default function TaxRecapBuilder({
     setNumbers((n) => ({ ...n, before: toRaw(emptyNumbers()) }));
     setEntityNumbers((e) => ({ ...e, before: toRawEntity(null) }));
     setEntityDerived(null);
+    setMoreEntities((m) => m.map((x) => ({ ...x, numbers: { ...x.numbers, before: toRawEntity(null) }, derived: null })));
+    setMoreStates((m) => m.map((s) => ({ ...s, numbers: { ...s.numbers, before: toRawState(null) }, derived: null })));
     setAnalysis(null);
     setClientName(displayName(a.taxpayerName || ""));
     setTaxYear(String(a.taxYear ?? new Date().getFullYear() - 1));
@@ -1102,12 +1277,15 @@ export default function TaxRecapBuilder({
     };
     const aNum = toNumbers(numbers.after);
     const eNum = toEntityNumbers(entityNumbers.after);
-    const result = deriveBefore(aNum, meta, tables, eNum);
+    const more = moreFrom(moreEntities, moreStates);
+    const result = deriveBefore(aNum, meta, tables, eNum, more);
     if (!result.ok) {
       setRederiveError(result.reasons);
-      void recordFailure("rederive", meta, aNum, eNum, result, a, sides.entity.entity, sides.city.entity);
+      void recordFailure("rederive", meta, aNum, eNum, result, a, sides.entity.entity, sides.city.entity, more);
       return;
     }
+    setMoreEntities((m) => m.map((x, i) => ({ ...x, numbers: { ...x.numbers, before: toRawEntity(result.otherEntitiesBefore[i] ?? null) }, derived: result.otherEntitiesBefore[i] ?? null })));
+    setMoreStates((m) => m.map((s, i) => ({ ...s, numbers: { ...s.numbers, before: toRawState(result.otherStatesBefore[i] ?? null) }, derived: result.otherStatesBefore[i] ?? null })));
     setRederiveError(null);
     setSides((s) => ({
       ...s,
@@ -1124,7 +1302,7 @@ export default function TaxRecapBuilder({
       before: toRawEntity(result.entityBefore),
     }));
     setEntityDerived(result.entityBefore);
-    setAnalysis(attributeStrategies(aNum, meta, tables, eNum));
+    setAnalysis(attributeStrategies(aNum, meta, tables, eNum, more));
   };
 
   /**
@@ -1143,6 +1321,8 @@ export default function TaxRecapBuilder({
     setNumbers({ before: toRaw(emptyNumbers()), after: toRaw(emptyNumbers()) });
     setEntityNumbers({ before: toRawEntity(null), after: toRawEntity(null) });
     setEntityDerived(null);
+    setMoreEntities([]);
+    setMoreStates([]);
     setAnalysis(null);
     setStrategies(DEFAULT_STRATEGIES.join("\n"));
     setNextSteps(DEFAULT_NEXT_STEPS);
@@ -1164,8 +1344,25 @@ export default function TaxRecapBuilder({
       after: toNumbers(numbers.after),
       entityBefore: toEntityNumbers(entityNumbers.before),
       entityAfter: toEntityNumbers(entityNumbers.after),
+      otherEntities: moreEntities.map(
+        (x): RecapOtherEntity => ({
+          form: x.form,
+          name: x.name,
+          stateCode: x.stateCode,
+          before: toEntityNumbers(x.numbers.before),
+          after: toEntityNumbers(x.numbers.after),
+        }),
+      ),
+      otherStates: moreStates.map(
+        (s): RecapOtherState => ({
+          stateCode: s.stateCode,
+          stateForm: s.stateForm,
+          before: toStateNumbers(s.numbers.before),
+          after: toStateNumbers(s.numbers.after),
+        }),
+      ),
     }),
-    [numbers, entityNumbers],
+    [numbers, entityNumbers, moreEntities, moreStates],
   );
   const computed = useMemo(
     () =>
@@ -1174,12 +1371,16 @@ export default function TaxRecapBuilder({
         after: parsed.after,
         entityBefore: parsed.entityBefore,
         entityAfter: parsed.entityAfter,
+        otherEntities: parsed.otherEntities,
+        otherStates: parsed.otherStates,
+        stateCode: stateCode.trim() || null,
+        extraction: { before: null, after: null, entity: sides.entity.entity },
         priorYearIncome: priorYearIncome.trim()
           ? asMoney(priorYearIncome)
           : null,
         analysis,
       }),
-    [parsed, priorYearIncome, analysis],
+    [parsed, priorYearIncome, analysis, stateCode, sides.entity.entity],
   );
   const warnings = useMemo(
     () =>
@@ -1188,9 +1389,12 @@ export default function TaxRecapBuilder({
         parsed.after,
         parsed.entityBefore,
         parsed.entityAfter,
+        { otherEntities: parsed.otherEntities, otherStates: parsed.otherStates },
       ),
     [parsed],
   );
+  /** The recap's state and entity rows, labelled. */
+  const rows = taxRows(computed, stateName);
   const hasEntity =
     !!sides.entity.entity || !!parsed.entityAfter || !!parsed.entityBefore;
   // Which entity return this is, for the labels: what the reader said, the
@@ -1231,13 +1435,65 @@ export default function TaxRecapBuilder({
       numbers.after[f.key].trim() !== "",
   );
   const hiddenCount = RETURN_FIELDS.length - visibleFields.length;
-  const visibleEntityFields = ENTITY_FIELDS.filter(
-    (f) =>
-      showAllLines ||
-      !("optional" in f && f.optional) ||
-      entityNumbers.before[f.key].trim() !== "" ||
-      entityNumbers.after[f.key].trim() !== "",
-  );
+  /**
+   * One entity return's rows in the grid: the first one's, and each one's
+   * beyond it, the same way — its before as derived, its after as read.
+   */
+  const entitySection = (o: {
+    key?: string;
+    title: string;
+    raw: Record<"before" | "after", RawEntity>;
+    derived: EntityNumbers | null;
+    read: EntityExtract | null;
+    onChange: (k: "before" | "after", key: EntityFieldKey, v: string) => void;
+    label: string;
+  }) => {
+    const visible = ENTITY_FIELDS.filter(
+      (f) => showAllLines || !("optional" in f && f.optional) || o.raw.before[f.key].trim() !== "" || o.raw.after[f.key].trim() !== "",
+    );
+    return (
+      <div key={o.key}>
+        <div className="grid grid-cols-2 items-end gap-3 border-b border-t-2 border-edge border-t-white/10 bg-white/[0.02] px-4 py-2.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <Mono className="col-span-2 font-bold text-magenta sm:col-span-1">{o.title}</Mono>
+          <Mono className="text-dusk">Before · computed</Mono>
+          <Mono className="text-dusk">After · the return</Mono>
+        </div>
+        {ENTITY_GROUPS.filter((g) => visible.some((f) => f.group === g.id)).map((g) => (
+          <div key={g.id}>
+            <div className="border-b border-edge bg-white/[0.02] px-4 py-2">
+              <Mono className="font-bold text-mist">{g.title}</Mono>
+            </div>
+            {visible
+              .filter((f) => f.group === g.id)
+              .map((f) => (
+                <GridRow key={f.key} label={f.label} source={f.source}>
+                  {(["before", "after"] as const).map((k) => {
+                    const derivedFrom = k === "before" ? o.derived : null;
+                    return (
+                      <Cell
+                        key={k}
+                        raw={o.raw[k][f.key]}
+                        extracted={
+                          derivedFrom
+                            ? { value: derivedFrom[f.key], page: null, verified: null }
+                            : k === "after"
+                              ? (o.read?.fields[f.key] ?? null)
+                              : null
+                        }
+                        derived={!!derivedFrom}
+                        onChange={(v) => o.onChange(k, f.key, v)}
+                        label={`${f.label} (${o.label}, ${k})`}
+                        prefix={f.key === "ownershipPct" || f.key === "ownershipPct2" || f.key === "cityAllocationPct" ? "%" : "$"}
+                      />
+                    );
+                  })}
+                </GridRow>
+              ))}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   /* ─────────────────────────────── save ───────────────────────────────── */
 
@@ -1253,6 +1509,8 @@ export default function TaxRecapBuilder({
       after: parsed.after,
       entityBefore: parsed.entityBefore,
       entityAfter: parsed.entityAfter,
+      otherEntities: parsed.otherEntities,
+      otherStates: parsed.otherStates,
       strategies: strategies
         .split("\n")
         .map((s) => s.trim())
@@ -1263,6 +1521,7 @@ export default function TaxRecapBuilder({
         after: sides.after.extract,
         entity: sides.entity.entity,
         city: sides.city.entity,
+        otherEntities: moreEntities.flatMap((x) => (x.side.entity ? [x.side.entity] : [])),
       },
       derivedBefore: sides.before.derived,
       analysis,
@@ -1350,6 +1609,7 @@ export default function TaxRecapBuilder({
             : []),
           ...sides.after.warnings.map((w) => `After return: ${w}`),
           ...sides.entity.warnings.map((w) => `${formLabel}: ${w}`),
+          ...moreEntities.flatMap((x, i) => x.side.warnings.map((w) => `${x.name ?? `Entity return ${i + 2}`}: ${w}`)),
           ...sides.city.warnings.map((w) => `City return: ${w}`),
         ]
       : [];
@@ -1462,6 +1722,7 @@ export default function TaxRecapBuilder({
               <HeroDrop
                 picked={picked}
                 sides={sides}
+                more={moreEntities.map((x) => x.side)}
                 reading={reading}
                 disabled={reading}
                 error={pickError}
@@ -1581,7 +1842,7 @@ export default function TaxRecapBuilder({
                   return (
                     <Chip key={k} tone={carried ? "warn" : "pos"}>
                       Before column: computed
-                      {hasEntity ? " from both returns" : " from it"},{" "}
+                      {moreEntities.length ? ` from all ${moreEntities.length + 2} returns` : hasEntity ? " from both returns" : " from it"},{" "}
                       {carried
                         ? `projected — ${carried} line${carried === 1 ? "" : "s"} carried`
                         : "verified to the dollar"}
@@ -1634,6 +1895,23 @@ export default function TaxRecapBuilder({
                   </Chip>
                 );
               })}
+              {moreEntities.map((x, i) => {
+                const ex = x.side.entity;
+                if (!ex) return null;
+                const n = ENTITY_FIELD_KEYS.filter((key) => ex.fields[key].value !== null).length;
+                const unverified = ENTITY_FIELD_KEYS.filter((key) => ex.fields[key].verified === false).length;
+                return (
+                  <Chip key={`m${i}`} tone={unverified ? "warn" : "pos"}>
+                    {x.name ?? `Entity return ${i + 2}`} ({x.form ?? "1120-S / 1065"}) read: {n} lines
+                    {unverified ? `, ${unverified} to check` : ""}
+                  </Chip>
+                );
+              })}
+              {moreStates.length ? (
+                <Chip tone="pos">
+                  {moreStates.length + 1} state returns: {[stateCode || "?", ...moreStates.map((s) => s.stateCode)].join(", ")}
+                </Chip>
+              ) : null}
               {sides.after.extract && !sides.before.extract ? (
                 // Derived, or refused and being typed: either way the after
                 // column is the source, and a corrected cell (or a W-2 line
@@ -1800,58 +2078,62 @@ export default function TaxRecapBuilder({
               </div>
             ))}
 
-            {hasEntity ? (
-              <>
+            {moreStates.map((s, i) => (
+              <div key={`state-${s.stateCode}`}>
                 <div className="grid grid-cols-2 items-end gap-3 border-b border-t-2 border-edge border-t-white/10 bg-white/[0.02] px-4 py-2.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
                   <Mono className="col-span-2 font-bold text-magenta sm:col-span-1">
-                    {entityForm === "1065" ? "Partnership · Form 1065" : "S corporation · Form 1120-S"}
+                    {stateName(s.stateCode)} · {s.stateForm ?? "state return"}
                   </Mono>
                   <Mono className="text-dusk">Before · computed</Mono>
                   <Mono className="text-dusk">After · the return</Mono>
                 </div>
-                {ENTITY_GROUPS.filter((g) =>
-                  visibleEntityFields.some((f) => f.group === g.id),
-                ).map((g) => (
-                  <div key={g.id}>
-                    <div className="border-b border-edge bg-white/[0.02] px-4 py-2">
-                      <Mono className="font-bold text-mist">{g.title}</Mono>
-                    </div>
-                    {visibleEntityFields
-                      .filter((f) => f.group === g.id)
-                      .map((f) => (
-                        <GridRow key={f.key} label={f.label} source={f.source}>
-                          {(["before", "after"] as const).map((k) => {
-                            const derivedFrom =
-                              k === "before" ? entityDerived : null;
-                            return (
-                              <Cell
-                                key={k}
-                                raw={entityNumbers[k][f.key]}
-                                extracted={
-                                  derivedFrom
-                                    ? {
-                                        value: derivedFrom[f.key],
-                                        page: null,
-                                        verified: null,
-                                      }
-                                    : k === "after"
-                                      ? (sides.entity.entity?.fields[f.key] ??
-                                        null)
-                                      : null
-                                }
-                                derived={!!derivedFrom}
-                                onChange={(v) => setEntityCell(k, f.key, v)}
-                                label={`${f.label} (${formLabel}, ${k})`}
-                                prefix={f.key === "ownershipPct" ? "%" : "$"}
-                              />
-                            );
-                          })}
-                        </GridRow>
+                {OTHER_STATE_FIELDS.filter(
+                  (f) => showAllLines || !("optional" in f && f.optional) || s.numbers.before[f.key as OtherStateFieldKey].trim() !== "" || s.numbers.after[f.key as OtherStateFieldKey].trim() !== "",
+                ).map((f) => {
+                  const key = f.key as OtherStateFieldKey;
+                  const read = sides.after.extract?.otherStates?.find((x) => x.stateCode === s.stateCode)?.fields[key] ?? null;
+                  return (
+                    <GridRow key={key} label={f.label} source={`The ${stateName(s.stateCode)} return's own line`}>
+                      {(["before", "after"] as const).map((k) => (
+                        <Cell
+                          key={k}
+                          raw={s.numbers[k][key]}
+                          extracted={k === "before" && s.derived ? { value: s.derived[key], page: null, verified: null } : k === "after" ? read : null}
+                          derived={k === "before" && !!s.derived}
+                          onChange={(v) =>
+                            setMoreStates((m) => m.map((x, j) => (j === i ? { ...x, numbers: { ...x.numbers, [k]: { ...x.numbers[k], [key]: v } } } : x)))
+                          }
+                          label={`${f.label} (${s.stateCode}, ${k})`}
+                        />
                       ))}
-                  </div>
-                ))}
-              </>
-            ) : null}
+                    </GridRow>
+                  );
+                })}
+              </div>
+            ))}
+
+            {hasEntity
+              ? entitySection({
+                  title: `${entityForm === "1065" ? "Partnership · Form 1065" : "S corporation · Form 1120-S"}${moreEntities.length && sides.entity.entity?.entityName ? ` · ${sides.entity.entity.entityName}` : ""}`,
+                  raw: entityNumbers,
+                  derived: entityDerived,
+                  read: sides.entity.entity,
+                  onChange: setEntityCell,
+                  label: formLabel,
+                })
+              : null}
+            {moreEntities.map((x, i) =>
+              entitySection({
+                key: `entity-${i}`,
+                title: `${x.form === "1065" ? "Partnership · Form 1065" : "S corporation · Form 1120-S"}${x.name ? ` · ${x.name}` : ` · entity return ${i + 2}`}`,
+                raw: x.numbers,
+                derived: x.derived,
+                read: x.side.entity,
+                onChange: (k, key, v) =>
+                  setMoreEntities((m) => m.map((y, j) => (j === i ? { ...y, numbers: { ...y.numbers, [k]: { ...y.numbers[k], [key]: v } } } : y))),
+                label: x.name ?? `entity return ${i + 2}`,
+              }),
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-edge px-4 py-3">
               <Legend />
@@ -1873,6 +2155,7 @@ export default function TaxRecapBuilder({
           sides.before.warnings.length ||
           sides.after.warnings.length ||
           sides.entity.warnings.length ||
+          moreEntities.some((x) => x.side.warnings.length) ||
           sides.before.derived ||
           analysis?.notes.length ? (
             <Panel title="Things to look at">
@@ -1907,6 +2190,14 @@ export default function TaxRecapBuilder({
                     <span>{w}</span>
                   </li>
                 ))}
+                {moreEntities.flatMap((x, j) =>
+                  x.side.warnings.map((w, i) => (
+                    <li key={`m${j}-${i}`} className="flex gap-2">
+                      <Mono className="mt-0.5 flex-none text-ember">{x.name ?? x.form ?? `entity ${j + 2}`}</Mono>
+                      <span>{w}</span>
+                    </li>
+                  )),
+                )}
                 {sides.city.warnings.map((w, i) => (
                   <li key={`c${i}`} className="flex gap-2">
                     <Mono className="mt-0.5 flex-none text-ember">{sides.city.entity?.stateForm ?? "city"}</Mono>
@@ -2014,10 +2305,20 @@ export default function TaxRecapBuilder({
                     size="sm"
                   />
                   <LineRow
-                    label="State tax saved"
+                    label={moreStates.length ? "State tax saved (every state)" : "State tax saved"}
                     value={money(computed.breakdown.stateSaved)}
                     size="sm"
                   />
+                  {moreStates.length
+                    ? rows.states.map((r) => (
+                        <LineRow
+                          key={r.index}
+                          label={`  ${r.label}: ${money(computed.before.stateRows[r.index])} → ${money(computed.after.stateRows[r.index])}`}
+                          value={money(computed.before.stateRows[r.index] - computed.after.stateRows[r.index])}
+                          size="sm"
+                        />
+                      ))
+                    : null}
                   <LineRow
                     label="Penalties avoided"
                     value={money(computed.breakdown.penaltiesSaved)}
@@ -2041,20 +2342,26 @@ export default function TaxRecapBuilder({
                     size="sm"
                     tone={computed.filing.federal.due > 0 ? "neg" : "pos"}
                   />
-                  <LineRow
-                    label={`State: ${money(computed.filing.state.owed)} owed − ${money(computed.filing.state.paid)} paid`}
-                    value={dueLabel(computed.filing.state.due)}
-                    size="sm"
-                    tone={computed.filing.state.due > 0 ? "neg" : "pos"}
-                  />
-                  {computed.filing.entity ? (
+                  {[computed.filing.state, ...computed.filing.otherStates].map((line, i) => (
                     <LineRow
-                      label={`${entityFilingLabel(computed)}: ${money(computed.filing.entity.owed)} owed − ${money(computed.filing.entity.paid)} paid`}
-                      value={dueLabel(computed.filing.entity.due)}
+                      key={`s${i}`}
+                      label={`${moreStates.length ? stateName(computed.states[i]?.code ?? null) : "State"}: ${money(line.owed)} owed − ${money(line.paid)} paid`}
+                      value={dueLabel(line.due)}
                       size="sm"
-                      tone={computed.filing.entity.due > 0 ? "neg" : "pos"}
+                      tone={line.due > 0 ? "neg" : "pos"}
                     />
-                  ) : null}
+                  ))}
+                  {[computed.filing.entity, ...computed.filing.otherEntities].map((line, i) =>
+                    line ? (
+                      <LineRow
+                        key={`e${i}`}
+                        label={`${rows.entities[i]?.filingLabel ?? "Entity"}: ${money(line.owed)} owed − ${money(line.paid)} paid`}
+                        value={dueLabel(line.due)}
+                        size="sm"
+                        tone={line.due > 0 ? "neg" : "pos"}
+                      />
+                    ) : null,
+                  )}
                   <LineRow
                     label="Total"
                     value={dueLabel(computed.filing.total)}
@@ -2468,6 +2775,7 @@ function GridRow({
 function HeroDrop({
   picked,
   sides,
+  more,
   reading,
   disabled,
   error,
@@ -2478,6 +2786,8 @@ function HeroDrop({
 }: {
   picked: Picked[];
   sides: Record<Kind, SideState>;
+  /** The entity returns beyond the first, each read on its own. */
+  more: SideState[];
   reading: boolean;
   disabled: boolean;
   error: string | null;
@@ -2494,6 +2804,7 @@ function HeroDrop({
     sides.after.status === "error" ||
     sides.entity.status === "error" ||
     sides.city.status === "error" ||
+    more.some((s) => s.status === "error") ||
     !!error;
   const allDone = picked.length > 0 && sides.after.status === "done";
   const tone = anyError
@@ -2512,7 +2823,7 @@ function HeroDrop({
     if (!disabled) inputRef.current?.click();
   };
   const empty = !picked.length && !reading;
-  const busy = [sides.after, sides.entity, sides.city].filter(
+  const busy = [sides.after, sides.entity, sides.city, ...more].filter(
     (s) => s.status === "reading",
   );
   const preview =
@@ -2584,6 +2895,13 @@ function HeroDrop({
                 </div>
               ) : null,
             )}
+            {more.map((s, i) =>
+              s.status === "reading" || s.status === "done" ? (
+                <div key={`m${i}`} className="mt-1.5 min-h-[20px] text-[13.5px] text-teal">
+                  {s.status === "done" ? `Entity return ${i + 2} read ✓` : s.message}
+                </div>
+              ) : null,
+            )}
             <div className="relative mx-auto mt-5 h-1.5 w-56 overflow-hidden rounded-full bg-white/10 sm:mx-0">
               <div className="absolute top-0 h-full w-[45%] rounded-full bg-grad animate-beam-sweep" />
             </div>
@@ -2607,7 +2925,8 @@ function HeroDrop({
           <ul className="space-y-2">
             {picked.map((p) => {
               const side =
-                p.analysis?.kind === "entity" ? sides.entity : p.analysis?.kind === "city" ? sides.city : sides.after;
+                [sides.after, sides.entity, sides.city, ...more].find((s) => s.file === p.file) ??
+                (p.analysis?.kind === "entity" ? sides.entity : p.analysis?.kind === "city" ? sides.city : sides.after);
               const done = side.status === "done" && side.file === p.file;
               const errored = side.status === "error" && side.file === p.file;
               return (
@@ -2726,7 +3045,7 @@ function HeroDrop({
             </div>
           ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            {picked.length < 3 ? (
+            {picked.length < MAX_FILES ? (
               <button
                 type="button"
                 disabled={disabled}
@@ -2737,14 +3056,18 @@ function HeroDrop({
                   ? "+ Add the 1120-S or 1065"
                   : hasEntity && !hasIndividual
                     ? "+ Add the 1040"
-                    : "+ Add a file"}
+                    : hasEntity
+                      ? "+ Add another 1120-S or 1065"
+                      : "+ Add a file"}
               </button>
             ) : null}
             <span className="text-[12px] text-dusk">
               {hasIndividual && !hasEntity
-                ? "A sole proprietor needs only the 1040. For an S corporation or a partnership, drop its 1120-S or 1065 too."
+                ? "A sole proprietor needs only the 1040. For an S corporation or a partnership, drop its 1120-S or 1065 too — every one, when the client owns several."
                 : hasIndividual && hasEntity
-                  ? "Both returns are here — the recap is built from the two together."
+                  ? picked.filter((p) => p.analysis?.kind === "entity").length > 1
+                    ? "Every business is here — each gets its own before, and the 1040 is built from them together."
+                    : "Both returns are here — the recap is built from the two together. Own another business? Add its return too."
                   : ""}
             </span>
           </div>

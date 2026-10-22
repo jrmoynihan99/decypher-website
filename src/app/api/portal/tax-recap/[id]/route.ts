@@ -6,10 +6,13 @@ import {
   sanitizeAnalysis,
   sanitizeDerivedBefore,
   sanitizeEntityExtract,
+  sanitizeEntityExtracts,
   sanitizeEntityNumbers,
   sanitizeExtract,
   sanitizeNextSteps,
   sanitizeNumbers,
+  sanitizeOtherEntities,
+  sanitizeOtherStates,
   sanitizeStrategies,
 } from "@/lib/tax-recap/schema";
 import {
@@ -70,6 +73,8 @@ export async function PATCH(
     if ("after" in r) edits.after = sanitizeNumbers(r.after);
     if ("entityBefore" in r) edits.entityBefore = sanitizeEntityNumbers(r.entityBefore);
     if ("entityAfter" in r) edits.entityAfter = sanitizeEntityNumbers(r.entityAfter);
+    if ("otherEntities" in r) edits.otherEntities = sanitizeOtherEntities(r.otherEntities);
+    if ("otherStates" in r) edits.otherStates = sanitizeOtherStates(r.otherStates);
     if ("strategies" in r) edits.strategies = sanitizeStrategies(r.strategies);
     if ("nextSteps" in r) edits.nextSteps = sanitizeNextSteps(r.nextSteps);
     if ("extraction" in r && r.extraction && typeof r.extraction === "object") {
@@ -78,6 +83,8 @@ export async function PATCH(
         before: sanitizeExtract(ex.before),
         after: sanitizeExtract(ex.after),
         entity: sanitizeEntityExtract(ex.entity),
+        city: sanitizeEntityExtract(ex.city),
+        otherEntities: sanitizeEntityExtracts(ex.otherEntities),
       };
     }
     if ("derivedBefore" in r) edits.derivedBefore = sanitizeDerivedBefore(r.derivedBefore);

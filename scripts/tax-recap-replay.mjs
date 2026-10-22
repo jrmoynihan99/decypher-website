@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { attributeStrategies, deriveBefore } from "../src/lib/tax-recap/derive.ts";
 import { computeRecap } from "../src/lib/tax-recap/compute.ts";
-import { ENTITY_FIELD_KEYS, RETURN_FIELD_KEYS, emptyEntityNumbers, emptyNumbers } from "../src/lib/tax-recap/schema.ts";
+import { ENTITY_FIELD_KEYS, RETURN_FIELD_KEYS, emptyEntityNumbers, emptyNumbers, emptyStateNumbers } from "../src/lib/tax-recap/schema.ts";
 
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
@@ -45,6 +45,11 @@ if (doc.entity && typeof doc.entity === "object") {
   if (!any) entity = null;
 }
 const meta = doc.meta ?? {};
+// The other entity and state returns on the same 1040 (recorded from engine v13 on).
+const more = {
+  entities: (doc.more?.entities ?? []).map((e) => ({ ...e, numbers: { ...emptyEntityNumbers(), ...e.numbers } })),
+  states: (doc.more?.states ?? []).map((s) => ({ ...s, numbers: { ...emptyStateNumbers(), ...s.numbers } })),
+};
 
 const money = (v) => (v === null || v === undefined ? "—" : `$${v.toLocaleString("en-US")}`);
 console.log(`${doc.clientName || "(client)"} · ${meta.taxYear ?? "?"} · ${meta.filingStatus ?? "?"} · ${meta.stateCode ?? "no state"}${meta.entityForm ? ` · ${meta.entityForm}` : ""} · recorded with engine v${doc.engineVersion ?? "?"} by ${doc.createdBy ?? "?"}`);
@@ -53,7 +58,7 @@ if (doc.extraction?.after?.notes) console.log(`reader notes (1040): ${doc.extrac
 if (doc.extraction?.entity?.notes) console.log(`reader notes (entity): ${doc.extraction.entity.notes}`);
 
 console.log("\nnow:");
-const r = deriveBefore(after, meta, undefined, entity);
+const r = deriveBefore(after, meta, undefined, entity, more);
 if (!r.ok) {
   console.log("REFUSED:\n - " + r.reasons.join("\n - "));
   if (r.mismatches.length) for (const m of r.mismatches) console.log(`   ${m.line}: read ${money(m.read)}, tables ${money(m.computed)}`);
@@ -64,10 +69,27 @@ if (!r.ok) {
     console.log("  entity before:");
     for (const [k, v] of Object.entries(r.entityBefore)) if (v !== null) console.log("  " + k.padEnd(28) + money(v).padStart(12));
   }
+  r.otherEntitiesBefore.forEach((e, i) => {
+    console.log(`  ${more.entities[i]?.name ?? `entity ${i + 2}`} before:`);
+    for (const [k, v] of Object.entries(e)) if (v !== null) console.log("  " + k.padEnd(28) + money(v).padStart(12));
+  });
+  r.otherStatesBefore.forEach((s, i) => {
+    console.log(`  ${more.states[i]?.stateCode ?? "state"} before:`);
+    for (const [k, v] of Object.entries(s)) if (v !== null) console.log("  " + k.padEnd(28) + money(v).padStart(12));
+  });
   console.log("  notes:\n   - " + r.derived.notes.join("\n   - "));
-  const c = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity });
+  const c = computeRecap({
+    before: r.before,
+    after,
+    priorYearIncome: null,
+    entityBefore: r.entityBefore,
+    entityAfter: entity,
+    stateCode: meta.stateCode ?? null,
+    otherEntities: more.entities.map((e, i) => ({ form: e.form ?? null, name: e.name ?? null, stateCode: e.stateCode ?? null, before: r.otherEntitiesBefore[i] ?? null, after: e.numbers })),
+    otherStates: more.states.map((s, i) => ({ stateCode: s.stateCode, stateForm: s.stateForm ?? null, before: r.otherStatesBefore[i], after: s.numbers })),
+  });
   console.log(`  savings ${money(c.savings)} (before ${money(c.before.totalTaxes)}, after ${money(c.after.totalTaxes)})`);
-  const analysis = attributeStrategies(after, meta, undefined, entity);
+  const analysis = attributeStrategies(after, meta, undefined, entity, more);
   if (analysis) {
     for (const a of analysis.attribution) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
   }

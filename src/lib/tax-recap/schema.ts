@@ -469,6 +469,20 @@ export const RETURN_FIELDS = [
     group: "state",
     optional: true,
   },
+  {
+    key: "stateSourceBusinessIncome",
+    label: "State-source business income",
+    source: "Part-year and nonresident returns only: the business income inside the state-source income — the state column's Schedule C line plus its S corporation and partnership income",
+    group: "state",
+    optional: true,
+  },
+  {
+    key: "stateOtherStateCredit",
+    label: "Credit for tax paid to other states",
+    source: "A resident return's credit for income tax paid to another state (CA Schedule S, NY Form IT-112-R, VA Schedule OSC, PA Schedule G-L), as claimed",
+    group: "state",
+    optional: true,
+  },
   /* ── marketplace coverage and self-employed health insurance ── */
   {
     key: "additionalTaxes",
@@ -656,6 +670,63 @@ export const RETURN_FIELD_KEYS = RETURN_FIELDS.map((f) => f.key) as ReturnFieldK
 /** The numbers a recap is computed from — one set per return. */
 export type ReturnNumbers = Record<ReturnFieldKey, number | null>;
 
+/* ─────────────────────────── a second state return ─────────────────────────── */
+
+/**
+ * The lines read from each state return beyond the main one: a part-year
+ * return in the state the client moved from, a nonresident return where
+ * income was earned. The main state's lines stay on the 1040's own record
+ * (`stateTotalTax` and the rest); each other state gets these, under the
+ * same keys, and its own before. The recap shows every state's taxes on
+ * its own row, so no state's savings are left out.
+ */
+export const OTHER_STATE_FIELD_KEYS = [
+  "stateTotalTax",
+  "stateTaxOnIncome",
+  "stateSourceIncome",
+  "stateSourceBusinessIncome",
+  "stateAdjustments",
+  "stateDeduction",
+  "stateExemptions",
+  "stateExemptionCredits",
+  "stateLocalTax",
+  "stateOtherStateCredit",
+  "statePayments",
+  "stateWithholding",
+  "stateRefund",
+  "stateAmountOwed",
+  "statePenalty",
+  "stateTotalDue",
+] as const satisfies readonly ReturnFieldKey[];
+
+export type OtherStateFieldKey = (typeof OTHER_STATE_FIELD_KEYS)[number];
+
+export type StateNumbers = Record<OtherStateFieldKey, number | null>;
+
+/**
+ * States whose resident return claims the credit for tax paid to another
+ * state with the payments, after the total tax line — Virginia's 760
+ * (line 24, Schedule OSC) and Pennsylvania's PA-40 (line 22) — rather
+ * than inside the tax. The recap nets it out of the tax and the payments
+ * both, the way it does a refundable credit.
+ */
+export const OTHER_STATE_CREDIT_WITH_PAYMENTS: ReadonlySet<string> = new Set(["VA", "PA"]);
+
+/** One more state return as read: which state, which form, its lines with their pages. */
+export type OtherStateExtract = {
+  stateCode: string;
+  stateForm: string | null;
+  fields: Record<OtherStateFieldKey, ExtractedValue>;
+};
+
+/** One more state return on the recap: its lines on each side. */
+export type RecapOtherState = {
+  stateCode: string;
+  stateForm: string | null;
+  before: StateNumbers;
+  after: StateNumbers;
+};
+
 /* ─────────────────────────── the S corporation's return ─────────────────────────── */
 
 export type EntityFieldGroup = "income" | "deductions" | "shareholder" | "state";
@@ -755,6 +826,21 @@ export type EntityExtract = {
 };
 
 /**
+ * A second (third…) entity return on the same 1040: another S corporation
+ * or partnership the client owns a share of. The first entity stays in
+ * `entityBefore` / `entityAfter`; each further one carries its own form,
+ * state and both sides here, so every business keeps its own before.
+ */
+export type RecapOtherEntity = {
+  form: EntityForm | null;
+  name: string | null;
+  /** The state its own return was filed in. */
+  stateCode: string | null;
+  before: EntityNumbers | null;
+  after: EntityNumbers | null;
+};
+
+/**
  * One extracted figure with its provenance. `page` is the 1-indexed PDF page
  * Claude read it from; `verified` records whether that number literally
  * appears in the pdfjs text of that page (null when no page text was
@@ -776,6 +862,8 @@ export type ReturnExtract = {
   stateForm: string | null;
   notes: string | null;
   fields: Record<ReturnFieldKey, ExtractedValue>;
+  /** Every other state return in the print, each with its own lines (engine v13 reader on). */
+  otherStates?: OtherStateExtract[];
 };
 
 /**
@@ -860,6 +948,10 @@ export type RecapInput = {
   /** The S corporation's return on each side; null for a sole proprietor. */
   entityBefore: EntityNumbers | null;
   entityAfter: EntityNumbers | null;
+  /** Entity returns beyond the first, each with its own before. Absent on recaps saved before there could be several. */
+  otherEntities?: RecapOtherEntity[];
+  /** State returns beyond the main one (`stateCode`), each with its own before. Absent on recaps saved before. */
+  otherStates?: RecapOtherState[];
   strategies: string[];
   nextSteps: RecapNextStep[];
   /** The raw extraction, kept as the audit trail for the numbers above. */
@@ -869,6 +961,8 @@ export type RecapInput = {
     entity: EntityExtract | null;
     /** A city's own return for the corporation (NYC-3L), read as a third file; its lines are merged into `entityAfter`. */
     city?: EntityExtract | null;
+    /** The reads of the entity returns beyond the first, in `otherEntities` order. */
+    otherEntities?: EntityExtract[];
   };
   /** Set when `before` was derived from the after return; `extraction.before` is then null. */
   derivedBefore: DerivedBefore | null;
@@ -1039,16 +1133,99 @@ export function sanitizeExtract(raw: unknown): ReturnExtract | null {
   const fields = sanitizeFieldValues(r.fields, RETURN_FIELD_KEYS);
 
   const year = Number(r.taxYear);
-  const stateCode = text(r.stateCode, 2)?.toUpperCase() ?? null;
+  const stateCode = asStateCode(r.stateCode);
+  const otherStates = (Array.isArray(r.otherStates) ? r.otherStates : [])
+    .map((s): OtherStateExtract | null => {
+      if (!s || typeof s !== "object") return null;
+      const o = s as Record<string, unknown>;
+      const code = asStateCode(o.stateCode);
+      // The main state again, or a state with nothing read, isn't another return.
+      if (!code || code === stateCode) return null;
+      const stateFields = sanitizeFieldValues(o.fields, [...OTHER_STATE_FIELD_KEYS]);
+      if (!OTHER_STATE_FIELD_KEYS.some((k) => stateFields[k].value !== null)) return null;
+      return { stateCode: code, stateForm: text(o.stateForm, 40), fields: stateFields };
+    })
+    .filter((s): s is OtherStateExtract => s !== null)
+    .filter((s, i, all) => all.findIndex((t) => t.stateCode === s.stateCode) === i)
+    .slice(0, MAX_OTHER_STATES);
   return {
     taxpayerName: text(r.taxpayerName, 120),
     taxYear: Number.isInteger(year) && year >= 2000 && year <= 2100 ? year : null,
     filingStatus: text(r.filingStatus, 60),
-    stateCode: stateCode && /^[A-Z]{2}$/.test(stateCode) ? stateCode : null,
+    stateCode,
     stateForm: text(r.stateForm, 40),
     notes: text(r.notes, 2000),
     fields,
+    ...(otherStates.length ? { otherStates } : {}),
   };
+}
+
+/** How many state returns beyond the main one a recap carries. */
+export const MAX_OTHER_STATES = 4;
+/** How many entity returns beyond the first a recap carries. */
+export const MAX_OTHER_ENTITIES = 5;
+
+const asStateCode = (v: unknown): string | null => {
+  const code = text(v, 2)?.toUpperCase() ?? null;
+  return code && /^[A-Z]{2}$/.test(code) ? code : null;
+};
+
+export function emptyStateNumbers(): StateNumbers {
+  return Object.fromEntries(OTHER_STATE_FIELD_KEYS.map((k) => [k, null])) as StateNumbers;
+}
+
+export function sanitizeStateNumbers(raw: unknown): StateNumbers {
+  const out = emptyStateNumbers();
+  if (!raw || typeof raw !== "object") return out;
+  const r = raw as Record<string, unknown>;
+  for (const key of OTHER_STATE_FIELD_KEYS) {
+    if (key in r) out[key] = asMoney(r[key]);
+  }
+  return out;
+}
+
+/** An other state's lines as read, flattened to the editable numbers. */
+export function stateNumbersFromExtract(extract: OtherStateExtract): StateNumbers {
+  const out = emptyStateNumbers();
+  for (const key of OTHER_STATE_FIELD_KEYS) out[key] = extract.fields[key]?.value ?? null;
+  return out;
+}
+
+export function sanitizeOtherStates(raw: unknown): RecapOtherState[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((s): RecapOtherState | null => {
+      if (!s || typeof s !== "object") return null;
+      const o = s as Record<string, unknown>;
+      const code = asStateCode(o.stateCode);
+      if (!code) return null;
+      return { stateCode: code, stateForm: text(o.stateForm, 40), before: sanitizeStateNumbers(o.before), after: sanitizeStateNumbers(o.after) };
+    })
+    .filter((s): s is RecapOtherState => s !== null)
+    .slice(0, MAX_OTHER_STATES);
+}
+
+export function sanitizeOtherEntities(raw: unknown): RecapOtherEntity[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((s): RecapOtherEntity | null => {
+      if (!s || typeof s !== "object") return null;
+      const o = s as Record<string, unknown>;
+      const before = sanitizeEntityNumbers(o.before);
+      const after = sanitizeEntityNumbers(o.after);
+      if (!before && !after) return null;
+      return { form: parseEntityForm(o.form), name: text(o.name, 120), stateCode: asStateCode(o.stateCode), before, after };
+    })
+    .filter((s): s is RecapOtherEntity => s !== null)
+    .slice(0, MAX_OTHER_ENTITIES);
+}
+
+export function sanitizeEntityExtracts(raw: unknown): EntityExtract[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e) => sanitizeEntityExtract(e))
+    .filter((e): e is EntityExtract => e !== null)
+    .slice(0, MAX_OTHER_ENTITIES);
 }
 
 /** Flatten an extraction to the editable numbers the recap is computed from. */
@@ -1265,6 +1442,8 @@ export function sanitizeRecapInput(raw: unknown): RecapInput {
     after: sanitizeNumbers(r.after),
     entityBefore: sanitizeEntityNumbers(r.entityBefore),
     entityAfter: sanitizeEntityNumbers(r.entityAfter),
+    otherEntities: sanitizeOtherEntities(r.otherEntities),
+    otherStates: sanitizeOtherStates(r.otherStates),
     strategies: sanitizeStrategies(r.strategies),
     nextSteps: sanitizeNextSteps(r.nextSteps),
     extraction: {
@@ -1272,6 +1451,7 @@ export function sanitizeRecapInput(raw: unknown): RecapInput {
       after: sanitizeExtract(extraction.after),
       entity: sanitizeEntityExtract(extraction.entity),
       city: sanitizeEntityExtract(extraction.city),
+      otherEntities: sanitizeEntityExtracts(extraction.otherEntities),
     },
     derivedBefore: sanitizeDerivedBefore(r.derivedBefore),
     analysis: sanitizeAnalysis(r.analysis),

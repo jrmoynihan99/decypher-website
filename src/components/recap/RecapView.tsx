@@ -13,7 +13,7 @@ import { prefersReducedMotion } from "@/lib/decrypt";
 import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
-import { computeRecap, entityFilingLabel, entityRowLabel, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
+import { computeRecap, taxRows, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
 import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
 
@@ -62,6 +62,10 @@ export default function RecapView({
   const c = computeRecap(recap);
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
   const stateLabel = recap.stateCode ? (STATE_NAMES[recap.stateCode] ?? recap.stateCode) : "State";
+  // A row per state return and per entity return: one each, as the recap
+  // always had, or every one when the client filed in several states or
+  // owns several businesses.
+  const rows = taxRows(c, (code) => (code ? (STATE_NAMES[code] ?? code) : "State"));
   const growth =
     c.priorYearIncome && c.priorYearIncome > 0
       ? (c.currentYearIncome - c.priorYearIncome) / c.priorYearIncome
@@ -83,8 +87,9 @@ export default function RecapView({
   // year and recap already filled in — old recaps' Airtable links included.
   const stepHref = (href: string) => recapSurveyHref(href, recap);
 
-  const owed = c.filing.federal.owed + c.filing.state.owed + (c.filing.entity?.owed ?? 0);
-  const paid = c.filing.federal.paid + c.filing.state.paid + (c.filing.entity?.paid ?? 0);
+  const filingLines = [c.filing.federal, c.filing.state, ...c.filing.otherStates, c.filing.entity, ...c.filing.otherEntities];
+  const owed = filingLines.reduce((s, l) => s + (l?.owed ?? 0), 0);
+  const paid = filingLines.reduce((s, l) => s + (l?.paid ?? 0), 0);
   const refund = c.filing.total < 0;
 
   const sections: Section[] = [
@@ -93,7 +98,7 @@ export default function RecapView({
       title: `What ${recap.taxYear} would have cost.`,
       sub: `Your income with nothing taken off it: no write-offs, no strategies${kidsOut ? ", no dependents claimed" : ""}.`,
       stage: true,
-      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" stateLabel={stateLabel} entityKind={c.entityKind} cityTax={c.cityTax} />,
+      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" rows={rows} entityKind={c.entityKind} />,
     },
     {
       label: "the difference",
@@ -133,7 +138,7 @@ export default function RecapView({
       sub: `Your books done and every strategy applied: the ${c.scorp ? "returns" : "return"} you’re filing.`,
       stage: true,
       body: (
-        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} stateLabel={stateLabel} entityKind={c.entityKind} cityTax={c.cityTax} />
+        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} rows={rows} entityKind={c.entityKind} />
       ),
     },
     ...(attribution.length
@@ -203,10 +208,12 @@ export default function RecapView({
             <Panel className="!py-5">
               <div className="space-y-2">
                 <FilingRow label="Federal" line={c.filing.federal} />
-                <FilingRow label={stateLabel} line={c.filing.state} />
-                {c.filing.entity ? (
-                  <FilingRow label={entityFilingLabel(c)} line={c.filing.entity} />
-                ) : null}
+                {[c.filing.state, ...c.filing.otherStates].map((line, i) => (
+                  <FilingRow key={`s${i}`} label={i === 0 && !c.filing.otherStates.length ? stateLabel : rows.states[i].label.replace(/ taxes$/, "")} line={line} />
+                ))}
+                {[c.filing.entity, ...c.filing.otherEntities].map((line, i) =>
+                  line ? <FilingRow key={`e${i}`} label={rows.entities[i]?.filingLabel ?? "Entity"} line={line} /> : null,
+                )}
               </div>
             </Panel>
           </Reveal>
@@ -517,9 +524,8 @@ function Stage({
   scale,
   tone,
   was,
-  stateLabel,
+  rows,
   entityKind,
-  cityTax,
 }: {
   side: RecapSide;
   /** The bar's one scale on both sides: the before return's total income. */
@@ -527,10 +533,9 @@ function Stage({
   tone: "neg" | "pos";
   /** The after only: the before side, for the "was" line and the bar's ghost. */
   was?: RecapSide;
-  stateLabel: string;
+  /** The state and entity rows, labelled (`taxRows`). */
+  rows: ReturnType<typeof taxRows>;
   entityKind: EntityKind;
-  /** The corporation files a city return too, so its row says so. */
-  cityTax: boolean;
 }) {
   const dash = (v: number) => (v === 0 ? "—" : signed(v));
   return (
@@ -572,8 +577,12 @@ function Stage({
           <ColumnHead>Taxes</ColumnHead>
           <div>
             <Row label="Federal taxes" value={money(side.federalTaxes)} />
-            <Row label={`${stateLabel} taxes`} value={dash(side.stateTaxes)} />
-            {entityKind ? <Row label={entityRowLabel({ entityKind, cityTax }, stateLabel)} value={dash(side.entityTaxes)} /> : null}
+            {rows.states.map((r) => (
+              <Row key={`s${r.index}`} label={r.label} value={dash(side.stateRows[r.index] ?? 0)} />
+            ))}
+            {rows.entities.map((r) => (
+              <Row key={`e${r.index}`} label={r.label} value={dash(side.entityRows[r.index] ?? 0)} />
+            ))}
             <Row label="Penalties" value={dash(side.penalties)} />
             <Row label="Total taxes owed" value={money(side.totalTaxes)} total tone={tone} />
           </div>

@@ -4,6 +4,7 @@ import {
   CITY_FIELD_KEYS,
   ENTITY_FIELDS,
   ENTITY_FIELD_KEYS,
+  OTHER_STATE_FIELD_KEYS,
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
   sanitizeEntityExtract,
@@ -173,8 +174,27 @@ const OUTPUT_SCHEMA = {
         "One entry per field that has a printed value. Omit fields whose line is blank. Each key at most once.",
       items: lineSchema(RETURN_FIELD_KEYS),
     },
+    otherStates: {
+      type: "array",
+      description:
+        "Every state return in the print beyond the one reported as stateCode, each with its own lines. Empty when there is one state return or none.",
+      items: {
+        type: "object",
+        properties: {
+          stateCode: { type: "string", description: "Two-letter code of this state return." },
+          stateForm: { type: "string", description: "Its main form, e.g. 540NR or IT-203. Empty string if unknown." },
+          lines: {
+            type: "array",
+            description: "This state return's own lines, read from its pages only. Omit blank lines. Each key at most once.",
+            items: lineSchema(OTHER_STATE_FIELD_KEYS),
+          },
+        },
+        required: ["stateCode", "stateForm", "lines"],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ["taxpayerName", "taxYear", "filingStatus", "stateCode", "stateForm", "notes", "lines"],
+  required: ["taxpayerName", "taxYear", "filingStatus", "stateCode", "stateForm", "notes", "lines", "otherStates"],
   additionalProperties: false,
 };
 
@@ -241,21 +261,27 @@ const ENTITY_OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
-/** Fold the model's `lines` array into the per-field record the rest of the code expects. */
+/** Fold the model's `lines` array into the per-field record the rest of the code expects (each other state's too). */
 function toFieldShape(parsed: unknown): unknown {
   if (!parsed || typeof parsed !== "object") return parsed;
   const p = parsed as Record<string, unknown>;
-  const fields: Record<string, { value: unknown; page: unknown }> = {};
-  if (Array.isArray(p.lines)) {
-    for (const item of p.lines) {
-      if (!item || typeof item !== "object") continue;
-      const { key, value, page } = item as Record<string, unknown>;
-      // First occurrence wins; a duplicated key is a model slip, not two lines.
-      if (typeof key !== "string" || key in fields) continue;
-      fields[key] = { value, page };
+  const fold = (lines: unknown) => {
+    const fields: Record<string, { value: unknown; page: unknown }> = {};
+    if (Array.isArray(lines)) {
+      for (const item of lines) {
+        if (!item || typeof item !== "object") continue;
+        const { key, value, page } = item as Record<string, unknown>;
+        // First occurrence wins; a duplicated key is a model slip, not two lines.
+        if (typeof key !== "string" || key in fields) continue;
+        fields[key] = { value, page };
+      }
     }
-  }
-  return { ...p, fields };
+    return fields;
+  };
+  const otherStates = Array.isArray(p.otherStates)
+    ? p.otherStates.map((s) => (s && typeof s === "object" ? { ...(s as Record<string, unknown>), fields: fold((s as Record<string, unknown>).lines) } : s))
+    : undefined;
+  return { ...p, fields: fold(p.lines), ...(otherStates ? { otherStates } : {}) };
 }
 
 const CONVENTIONS = `Conventions of these prints:
@@ -334,7 +360,7 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - The rest of Schedule C Part II, each omitted when blank (with several Schedules C, add each line up across them): schCAdvertising line 8; schCCarTruck line 9; schCCommissions line 10; schCContractLabor line 11; schCEmployeeBenefits line 14; schCInsurance line 15; schCInterest lines 16a + 16b; schCLegalProfessional line 17; schCOfficeExpense line 18; schCPension line 19; schCRent lines 20a + 20b; schCRepairs line 21; schCSupplies line 22; schCTaxesLicenses line 23; schCTravel line 24a; schCMeals line 24b (the deductible amount as printed); schCUtilities line 25; schCOtherExpenses line 27a.
 
 State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field.
-More than one state return (a move during the year, income earned in another state): report ONE state as stateCode and stateForm — the state the taxpayer lived in on December 31 (its resident or part-year return); if that state has no income tax return in the print, the state whose return shows the most total tax. Read every state line below from that state's return ONLY, except these totals, which add up every state's return: stateTotalTax, statePayments, stateWithholding, stateRefund, stateAmountOwed, statePenalty, stateTotalDue. Never add another state's figures into stateTaxOnIncome, stateDeduction, stateExemptions, stateExemptionCredits, stateSourceIncome or stateAdjustments. In notes, list each other state with its form and its total tax.
+More than one state return (a move during the year, income earned in another state): report the state the taxpayer lived in on December 31 as stateCode and stateForm (its resident or part-year return); if that state has no income tax return in the print, the state whose return shows the most total tax. Read every state line in "lines" from that state's return ONLY — never add another state's figures into it. Report every other state return as its own entry in "otherStates": its two-letter code, its form (e.g. "540NR", "IT-203", "1040ME", "PA-40"), and its own lines under the same keys, read from that state's return only, the same way (a part-year or nonresident return's stateSourceIncome and stateSourceBusinessIncome included). One entry per state; "otherStates" is empty when there is only one state return.
 - stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
 - statePayments: total withholding, estimated payments and refundable credits. California 540: line 93 (or line 78 if 93 is absent). California 540NR: line 88.
 - stateWithholding: state income tax withheld. California 540: line 71. California 540NR: line 81. Omit when blank.
@@ -343,6 +369,8 @@ More than one state return (a move during the year, income earned in another sta
 - statePenalty: underpayment penalty plus interest and late penalties. California 540: line 112 plus line 113. California 540NR: line 122 plus line 123. Omit when none.
 - stateTotalDue: total amount due including penalties. California 540: line 114. California 540NR: line 124.
 - stateSourceIncome: ONLY on a nonresident or part-year state return. California Form 540NR: the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Maryland Form 505: Form 505NR line 8 (Maryland income, after the non-Maryland income comes out). New York Form IT-203: line 17, the "New York State amount" column (NOT line 31). Virginia Form 760PY: the Schedule of Income, Part 1, Section A line 4 ("Gross income"), column A2 "While VA Resident" — on filing status 4, plus Section B line 4, column B2. Arizona Form 140PY: line 23, the Arizona column. Omit on a resident return.
+- stateSourceBusinessIncome: ONLY on a nonresident or part-year state return: the business income inside stateSourceIncome — the same state column's business income line (Schedule C) plus its partnership and S corporation income. California Form 540NR: Schedule CA (540NR) Part II column E, line 3, plus the partnership and S corporation part of line 17. New York Form IT-203: line 6 in the New York State amount column, plus the partnership and S corporation part of line 11. Rents, wages, interest and gains are not business income. Omit when the column has no business income, and on a resident return.
+- stateOtherStateCredit: on a RESIDENT return only, the credit it claims for income tax paid to another state, as printed — California Schedule S (Form 540 credit code 187), New York IT-201 line 41 (resident credit, Form IT-112-R), New Jersey NJ-1040 line 44, Massachusetts Form 1 line 31, Virginia Form 760 line 24 (Schedule OSC), Pennsylvania PA-40 line 22 (resident credit). Report stateTotalTax and statePayments as printed whichever section the credit sits in. Omit when blank and on a part-year or nonresident return.
 - New York Form IT-203 (nonresident / part-year; the same lines on an amended IT-203-X): stateTaxOnIncome is line 46 (the allocated New York State tax: line 44 times the income percentage on line 45); stateTotalTax is line 58; stateLocalTax is line 51 (New York City part-year resident tax) when printed; stateDeduction is line 33.
 - Virginia Form 760PY (part-year): stateTaxOnIncome and stateTotalTax are both line 18; stateDeduction is line 12 (or line 11 when itemized); stateExemptions is line 13. On filing status 4 (spouses filing separately on one combined return, column A for you and column B for the spouse), add the two columns together on every line.
 - Arizona Form 140PY (part-year / nonresident): stateTaxOnIncome is line 56; stateTotalTax is line 62 (balance of tax); stateDeduction is line 53.
@@ -666,12 +694,20 @@ export async function extractReturn(
   // Verification runs against the pages as sent; the page numbers are only
   // translated back afterwards, once nothing else needs to index into them.
   const extract = remapPages(unbundled.extract, pageMap);
-  const { unverified, noText } = verified;
+  const { unverified, unverifiedOther, noText } = verified;
 
   const warnings: string[] = [...unbundled.notes];
+  const labelOf = (k: string) => RETURN_FIELDS.find((f) => f.key === k)?.label ?? k;
   if (unverified.length) {
-    const labels = unverified.map((k) => RETURN_FIELDS.find((f) => f.key === k)?.label ?? k);
-    warnings.push(`Couldn't find these numbers in the PDF text, check them by hand: ${labels.join(", ")}`);
+    warnings.push(`Couldn't find these numbers in the PDF text, check them by hand: ${unverified.map(labelOf).join(", ")}`);
+  }
+  for (const o of unverifiedOther) {
+    warnings.push(`Couldn't find these numbers on the ${o.stateCode} return, check them by hand: ${o.keys.map(labelOf).join(", ")}`);
+  }
+  if (extract.otherStates?.length) {
+    warnings.push(
+      `More than one state return: ${[extract.stateCode, ...extract.otherStates.map((s) => s.stateCode)].filter(Boolean).join(", ")} — each is on its own row of the recap and gets its own before`,
+    );
   }
   if (noText) warnings.push(noTextWarning(pageTexts));
   if (extract.notes) warnings.push(`Reader notes: ${extract.notes}`);

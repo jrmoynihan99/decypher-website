@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
-import { computeRecap, entityFilingLabel, entityRowLabel, type EntityKind, type RecapSide } from "./compute";
+import { computeRecap, taxRows, type EntityKind, type RecapSide } from "./compute";
 import type { RecapDoc } from "./schema";
 import { US_STATES } from "./tables";
 
@@ -235,10 +235,9 @@ function stage(
     scale: number;
     /** The after only: the before side, for the "was" figure and the bar's ghost. */
     was?: RecapSide;
-    stateLabel: string;
+    /** The state and entity rows, labelled (`taxRows`): one each, or every one when there are several. */
+    rows: ReturnType<typeof taxRows>;
     entityKind: EntityKind;
-    /** The corporation files a city return too, so its row says so. */
-    cityTax: boolean;
   },
 ): number {
   let y = top;
@@ -286,7 +285,6 @@ function stage(
   page.drawText("TAXES", { x: right, y, size: 7.5, font: ctx.bold, color: C.dusk });
   y -= 20;
   const s = o.side;
-  const st = o.stateLabel;
   const left = ledger(ctx, page, M, y, colW, [
     ["W-2 income", dash(s.w2Income)],
     [o.entityKind ? "Business net income (K-1)" : "Business net income", money(s.businessNetIncome), { color: C.magenta }],
@@ -295,9 +293,9 @@ function stage(
   ]);
   const taxes = ledger(ctx, page, right, y, colW, [
     ["Federal taxes", money(s.federalTaxes)],
-    [`${st} taxes`, dash(s.stateTaxes)],
+    ...o.rows.states.map((r): LedgerRow => [r.label, dash(s.stateRows[r.index] ?? 0)]),
     // The entity's own state tax: its own row for an S corporation (tax plus the elective tax, and a city's tax when it files one) or an LLC (annual tax plus fee).
-    ...(o.entityKind ? ([[entityRowLabel(o, st), dash(s.entityTaxes)]] as LedgerRow[]) : []),
+    ...o.rows.entities.map((r): LedgerRow => [r.label, dash(s.entityRows[r.index] ?? 0)]),
     ["Penalties", dash(s.penalties)],
     ["Total taxes owed", money(s.totalTaxes), { total: true, color: o.color }],
   ]);
@@ -318,6 +316,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
   const c = computeRecap(recap);
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
   const stateLabel = recap.stateCode ? (US_STATES[recap.stateCode] ?? recap.stateCode) : "State";
+  const rows = taxRows(c, (code) => (code ? (US_STATES[code] ?? code) : "State"));
   const header = { left: "DeCypher Financials", right: `TAX RECAP  ·  ${recap.taxYear}` };
   const TOTAL = 5;
   // An S corporation's SE-tax saving sits outside the before/after and is
@@ -380,9 +379,8 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       side: c.before,
       color: C.danger,
       scale: c.before.grossIncome,
-      stateLabel,
+      rows,
       entityKind: c.entityKind,
-      cityTax: c.cityTax,
     });
     y -= 14;
 
@@ -423,9 +421,8 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       color: C.teal,
       scale: c.before.grossIncome,
       was: c.before,
-      stateLabel,
+      rows,
       entityKind: c.entityKind,
-      cityTax: c.cityTax,
     });
 
     // One line per strategy, adding up to the total.
@@ -480,12 +477,13 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     y -= 26;
     page.drawText(refund ? "Your refund" : "Taxes due at filing", { x: M, y, size: 22, font: ctx.bold, color: C.fog });
     y -= 22;
-    const lines: [string, { owed: number; paid: number; due: number }][] = [
+    type Line = [string, { owed: number; paid: number; due: number }];
+    const lines: Line[] = [
       ["Federal", c.filing.federal],
-      [stateLabel, c.filing.state],
-      ...(c.filing.entity
-        ? ([[entityFilingLabel(c), c.filing.entity]] as [string, { owed: number; paid: number; due: number }][])
-        : []),
+      ...[c.filing.state, ...c.filing.otherStates].map(
+        (l, i): Line => [i === 0 && !c.filing.otherStates.length ? stateLabel : rows.states[i].label.replace(/ taxes$/, ""), l],
+      ),
+      ...[c.filing.entity, ...c.filing.otherEntities].flatMap((l, i): Line[] => (l ? [[rows.entities[i]?.filingLabel ?? "Entity", l]] : [])),
     ];
     // The year in three figures: owed, already paid, and what's left.
     const owed = lines.reduce((s, [, l]) => s + l.owed, 0);

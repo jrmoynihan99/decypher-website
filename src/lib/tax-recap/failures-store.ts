@@ -1,12 +1,16 @@
 import "server-only";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
-import type { DeriveMeta, Mismatch } from "./derive";
+import type { DeriveMeta, DeriveMore, EntityInput, Mismatch, OtherStateInput } from "./derive";
 import {
+  MAX_OTHER_ENTITIES,
+  MAX_OTHER_STATES,
   asMoney,
+  parseEntityForm,
   sanitizeEntityExtract,
   sanitizeEntityNumbers,
   sanitizeExtract,
   sanitizeNumbers,
+  sanitizeStateNumbers,
   type EntityExtract,
   type EntityNumbers,
   type ReturnExtract,
@@ -82,6 +86,8 @@ export type FailureInput = {
   mismatches: Mismatch[];
   after: ReturnNumbers;
   entity: EntityNumbers | null;
+  /** The entity returns beyond the first and the state returns beyond the main one (engine v13). */
+  more: DeriveMore;
   extraction: { after: ReturnExtract | null; entity: EntityExtract | null; city?: EntityExtract | null };
   /** The reader's and cross-check's warnings, per return. */
   warnings: { after: string[]; entity: string[] };
@@ -143,8 +149,35 @@ export function sanitizeMeta(raw: unknown): DeriveMeta {
     stateForm: text(r.stateForm, 40) || null,
     entityForm: entityForm === "1120-S" || entityForm === "1065" ? entityForm : null,
     entityStateCode: /^[A-Z]{2}$/.test(entityStateCode) ? entityStateCode : null,
+    entityName: text(r.entityName, 120) || null,
     unverified: strings(r.unverified, 80, 60),
   };
+}
+
+/** The other entity and state returns the engine was handed, narrowed. */
+export function sanitizeMore(raw: unknown): DeriveMore {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const code = (v: unknown) => {
+    const c = text(v, 2).toUpperCase();
+    return /^[A-Z]{2}$/.test(c) ? c : null;
+  };
+  const entities = (Array.isArray(r.entities) ? r.entities : [])
+    .map((e): EntityInput | null => {
+      const o = (e && typeof e === "object" ? e : {}) as Record<string, unknown>;
+      const numbers = sanitizeEntityNumbers(o.numbers);
+      return numbers ? { numbers, form: parseEntityForm(o.form), stateCode: code(o.stateCode), name: text(o.name, 120) || null } : null;
+    })
+    .filter((e): e is EntityInput => e !== null)
+    .slice(0, MAX_OTHER_ENTITIES);
+  const states = (Array.isArray(r.states) ? r.states : [])
+    .map((s): OtherStateInput | null => {
+      const o = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
+      const c = code(o.stateCode);
+      return c ? { stateCode: c, stateForm: text(o.stateForm, 40) || null, numbers: sanitizeStateNumbers(o.numbers) } : null;
+    })
+    .filter((s): s is OtherStateInput => s !== null)
+    .slice(0, MAX_OTHER_STATES);
+  return { entities, states };
 }
 
 function sanitizeMismatches(raw: unknown): Mismatch[] {
@@ -186,6 +219,7 @@ export function sanitizeFailureInput(raw: unknown): FailureInput {
     mismatches: sanitizeMismatches(r.mismatches),
     after: sanitizeNumbers(r.after),
     entity: sanitizeEntityNumbers(r.entity),
+    more: sanitizeMore(r.more),
     extraction: { after: sanitizeExtract(ex.after), entity: sanitizeEntityExtract(ex.entity), city: sanitizeEntityExtract(ex.city) },
     warnings: { after: strings(w.after, 30, 1200), entity: strings(w.entity, 30, 1200) },
     pages: { after: pagesOf(p.after), entity: pagesOf(p.entity) },

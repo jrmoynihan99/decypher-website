@@ -1,8 +1,10 @@
 import {
   ENTITY_FIELD_KEYS,
+  OTHER_STATE_FIELD_KEYS,
   RETURN_FIELD_KEYS,
   type EntityExtract,
   type ExtractedValue,
+  type OtherStateFieldKey,
   type ReturnExtract,
 } from "./schema";
 
@@ -173,9 +175,26 @@ export function verifyFields<K extends string>(
 export function verifyAgainstText(
   extract: ReturnExtract,
   pageTexts: string[] | null,
-): { extract: ReturnExtract; unverified: (typeof RETURN_FIELD_KEYS)[number][]; noText: boolean } {
+): {
+  extract: ReturnExtract;
+  unverified: (typeof RETURN_FIELD_KEYS)[number][];
+  /** Each other state return's lines found nowhere, by state code. */
+  unverifiedOther: { stateCode: string; keys: OtherStateFieldKey[] }[];
+  noText: boolean;
+} {
   const r = verifyFields(extract.fields, RETURN_FIELD_KEYS, pageTexts);
-  return { extract: { ...extract, fields: r.fields }, unverified: r.unverified, noText: r.noText };
+  const unverifiedOther: { stateCode: string; keys: OtherStateFieldKey[] }[] = [];
+  const otherStates = extract.otherStates?.map((s) => {
+    const v = verifyFields(s.fields, [...OTHER_STATE_FIELD_KEYS], pageTexts);
+    if (v.unverified.length) unverifiedOther.push({ stateCode: s.stateCode, keys: v.unverified });
+    return { ...s, fields: v.fields };
+  });
+  return {
+    extract: { ...extract, fields: r.fields, ...(otherStates ? { otherStates } : {}) },
+    unverified: r.unverified,
+    unverifiedOther,
+    noText: r.noText,
+  };
 }
 
 export function verifyEntityAgainstText(
@@ -211,7 +230,8 @@ export function remapFieldPages<K extends string>(
 }
 
 export function remapPages(extract: ReturnExtract, pageMap: number[] | null): ReturnExtract {
-  return { ...extract, fields: remapFieldPages(extract.fields, RETURN_FIELD_KEYS, pageMap) };
+  const otherStates = extract.otherStates?.map((s) => ({ ...s, fields: remapFieldPages(s.fields, [...OTHER_STATE_FIELD_KEYS], pageMap) }));
+  return { ...extract, fields: remapFieldPages(extract.fields, RETURN_FIELD_KEYS, pageMap), ...(otherStates ? { otherStates } : {}) };
 }
 
 export function remapEntityPages(extract: EntityExtract, pageMap: number[] | null): EntityExtract {
