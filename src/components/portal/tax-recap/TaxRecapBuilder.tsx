@@ -54,7 +54,7 @@ import {
   type ReturnFieldKey,
   type ReturnNumbers,
 } from "@/lib/tax-recap/schema";
-import { analyzePdf, preparePdf, type PdfAnalysis } from "./pdf-prepare";
+import { analyzePdf, preparePdf, redactionBlock, type PdfAnalysis } from "./pdf-prepare";
 import { VideoStatus, useVideoMaker } from "./VideoMaker";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 
@@ -458,8 +458,14 @@ export default function TaxRecapBuilder({
           for (let j = i; j < Math.min(total, i + PER_REQUEST); j++) {
             part.append(`chunk-${j}`, p.data.slice(j * CHUNK, (j + 1) * CHUNK), String(j));
           }
-          const r = await fetch(`/api/portal/tax-recap/failures/${id}/file`, { method: "POST", body: part });
-          if (!r.ok) throw new Error("upload failed");
+          // A dropped request left four kept copies with pieces missing (and
+          // unreadable); each batch gets three tries before the copy fails.
+          let sent = false;
+          for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+            const r = await fetch(`/api/portal/tax-recap/failures/${id}/file`, { method: "POST", body: part }).catch(() => null);
+            sent = !!r?.ok;
+          }
+          if (!sent) throw new Error("upload failed");
         }
         setFailure((f) => (f && f.id === id ? { ...f, kept: { ...f.kept, [kind]: "kept" } } : f));
       } catch {
@@ -563,7 +569,7 @@ export default function TaxRecapBuilder({
   const readOne = async (
     kind: Kind,
     source: { file: File; analysis: PdfAnalysis | null },
-    extraTokens: string[],
+    shared: { tokens: string[]; short: string[] },
     w2Pages: EntityW2Page[] | null = null,
   ) => {
     const say = (message: string) =>
@@ -577,8 +583,11 @@ export default function TaxRecapBuilder({
     // paints out the identity fields — all here, before anything leaves.
     const prepared = await preparePdf(source.analysis ?? source.file, {
       kind: kind === "entity" || kind === "city" ? kind : "individual",
-      extraTokens,
+      extraTokens: shared.tokens,
+      extraShortTokens: shared.short,
     });
+    // A print that can't be redacted is never sent (see pdf-prepare).
+    if (prepared.blocked) throw new Error(prepared.blocked);
     if (process.env.NODE_ENV !== "production") {
       // For the browser test to inspect exactly what would be sent.
       const w = window as unknown as {
@@ -612,11 +621,7 @@ export default function TaxRecapBuilder({
       kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : kind === "city" ? "the city return" : "the return";
     const readingMsg = prepared.trimmed
       ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
-      : prepared.fallback === "no-text-layer"
-        ? `Reading a scanned copy of ${what} — no text layer, so numbers can't be cross-checked…`
-        : prepared.fallback === "garbled-text-layer"
-          ? `Reading all ${prepared.totalPages} pages of ${what} as printed — its text layer is scrambled, so it's read like a scan…`
-          : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
+      : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
 
     const fd = new FormData();
     fd.append("kind", kind);
@@ -724,15 +729,6 @@ export default function TaxRecapBuilder({
         }`,
       );
     }
-    if (!prepared.identity.redacted) {
-      warnings.push(
-        prepared.fallback === "no-text-layer"
-          ? "Scanned copy: the identity fields couldn't be located, so the pages were sent as printed. An export from ProSeries would be redacted before sending"
-          : prepared.fallback === "garbled-text-layer"
-            ? "This print's text layer is scrambled on every page — it was made through a generic PDF printer, not ProSeries' own export — so it was read like a scan: the identity fields couldn't be painted out and the pages went as printed, and no number could be cross-checked. Export the return from ProSeries to get both back"
-            : "The identity fields couldn't be painted out on this print, so the pages were sent as printed",
-      );
-    }
     readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
     return {
       extract: data.extract,
@@ -807,11 +803,28 @@ export default function TaxRecapBuilder({
     const sorted = sortPicked();
     if (!sorted) return;
     const beforeFile = sides.before.file;
+    // What a previous client's run left behind for a return this run doesn't
+    // have — its read warnings, page counts and the redacted copy — must not
+    // be recorded with this client's refusal or kept under this client's
+    // name (a 1040-only run used to carry the last client's 1120-S).
+    if (!sorted.entity) {
+      delete preparedRef.current.entity;
+      delete readInfoRef.current.entity;
+    }
+    if (!sorted.city) {
+      delete preparedRef.current.city;
+      delete readInfoRef.current.city;
+    }
+    if (!beforeFile) {
+      delete preparedRef.current.before;
+      delete readInfoRef.current.before;
+    }
     // Words learned from either return (the corporation's name, the owner's)
     // are painted out of both.
-    const tokens = [
-      ...new Set(picked.flatMap((p) => p.analysis?.tokens ?? [])),
-    ];
+    const tokens = {
+      tokens: [...new Set(picked.flatMap((p) => p.analysis?.tokens ?? []))],
+      short: [...new Set(picked.flatMap((p) => p.analysis?.shortTokens ?? []))],
+    };
 
     // A return already read for its current file isn't sent again: when a
     // derivation is refused and the before PDF then added, only that one
@@ -1306,10 +1319,13 @@ export default function TaxRecapBuilder({
   const anyTooBig =
     picked.some((p) => p.file.size > FILE_MAX) ||
     (!!sides.before.file && sides.before.file.size > FILE_MAX);
+  // A print that can't be redacted is never read (pdf-prepare `redactionBlock`).
+  const anyUnsendable = picked.some((p) => p.analysis && redactionBlock(p.analysis));
   const canRead =
     picked.length > 0 &&
     picked.every((p) => p.status !== "checking") &&
     !anyTooBig &&
+    !anyUnsendable &&
     !reading;
   const deriving = !sides.before.file;
   const refusal =
@@ -2652,7 +2668,11 @@ function HeroDrop({
                         {side.message}
                       </div>
                     ) : null}
-                    {p.status !== "checking" && p.analysis && !p.analysis.kind ? (
+                    {p.status !== "checking" && p.analysis && redactionBlock(p.analysis) ? (
+                      <div className="mt-1 text-[12.5px] leading-snug text-danger">
+                        {redactionBlock(p.analysis)}
+                      </div>
+                    ) : p.status !== "checking" && p.analysis && !p.analysis.kind ? (
                       // Neither the pages nor the file's name said what this
                       // is (a scan, or a print scrambled throughout): staff do.
                       <label className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-dusk">

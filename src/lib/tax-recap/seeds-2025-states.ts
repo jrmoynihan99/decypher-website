@@ -99,8 +99,13 @@ export const STATES_2025: Record<string, StateCard> = {
     brackets: flat(0.025),
     deduction: { kind: "federal" },
     exemption: { kind: "credit", amount: 0, count: ONE, dependentAmount: 100, phaseOut: null },
+    // Part-year / nonresident Form 140PY, prorated by the Arizona column of
+    // line 23. The form itself takes the FULL deduction against Arizona
+    // income (line 53) rather than a prorated one, so the proration lands
+    // a little high; the gap is carried ($298 on a 2023 return).
+    nonresident: { form: "140PY" },
     entity: entity("120S", 50, pte(0.025, "nonrefundable")),
-    note: "Form 140, 2025: 2.5% flat, the federal standard deduction. Dependent tax credit $100 per dependent under 17 ($25 for 17 and over — modeled as $100). Not modeled: the 33% standard-deduction increase for charitable gifts. S corporation minimum $50; PTE tax 2.5%, nonrefundable credit with a five-year carryforward.",
+    note: "Form 140, 2025: 2.5% flat, the federal standard deduction. Dependent tax credit $100 per dependent under 17 ($25 for 17 and over — modeled as $100). Not modeled: the 33% standard-deduction increase for charitable gifts. Part-year Form 140PY prorated by Arizona income (the form's full-deduction rule isn't modeled; the gap is carried). S corporation minimum $50; PTE tax 2.5%, nonrefundable credit with a five-year carryforward.",
   }),
 
   AR: card("Arkansas", {
@@ -402,6 +407,10 @@ export const STATES_2025: Record<string, StateCard> = {
     ),
     deduction: { kind: "standard", amount: by(8000, 16050, 11200, 8000, 16050) },
     exemption: { kind: "deduction", amount: 0, count: ONE, dependentAmount: 1000, phaseOut: null },
+    // Part-year / nonresident Form IT-203: the tax on all income as a
+    // resident (line 44) times the income percentage (line 45) — exactly
+    // the proration, with line 17's New York State column as the source.
+    nonresident: { form: "IT-203" },
     // New York City resident tax (IT-201 lines 47–54), on the same taxable
     // income; applied only when the return carries it (line 54 read).
     // Checked on Client J's 2025 return: $410,904 → $15,802.
@@ -447,7 +456,7 @@ export const STATES_2025: Record<string, StateCard> = {
         ],
       },
     },
-    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. NOT MODELED: the tax benefit recapture above $107,650 of AGI (the higher rates phase in on all income). Engine v11 carries the gap as a fixed amount, which is exact when both sides sit in the same fully-recaptured bracket (single: AGI over $265,400 and taxable income under $1,077,550 — Client J's $2,399); Yonkers and the MCTMT. New York City resident tax IS modeled (3.078% to 3.876%, applied when IT-201 line 54 is read), and so is the corporation's NYC general corporation tax from a Form NYC-3L dropped as a third file (8.85% of allocated net income, fixed-dollar minimum by city receipts). S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
+    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. Part-year / nonresident Form IT-203 modeled (base tax × income percentage, from line 17's New York State column). NOT MODELED: the tax benefit recapture above $107,650 of AGI (the higher rates phase in on all income). Engine v11 carries the gap as a fixed amount, which is exact when both sides sit in the same fully-recaptured bracket (single: AGI over $265,400 and taxable income under $1,077,550 — Client J's $2,399); Yonkers and the MCTMT. New York City resident tax IS modeled (3.078% to 3.876%, applied when IT-201 line 54 is read), and so is the corporation's NYC general corporation tax from a Form NYC-3L dropped as a third file (8.85% of allocated net income, fixed-dollar minimum by city receipts). S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
   }),
 
   OH: card("Ohio", {
@@ -523,8 +532,14 @@ export const STATES_2025: Record<string, StateCard> = {
     brackets: brackets([[3000, 0.02], [5000, 0.03], [17000, 0.05], [null, 0.0575]], [[3000, 0.02], [5000, 0.03], [17000, 0.05], [null, 0.0575]]),
     deduction: { kind: "standard", amount: by(8750, 17500, 8750, 8750, 17500) },
     exemption: { kind: "deduction", amount: 930, count: ONE, dependentAmount: 930, phaseOut: null },
+    // Part-year Form 760PY, prorated by the "While VA Resident" column of the
+    // Schedule of Income. The form runs the resident-period income through
+    // the schedule with the deduction prorated by income and the exemptions
+    // by days; on the near-flat schedule the proration comes close, and the
+    // gap is carried.
+    nonresident: { form: "760PY" },
     entity: entity("502", 0, pte(0.0575, "refundable")),
-    note: "Form 760, 2025: the same schedule for every status, standard deduction $8,750 / $17,500, $930 exemptions. PTET 5.75%, refundable credit. No entity-level tax on S corporations.",
+    note: "Form 760, 2025: the same schedule for every status, standard deduction $8,750 / $17,500, $930 exemptions. Part-year Form 760PY prorated by Virginia-period income (the form's day-based exemption proration isn't modeled; the gap is carried). Filing status 4 (separate on one return) runs each spouse through the schedule; the engine runs the joint schedule, and the difference is carried. PTET 5.75%, refundable credit. No entity-level tax on S corporations.",
   }),
 
   VT: card("Vermont", {

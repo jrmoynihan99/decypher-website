@@ -52,6 +52,11 @@
 const MIN_PAGES_TO_FILTER = 14;
 /** Total characters under this means a scan with no usable text layer. */
 const MIN_TEXT_CHARS = 2000;
+
+/** Whether a print has no text layer to speak of: a scan, or pages saved as pictures. */
+export function noTextLayer(pageTexts: string[]): boolean {
+  return pageTexts.reduce((sum, t) => sum + t.trim().length, 0) < MIN_TEXT_CHARS;
+}
 /** Fewer kept pages than this and something is wrong with the matching. */
 const MIN_KEPT = 5;
 
@@ -453,12 +458,18 @@ export function detectEntityForm(pageTexts: string[], fileName = ""): "1120-S" |
  * Decide which pages of a return to send. Never returns an empty list.
  * `valueCounts[i]`, when given, is how many filled-in amounts page i + 1
  * carries in the print's data fonts; it only ever drops a garbled page, and
- * only one with zero.
+ * only one with zero. `filledCounts[i]`, when given, counts any number at
+ * all filled in on it (a "0", a $64 credit — redact.ts `filledCounts`), and
+ * a garbled page is dropped only when that is zero too: a California 540
+ * side 3 on a zero-tax return carries its total tax, payments and refund
+ * as zeros and small amounts, none of which `valueCounts` sees, and was
+ * being dropped with the state total on it.
  */
 export function selectPages(
   pageTexts: string[],
   kind: ReturnKind = "individual",
   valueCounts: number[] | null = null,
+  filledCounts: number[] | null = null,
 ): PageSelection {
   const n = pageTexts.length;
   if (!n) return { pages: [], fallback: "no-text-layer" };
@@ -485,7 +496,7 @@ export function selectPages(
     // from. Unsure means send it — unless the caller could see that nothing
     // is filled in on it.
     if (isGarbledText(text)) {
-      if (valueCounts && valueCounts[i] === 0) continue;
+      if (valueCounts && valueCounts[i] === 0 && (!filledCounts || filledCounts[i] === 0)) continue;
       kept.push(i + 1);
       seen.add(text);
       continue;

@@ -298,6 +298,13 @@ export const RETURN_FIELDS = [
     group: "federal",
   },
   {
+    key: "seSsWages",
+    label: "Social Security wages on Schedule SE",
+    source: "Schedule SE line 8a (W-2 boxes 3 and 7) — what uses up the Schedule C's wage base, which can differ from box 1",
+    group: "federal",
+    optional: true,
+  },
+  {
     key: "otherTaxes",
     label: "Other taxes (line 23)",
     source: "Form 1040 line 23 (= Schedule 2 line 21): SE tax and the other Schedule 2 taxes",
@@ -673,6 +680,7 @@ export type EntityField = {
 export const ENTITY_FIELDS = [
   { key: "grossReceipts", label: "Gross receipts", source: "Form 1120-S line 1a / Form 1065 line 1a", group: "income" },
   { key: "cogs", label: "Cost of goods sold", source: "Form 1120-S line 2 / Form 1065 line 2", group: "income", optional: true },
+  { key: "otherIncome", label: "Other income (sale gains, other)", source: "Form 1120-S lines 4 + 5 (net gain from Form 4797, other income) / Form 1065 lines 4–7 — kept as it is on the before", group: "income", optional: true },
   { key: "totalIncome", label: "Total income", source: "Form 1120-S line 6 / Form 1065 line 8", group: "income" },
   { key: "officerComp", label: "Compensation of officers", source: "Form 1120-S line 7", group: "deductions", optional: true },
   { key: "wages", label: "Salaries and wages", source: "Form 1120-S line 8 / Form 1065 line 9", group: "deductions", optional: true },

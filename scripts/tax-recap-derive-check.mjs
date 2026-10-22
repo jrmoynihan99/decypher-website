@@ -15,6 +15,7 @@
  * Runs on plain Node (24+): `--import ./scripts/lib/resolve-ts.mjs` lets it
  * load the app's TypeScript without a build.
  */
+import { readFileSync } from "node:fs";
 import { attributeStrategies, deriveBefore, entityTax } from "../src/lib/tax-recap/derive.ts";
 import { computeRecap } from "../src/lib/tax-recap/compute.ts";
 import { emptyEntityNumbers, emptyNumbers } from "../src/lib/tax-recap/schema.ts";
@@ -864,14 +865,18 @@ const REFUSALS = [
   },
   {
     // Earned income small enough for the limit to bite: Client A with $1,000
-    // of profit would have a $1,350 deduction, so her printed $15,750 one
-    // can't be the dependent's — carried across, and named.
-    name: "a filer whose deduction isn't the dependent's limited one (derives projected, the deduction carried)",
+    // of profit has a $1,350 deduction against $929 of AGI. Until engine
+    // v12 the "deduction" was taken as AGI less taxable income ($929) and
+    // carried as a $421 gap; but taxable income printed as $0 is a floor —
+    // any deduction of $929 or more prints the same — so nothing is carried
+    // for the deduction (the same flaw put −$15,214 on one client's before).
+    // Still projected: Client A's California lines don't fit these numbers.
+    name: "a dependent filer whose taxable income is $0 (the deduction isn't carried: $0 is a floor)",
     meta: clientA.meta,
     after: { ...clientA.after, dependentOfAnother: 1, businessNetIncome: 1000, grossReceipts: 1000, totalExpenses: 0, homeOffice: 0, totalIncome: 1000, agi: 929, seTax: 141, taxableIncome: 0, incomeTax: 0, qbiDeduction: 0, federalTotalTax: 141 },
     expect: null,
     verified: false,
-    assert: (r) => r.derived.proof.residuals.some((m) => /deduction/i.test(m.line)) && r.derived.notes.some((s) => /dependent's standard deduction/.test(s)),
+    assert: (r) => !r.derived.proof.residuals.some((m) => /deduction/i.test(m.line)),
   },
   {
     name: "a partner's return without the 1065",
@@ -996,8 +1001,10 @@ const REFUSALS = [
     expect: /weren't read from the after return: Partnership income/,
   },
   {
+    // Form 541 is California's fiduciary return. (This fixture used 540X
+    // until engine v12, which reads an amended form as the form it amends.)
     name: "a state form the card doesn't list",
-    meta: { ...clientA.meta, stateForm: "540X" },
+    meta: { ...clientA.meta, stateForm: "541" },
     after: clientA.after,
     expect: /isn't the resident Form 540 or the nonresident Form 540NR/,
   },
@@ -2110,6 +2117,37 @@ for (const c of REFUSALS) {
       `         → derived; federal before ${money(r.before.federalTotalTax)}${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)}` : ""}; ${
         p.verified ? "verified" : `projected: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`
       }`,
+    );
+  }
+}
+
+/* ── The Failures inbox, 2026-10-16…19 (engine v12) ─────────────────────────
+   The tax team's refused returns from those four days, as the reader read
+   them (the records' own numbers; five with the lines a re-read through
+   the v12 reader prompt gives, noted in their names). Each derive pins the
+   before's federal and state totals to the dollar, whether the after
+   reproduces outright, and the v12 note that must fire; each refusal pins
+   its reason. The data lives in fixtures/ — it's long, and generated from
+   the records; `proves` says what each one is for.                        */
+const FAILURES = JSON.parse(readFileSync(new URL("./fixtures/tax-recap-failures-2026-10.json", import.meta.url), "utf8"));
+console.log("\nFailures inbox, 2026-10-16…19 (engine v12)");
+for (const f of FAILURES) {
+  const r = deriveBefore(numbers(f.after), f.meta, undefined, f.entity ? entityNumbers(f.entity) : null);
+  const ok =
+    f.expect === null
+      ? r.ok &&
+        r.before.federalTotalTax === f.federal &&
+        r.before.stateTotalTax === f.state &&
+        r.derived.proof.verified === f.verified &&
+        (f.notes ?? []).every((n) => r.derived.notes.some((s) => new RegExp(n).test(s)))
+      : !r.ok && r.reasons.some((s) => new RegExp(f.expect).test(s));
+  if (!ok) failed++;
+  console.log(`  ${ok ? "ok" : "WRONG"}  ${f.name} — ${f.proves}`);
+  if (!r.ok) console.log(`         → ${r.reasons[0]}`);
+  else {
+    const p = r.derived.proof;
+    console.log(
+      `         → derived; federal before ${money(r.before.federalTotalTax)} (want ${money(f.federal)})${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)} (want ${money(f.state)})` : ""}; ${p.verified ? "verified" : `projected (${p.residuals.length} carried)`}`,
     );
   }
 }

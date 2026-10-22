@@ -268,7 +268,9 @@ const CONVENTIONS = `Conventions of these prints:
 const SYSTEM = `You read US individual income tax returns printed from Intuit ProSeries and report specific line values as JSON.
 
 ${CONVENTIONS}
+- One exception to omitting blanks: on a completed return, Form 1040 lines 9 (total income), 11a (AGI), 15 (taxable income), 16 (tax) and 24 (total tax), and the state return's total tax line, always exist. When one of them is on a page you can see and is printed blank, its value is 0 — report 0. (A line on a page that isn't in this PDF is still omitted.)
 - The print may include a cover letter, filing instructions, estimated-tax vouchers, e-file signature forms (Form 8879), worksheets and state forms. Read the primary form lines listed below. Form 8879 line 1 (AGI) and line 2 (total tax) can be used to cross-check but cite the Form 1040 page.
+- An amended return (Form 1040-X, IT-201-X, 500X, 540X and the like): report the corrected figures — the Form 1040 and state form attached with the amended amounts, or column C of the 1040-X — and the state form's own name (e.g. "IT-201-X").
 
 Federal lines (2025 Form 1040 layout; on an older layout use the line with the same meaning):
 - w2Income: Form 1040 line 1z (total wages). If line 1z is blank and line 1a has a value, use 1a.
@@ -281,9 +283,10 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - capitalGain: Form 1040 line 7 (capital gain or loss; a loss as a negative number). Omit when blank.
 - capitalGainLongTerm: Schedule D line 15 (net long-term capital gain or loss) when the print has a Schedule D. Omit otherwise.
 - businessNetIncome: Schedule 1 line 3, which equals Schedule C line 31 (net profit or loss). If Schedule 1 is absent, use Schedule C line 31. Omit when there is no Schedule C. A Schedule C whose only purpose is to pass income through — its receipts are described as "income issued to SSN picked up on the partnership (or S corporation) return" and the same amount is deducted as other expenses, so line 31 is 0 — is NOT a business: omit every Schedule C field for it and say so in notes.
-- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up, LESS any section 179 deduction in column (j) for those rows — i.e. what those rows contribute to line 32 and Schedule 1 line 5. Omit when there is no S corporation row.
-- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments. Omit when there is no partnership row. Never report the same Schedule E figure under both scorpIncome and partnershipIncome.
-- rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number). Omit when there is no Schedule E page 1.
+- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up, LESS any section 179 deduction in column (j) for those rows — i.e. what those rows contribute to line 32 and Schedule 1 line 5. A nonpassive LOSS sits in column (i), printed without parentheses: report it as a negative number. Omit when there is no S corporation row.
+- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments; a nonpassive loss in column (i) as a negative number. Omit when there is no partnership row.
+- Each Schedule E Part II row goes in exactly ONE of scorpIncome and partnershipIncome, by the letter in its column (b) — S or P. Never report the same row, or the same total, under both. Columns (g) and (h) are the passive loss and income; columns (i) and (k) the nonpassive loss and income — read which column the amount is printed in.
+- rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number). Omit when there is no Schedule E page 1. Part I only: a Part II row (a partnership or S corporation) is never rental income, passive or not.
 - rentalProfits: Schedule E line 21 for the properties showing a profit, added up across every Schedule E page 1 copy. Omit when none.
 - rentalLosses: Schedule E line 21 for the properties showing a loss, added up across every copy, as a POSITIVE number — the losses before any limitation. Omit when none.
 - rentalRents: Schedule E line 23a, the total of line 3 (rents received) for all rental properties. When the properties run over several Schedule E page 1 copies, the totals are printed on the first copy only; read them there. Omit when there is no Schedule E Part I.
@@ -309,8 +312,9 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - incomeTax: Form 1040 line 16.
 - childTaxCredit: Form 1040 line 19. Omit when blank.
 - childCareCredit: Schedule 3 line 2 (= Form 2441 line 11), the credit for child and dependent care expenses. Omit when blank.
-- nonrefundableCredits: Form 1040 line 20 (= Schedule 3 line 8). Omit when blank.
-- seTax: Schedule 2 line 4, which equals Schedule SE line 12. If Schedule 2 is absent use Schedule SE line 12; if neither exists, omit.
+- nonrefundableCredits: Form 1040 line 20 only (= Schedule 3 line 8). NOT line 21, which adds line 19's child tax credit to it. Omit when line 20 is blank.
+- seTax: Schedule 2 line 4 — every Schedule SE on the return together (a joint return can carry one for each spouse). It equals Schedule SE line 12 only when there is one Schedule SE. If Schedule 2 is absent, add up line 12 of every Schedule SE; if there is none, omit.
+- seSsWages: Schedule SE line 8a (total Social Security wages and tips, W-2 boxes 3 and 7), added up when there are several Schedules SE. Omit when blank or when there is no Schedule SE.
 - otherTaxes: Form 1040 line 23 (other taxes, including self-employment tax, from Schedule 2 line 21). Report 0 when printed as 0; omit when blank.
 - niit: Schedule 2 line 12 (= Form 8960 line 17), net investment income tax. Omit when blank or 0.
 - federalTotalTax: Form 1040 line 24.
@@ -322,14 +326,15 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - federalAmountOwed: Form 1040 line 37; omit when there is a refund.
 - federalPenalty: Form 1040 line 38 (estimated tax penalty); omit when empty.
 - grossReceipts: Schedule C line 1. If there are several Schedules C, sum them and say so in notes. Omit when there is no Schedule C.
-- totalExpenses: Schedule C line 28.
+- totalExpenses: Schedule C line 28 (total expenses before the home office). Line 29 (tentative profit) and line 31 (net profit) are not expenses. On a Schedule C with receipts whose line 28 is blank, report 0.
 - homeOffice: Schedule C line 30.
 - cogs: Schedule C line 4 (cost of goods sold). Omit when blank.
 - schCWages: Schedule C line 26 (wages, less employment credits). Omit when blank.
 - schCDepreciation: Schedule C line 13 (depreciation and section 179). Omit when blank.
 - The rest of Schedule C Part II, each omitted when blank (with several Schedules C, add each line up across them): schCAdvertising line 8; schCCarTruck line 9; schCCommissions line 10; schCContractLabor line 11; schCEmployeeBenefits line 14; schCInsurance line 15; schCInterest lines 16a + 16b; schCLegalProfessional line 17; schCOfficeExpense line 18; schCPension line 19; schCRent lines 20a + 20b; schCRepairs line 21; schCSupplies line 22; schCTaxesLicenses line 23; schCTravel line 24a; schCMeals line 24b (the deductible amount as printed); schCUtilities line 25; schCOtherExpenses line 27a.
 
-State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field. If there is more than one state, sum the amounts and list the states in notes.
+State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field.
+More than one state return (a move during the year, income earned in another state): report ONE state as stateCode and stateForm — the state the taxpayer lived in on December 31 (its resident or part-year return); if that state has no income tax return in the print, the state whose return shows the most total tax. Read every state line below from that state's return ONLY, except these totals, which add up every state's return: stateTotalTax, statePayments, stateWithholding, stateRefund, stateAmountOwed, statePenalty, stateTotalDue. Never add another state's figures into stateTaxOnIncome, stateDeduction, stateExemptions, stateExemptionCredits, stateSourceIncome or stateAdjustments. In notes, list each other state with its form and its total tax.
 - stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
 - statePayments: total withholding, estimated payments and refundable credits. California 540: line 93 (or line 78 if 93 is absent). California 540NR: line 88.
 - stateWithholding: state income tax withheld. California 540: line 71. California 540NR: line 81. Omit when blank.
@@ -337,7 +342,10 @@ State lines. The state return can be for any state; identify the main individual
 - stateAmountOwed: balance due before penalties and interest. California 540: line 100. California 540NR: line 121.
 - statePenalty: underpayment penalty plus interest and late penalties. California 540: line 112 plus line 113. California 540NR: line 122 plus line 123. Omit when none.
 - stateTotalDue: total amount due including penalties. California 540: line 114. California 540NR: line 124.
-- stateSourceIncome: ONLY on a nonresident or part-year state return. California Form 540NR: the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Maryland Form 505: Form 505NR line 8 (Maryland income, after the non-Maryland income comes out). Omit on a resident return.
+- stateSourceIncome: ONLY on a nonresident or part-year state return. California Form 540NR: the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Maryland Form 505: Form 505NR line 8 (Maryland income, after the non-Maryland income comes out). New York Form IT-203: line 17, the "New York State amount" column (NOT line 31). Virginia Form 760PY: the Schedule of Income, Part 1, Section A line 4 ("Gross income"), column A2 "While VA Resident" — on filing status 4, plus Section B line 4, column B2. Arizona Form 140PY: line 23, the Arizona column. Omit on a resident return.
+- New York Form IT-203 (nonresident / part-year; the same lines on an amended IT-203-X): stateTaxOnIncome is line 46 (the allocated New York State tax: line 44 times the income percentage on line 45); stateTotalTax is line 58; stateLocalTax is line 51 (New York City part-year resident tax) when printed; stateDeduction is line 33.
+- Virginia Form 760PY (part-year): stateTaxOnIncome and stateTotalTax are both line 18; stateDeduction is line 12 (or line 11 when itemized); stateExemptions is line 13. On filing status 4 (spouses filing separately on one combined return, column A for you and column B for the spouse), add the two columns together on every line.
+- Arizona Form 140PY (part-year / nonresident): stateTaxOnIncome is line 56; stateTotalTax is line 62 (balance of tax); stateDeduction is line 53.
 - Maryland Form 505 (nonresident) with Form 505NR: stateTaxOnIncome is Form 505 line 32a (the Maryland tax from 505NR line 16, before the special nonresident tax); stateTotalTax is Form 505 line 37 (Maryland tax after credits, which includes the special nonresident tax on line 32b); statePayments is line 47; stateWithholding is line 43; stateAmountOwed is line 48; statePenalty is line 52; stateTotalDue is line 53; stateExemptions is Form 505 line 28 (the total exemption amount before any proration); stateDeduction is line 26a or 26d. Maryland Form 502 (resident): stateTotalTax is line 34 plus the local tax on line 28 is NOT modeled — report line 34 as printed; stateTaxOnIncome is line 22; stateExemptions is line 19; stateDeduction is line 17.
 - stateAdjustments: the state's net adjustment to federal AGI before its own deductions, additions less subtractions. California Form 540: line 16 minus line 14 (Schedule CA (540) Part I line 27, column C less column B). Form 540NR: Schedule CA (540NR) Part II line 27, column C less column B. Negative when the subtractions are larger. Omit when both columns are blank, and for a state that starts from its own gross income (New Jersey).
 - stateDeduction: the deduction the state return took — its standard deduction or its own itemized deductions, whichever line 18 of California Form 540 shows (= Schedule CA (540) Part II line 30). Omit for states without such a line.
@@ -383,6 +391,7 @@ ${CONVENTIONS}
 Federal lines — Form 1120-S (2025 layout; on an older layout use the line with the same meaning):
 - grossReceipts: Form 1120-S line 1a (gross receipts or sales). If line 1b has returns and allowances, report line 1c instead and say so in notes.
 - cogs: Form 1120-S line 2 (cost of goods sold). Omit when blank.
+- otherIncome: Form 1120-S line 4 (net gain from Form 4797) plus line 5 (other income), added up; a loss as a negative number. Omit when both are blank.
 - totalIncome: Form 1120-S line 6.
 - officerComp: Form 1120-S line 7 (compensation of officers). Omit when blank.
 - wages: Form 1120-S line 8 (salaries and wages). Omit when blank.
@@ -406,6 +415,7 @@ Federal lines — Form 1120-S (2025 layout; on an older layout use the line with
 Federal lines — Form 1065 (2025 layout):
 - grossReceipts: Form 1065 line 1a. If line 1b has returns and allowances, report line 1c instead and say so in notes.
 - cogs: Form 1065 line 2. Omit when blank.
+- otherIncome: Form 1065 lines 4 through 7 (income from other partnerships, net farm profit, net gain from Form 4797, other income), added up; a loss as a negative number. Omit when all are blank.
 - totalIncome: Form 1065 line 8.
 - wages: Form 1065 line 9 (salaries and wages other than to partners). Omit when blank.
 - guaranteedPayments: Form 1065 line 10 (guaranteed payments to partners). Omit when blank.
