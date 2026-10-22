@@ -1805,15 +1805,17 @@ for (const p of PAIRINGS) {
     - NYC-3L: 8.85% of $358,145 allocated at 54.21% = $194,150 → $17,182;
       on the before $962,595 → $521,823 → $46,181. The $300 CT-3-S minimum
       stays (receipts under $1M either way).
-    - New York's tax benefit recapture isn't on the card: line 39 reads
-      $28,147 (6.85% flat on all taxable income) against the schedule's
-      $25,748. The $2,399 is carried, and is exact here: both sides are in
-      the fully-recaptured 6.85% zone (AGI over $265,400, taxable under
-      $1,077,550), where the recapture is the same constant.
-   Before: federal 307,280, New York 102,265 (62,991 + 2,399 + 36,875 city),
+    - New York's tax benefit recapture (engine v14; v11–v13 carried it):
+      line 39 reads $28,147, 6.85% flat on all taxable income — the
+      schedule's $25,748 plus worksheet 8's $568 + $1,831. The before's
+      $954,595 is in the same fully-recaptured zone (AGI over $265,400,
+      taxable under $1,077,550): 6.85% flat, $65,390.
+   Before: federal 307,280, New York 102,265 (65,390 + 36,875 city),
    the corporation's 300 + 46,181; savings 309,621 over the after's 146,405. */
+/** Client J's return, for the engine v14 checks further down. */
+let CLIENT_J = null;
 {
-  console.log("\nClient J 2025 (single, NY IT-201 with NYC resident tax, S corporation on CT-3-S + NYC-3L — engine v11, projected)");
+  console.log("\nClient J 2025 (single, NY IT-201 with NYC resident tax, S corporation on CT-3-S + NYC-3L — verified since engine v14)");
   const meta = { taxYear: 2025, filingStatus: "Single", stateCode: "NY", stateForm: "IT-201", entityForm: "1120-S" };
   const after = numbers({
     w2Income: 76500,
@@ -1871,12 +1873,13 @@ for (const p of PAIRINGS) {
     cityTax: 17182,
     cityAmountDue: 17182,
   });
+  CLIENT_J = { meta, after, entity };
   const r = deriveBefore(after, meta, undefined, entity);
   if (!r.ok) {
     failed++;
     console.log("  REFUSED:\n   - " + r.reasons.join("\n   - "));
   } else {
-    const want = { scorpIncome: 962595, federalTotalTax: 307280, stateTaxOnIncome: 62991, stateLocalTax: 36875, stateTotalTax: 102265, rentalIncome: null };
+    const want = { scorpIncome: 962595, federalTotalTax: 307280, stateTaxOnIncome: 65390, stateLocalTax: 36875, stateTotalTax: 102265, rentalIncome: null };
     for (const [key, w] of Object.entries(want)) {
       const got = r.before[key];
       const ok = got === w;
@@ -1888,13 +1891,9 @@ for (const p of PAIRINGS) {
     if (!entityOk) failed++;
     console.log(`  ${entityOk ? "ok" : "WRONG"}  corporation before: CT-3-S ${money(eb?.stateTax)}, NYC-3L ${money(eb?.cityTax)} on ${money(eb?.cityNetIncome)} allocated at ${eb?.cityAllocationPct}% (want 300 / 46,181 on 521,823 at 54.21)`);
     const p = r.derived.proof;
-    const proofOk =
-      !p.verified &&
-      p.residuals.length === 2 &&
-      p.residuals.some((m) => /New York tax on income/.test(m.line) && m.read === 28147 && m.computed === 25748) &&
-      p.residuals.some((m) => /New York total tax/.test(m.line) && m.read === 43949 && m.computed === 41550);
+    const proofOk = p.verified && p.residuals.length === 0;
     if (!proofOk) failed++;
-    console.log(`  ${proofOk ? "ok" : "WRONG"}  projected with the recapture carried: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}`);
+    console.log(`  ${proofOk ? "ok" : "WRONG"}  verified with the recapture figured${p.residuals.length ? `: ${p.residuals.map((m) => `${m.line} ${money(m.read)} vs ${money(m.computed)}`).join("; ")}` : ""}`);
     const notesOk =
       r.derived.notes.some((s) => /New York City: the corporation's own NYC-3L tax at 8\.85%/.test(s) && /\$17,182 on the after, \$46,181 on the before/.test(s)) &&
       r.derived.notes.some((s) => /New York City resident tax on the IT-201: \$15,802 on the after, \$36,875 on the before/.test(s));
@@ -2298,6 +2297,102 @@ const check = (name, ok, detail) => {
     r.ok
       ? `K-1s ${r.before.scorpIncome} + ${r.before.partnershipIncome}, SE tax ${r.before.seTax}; ${r.derived.proof.verified ? "verified" : `projected (${r.derived.proof.residuals.length})`}`
       : r.reasons.join(" / "),
+  );
+}
+
+/* Engine v14 (2026-10-22): the lines v11–v13 carried that the tables can
+   figure. The earned income credit and the additional child tax credit on
+   each scenario's income; line 32's payments read as credits moved to line
+   31; New York's tax benefit recapture, IT-203's income percentage and a
+   part-year New York City resident's tax; New York City residency taken
+   from a total read without page 3; Massachusetts' wage deduction counting
+   the Schedule SE tax; a part-year schedule on a resident form. */
+console.log("\nThe carried lines figured (engine v14)");
+{
+  // Case 03 · the line 32 credits of a joint return with three children:
+  // the earned income credit on the larger of AGI and earned income
+  // ($63,603 against a $30,470 start) and the additional child tax credit
+  // (15% of earned income over $2,500), within $2 of the $4,457 printed.
+  const c = FAILURES.find((x) => x.name.startsWith("Case 03"));
+  const r = deriveBefore(numbers(c.after), c.meta, undefined, c.entity ? entityNumbers(c.entity) : null);
+  const carried = r.ok ? r.derived.proof.residuals.some((m) => /Refundable/.test(m.line)) : true;
+  check(
+    "the earned income credit and the additional child tax credit reproduce line 32 (three children, $63,603 of AGI)",
+    r.ok && !carried && r.before.federalRefundableCredits === null,
+    r.ok
+      ? `${r.derived.notes.find((s) => /^Earned income credit/.test(s)) ?? "no EIC note"}; ${r.derived.notes.find((s) => /^Additional child tax credit/.test(s)) ?? "no ACTC note"}`
+      : r.reasons.join(" / "),
+  );
+}
+{
+  // Case 21 · $29,334 on line 32 at $135,898 of AGI, single, no
+  // dependents: no credit can come to that; it's line 33 less the
+  // withholding — estimated payments. Moved to line 31 on both sides, and
+  // the after column takes the same fix, so the recap's after side is the
+  // printed $33,223, not $3,889.
+  const c = FAILURES.find((x) => x.name.startsWith("Case 21"));
+  const after = numbers(c.after);
+  const r = deriveBefore(after, c.meta, undefined, null);
+  const fixed = r.ok ? { ...after, ...r.afterFixes } : after;
+  const side = computeRecap({ before: r.ok ? r.before : after, after: fixed, priorYearIncome: null }).after;
+  check(
+    "line 32's estimated payments taken as payments, on the after column too",
+    r.ok && r.afterFixes.otherPayments === 29334 && side.federalTaxes === 33223 && r.derived.notes.some((s) => /estimated payments \(line 26\)/.test(s)),
+    r.ok ? `fix ${JSON.stringify(r.afterFixes)}, after federal taxes ${side.federalTaxes}` : r.reasons.join(" / "),
+  );
+}
+{
+  // Client J's return read without the IT-201's page 3 (the 2026-10-16
+  // print): no line 39, no city lines, only line 61's $43,949. New York's
+  // $28,147 and the city's $15,802 on the same income add up to it to the
+  // dollar, so the filer is a city resident and the before is the same.
+  const j = CLIENT_J;
+  const after = numbers({ ...j.after, stateTaxOnIncome: null, stateLocalTax: null });
+  const r = deriveBefore(after, j.meta, undefined, j.entity);
+  check(
+    "New York City residency taken from a total read without page 3",
+    r.ok && r.derived.proof.verified && r.before.stateTotalTax === 102265 && r.before.stateLocalTax === 36875 && r.derived.notes.some((s) => /resident tax wasn't read/.test(s)),
+    r.ok ? `state ${r.before.stateTotalTax}, city ${r.before.stateLocalTax}; ${r.derived.proof.verified ? "verified" : "projected"}` : r.reasons.join(" / "),
+  );
+}
+{
+  // Case 02 · Delaware's total read off line 26, before the personal
+  // credits: $28,469 read, while the $7,000 of payments and $20,919 still
+  // owed settle against $27,919 — the card's figure. The after column takes
+  // the settled total, and the before carries nothing for it.
+  const c = FAILURES.find((x) => x.name.startsWith("Case 02"));
+  const r = deriveBefore(numbers(c.after), c.meta, undefined, c.entity ? entityNumbers(c.entity) : null);
+  const carried = r.ok ? r.derived.proof.residuals.some((m) => /Delaware/.test(m.line)) : true;
+  check(
+    "a state total read before the credits, settled by the payments and the balance due",
+    r.ok && r.afterFixes.stateTotalTax === 27919 && !carried,
+    r.ok ? `fix ${JSON.stringify(r.afterFixes)}; ${r.derived.proof.residuals.map((m) => m.line).join(", ") || "nothing carried"}` : r.reasons.join(" / "),
+  );
+}
+{
+  // Case 12 · Massachusetts: $8,423 of wages and $35,459 of SE tax; lines
+  // 11a/11b print the full $2,000, which the wages alone ($644) don't reach.
+  const c = FAILURES.find((x) => x.name.startsWith("Case 12"));
+  const r = deriveBefore(numbers(c.after), c.meta, undefined, null);
+  const carried = r.ok ? r.derived.proof.residuals.some((m) => /Social Security \/ Medicare deduction/.test(m.line)) : true;
+  check(
+    "Massachusetts' wage deduction counts the Schedule SE tax",
+    r.ok && !carried && r.before.stateWageDeduction === 2000,
+    r.ok ? `before ${r.before.stateWageDeduction}` : r.reasons.join(" / "),
+  );
+}
+{
+  // Case 22 · a South Carolina SC1040 with Schedule NR: the same form as a
+  // resident's, its state-source income below the return's total. With the
+  // source read it's prorated the usual way and fitted; without it, it's a
+  // resident return as before.
+  const c = FAILURES.find((x) => x.name.startsWith("Case 22"));
+  const resident = deriveBefore(numbers(c.after), c.meta, undefined, c.entity ? entityNumbers(c.entity) : null);
+  const partYear = deriveBefore(numbers({ ...c.after, stateSourceIncome: 120000 }), c.meta, undefined, c.entity ? entityNumbers(c.entity) : null);
+  check(
+    "a part-year schedule on the resident form (South Carolina's Schedule NR) is prorated",
+    resident.ok && partYear.ok && partYear.before.stateSourceIncome === 120000 && partYear.derived.notes.some((s) => /part-year or nonresident schedule/.test(s)) && partYear.before.stateTotalTax < resident.before.stateTotalTax,
+    partYear.ok && resident.ok ? `SC before ${partYear.before.stateTotalTax} prorated, ${resident.before.stateTotalTax} as a resident` : [...(resident.ok ? [] : resident.reasons), ...(partYear.ok ? [] : partYear.reasons)].join(" / "),
   );
 }
 

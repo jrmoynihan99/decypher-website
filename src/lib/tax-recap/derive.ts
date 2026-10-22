@@ -109,7 +109,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "13";
+export const DERIVE_VERSION = "14";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -167,6 +167,14 @@ export type DeriveResult =
       /** Each further state return's before, in `DeriveMore.states` order. */
       otherStatesBefore: StateNumbers[];
       derived: DerivedBefore;
+      /**
+       * After-return lines the return's own figures prove were misread, with
+       * the value they should have (engine v14: line 32's estimated payments
+       * moved to line 31). Empty almost always. The builder writes them into
+       * its after column, so the recap's after side is figured the way the
+       * before was; the notes say why.
+       */
+      afterFixes: Partial<ReturnNumbers>;
     }
   | {
       ok: false;
@@ -275,6 +283,52 @@ function printedTax(brackets: Bracket[], table: TaxTableRule | null, taxable: nu
     return Math.round(scheduleTax(brackets, at));
   }
   return Math.round(scheduleTax(brackets, taxable));
+}
+
+/**
+ * A state tax with a benefit recapture (New York's IT-201 line 39 over
+ * $107,650 of AGI), worksheet by worksheet. The first slice (worksheets 1,
+ * 7, 12): taxable income at the flat rate of the bracket just above
+ * `agiFrom`, less the schedule's tax, times the share of `range` AGI is
+ * over `agiFrom` (four places), added to the schedule's tax — the flat
+ * figure outright once AGI is past the range. Each later slice (worksheets
+ * 2–5, 8–10, 13–15): the schedule's tax, plus the recapture already taken
+ * at the bracket below (the "recapture base amount"), plus the next
+ * bracket's share of it (the "incremental benefit") times the AGI share.
+ * Both amounts are the brackets' own: base = the bracket below's top × its
+ * rate less the schedule's tax there; incremental = that top × this rate
+ * less the same tax, less the base. Over `flatAbove` the top rate applies
+ * to everything.
+ */
+function recapturedTax(
+  brackets: Bracket[],
+  table: TaxTableRule | null,
+  taxable: number,
+  agi: number,
+  r: NonNullable<StateCard["recapture"]>,
+): number {
+  const plain = printedTax(brackets, table, taxable);
+  if (taxable <= 0 || agi <= r.agiFrom || !brackets.length) return plain;
+  if (agi > r.flatAbove) return Math.round(taxable * brackets[brackets.length - 1].rate);
+  /** The bracket a figure falls in: the first whose top it doesn't pass. */
+  const bracketOf = (x: number) => {
+    const k = brackets.findIndex((b) => b.upTo === null || x <= b.upTo);
+    return k < 0 ? brackets.length - 1 : k;
+  };
+  const first = brackets.findIndex((b) => b.upTo === null || r.agiFrom < b.upTo);
+  if (first < 0) return plain;
+  const k = Math.max(first, bracketOf(taxable));
+  const share = (from: number) => round4(Math.min(r.range, Math.max(0, agi - from)) / r.range);
+  if (k === first) {
+    const flat = Math.round(taxable * brackets[first].rate);
+    if (agi >= r.agiFrom + r.range) return flat;
+    return plain + Math.round((flat - plain) * share(r.agiFrom));
+  }
+  const top = brackets[k - 1].upTo as number;
+  const below = scheduleTax(brackets, top);
+  const base = Math.round(top * brackets[k - 1].rate - below);
+  const incremental = Math.round(top * brackets[k].rate - below) - base;
+  return plain + base + Math.round(incremental * share(top));
 }
 
 /**
@@ -412,7 +466,7 @@ type Extras = {
   childTaxCredit: number;
   /** Form 8960 beyond the tables once net investment income is settled. */
   niit: number;
-  /** Line 32 beyond the net premium tax credit: earned income credit, additional child tax credit, other refundable credits. */
+  /** Line 32 beyond the net premium tax credit, the earned income credit and the additional child tax credit: the American opportunity credit's refundable part, other refundable credits. */
   refundable: number;
   /** Line 24 beyond everything above: other Schedule 2 Part II taxes, Schedule 3 credits the engine doesn't model. */
   otherTaxes: number;
@@ -497,6 +551,8 @@ type Ptc = {
 type Federal = {
   seEarnings: number;
   seTax: number;
+  /** Each person's Schedule SE tax (taxpayer, spouse): Social Security and Medicare paid as self-employment tax, which Massachusetts' wage deduction counts. */
+  seTaxByPerson: [number, number];
   halfSe: number;
   /** Form 7206 line 14 → Schedule 1 line 17. */
   sehi: number;
@@ -535,7 +591,11 @@ type Federal = {
   /** Schedule 2 line 12. */
   niit: number;
   totalTax: number;
-  /** Form 1040 line 32: the net premium tax credit. */
+  /** Form 1040 line 27: the earned income credit (0 when the year's figures aren't on the card). */
+  eic: number;
+  /** Form 1040 line 28: the additional child tax credit. */
+  actc: number;
+  /** Form 1040 line 32: the net premium tax credit, the two above, and any refundable credit carried across. */
   refundable: number;
   /** Wages plus Schedule C profit: what the child-care credit needs. */
   earnedIncome: number;
@@ -626,6 +686,59 @@ function childTaxCredit(card: FederalCard, status: FilingStatus, agi: number, ch
 }
 
 /**
+ * Form 1040 line 27, the earned income credit, priced the way the EIC Table
+ * prices it: at the middle of the $50 row the income falls in. The credit
+ * on earned income, or — when AGI is over the phase-out start and isn't the
+ * same figure — the smaller of that and the credit on AGI (EIC Worksheet A
+ * lines 2–6). Null on the card means the year's figures aren't there.
+ */
+function earnedIncomeCredit(
+  card: FederalCard,
+  status: FilingStatus,
+  earned: number,
+  agi: number,
+  children: number,
+  investment: number,
+  claimedAsDependent: boolean,
+): number {
+  const t = card.earnedIncomeCredit;
+  if (!t || status === "mfs" || claimedAsDependent || earned <= 0 || investment > t.investmentLimit) return 0;
+  const row = t.rows[Math.min(t.rows.length - 1, Math.max(0, children))];
+  if (!row) return 0;
+  const start = status === "mfj" ? row.phaseOutJoint : row.phaseOutStart;
+  const at = (x: number) => {
+    const mid = Math.floor(x / 50) * 50 + 25;
+    return Math.max(0, Math.round(row.rate * Math.min(mid, row.earnedAmount) - row.phaseOutRate * Math.max(0, mid - start)));
+  };
+  const onEarned = at(earned);
+  return agi < start || Math.round(agi) === Math.round(earned) ? onEarned : Math.min(onEarned, at(Math.max(0, agi)));
+}
+
+/**
+ * Schedule 8812 Part II, the additional child tax credit: the children's
+ * credit the tax didn't use (line 16a, `unused`), up to the refundable
+ * amount per child (16b), and no more than 15% of earned income over
+ * $2,500 (line 20) — or, with three or more children, the Social Security
+ * and Medicare taxes paid less the earned income credit when that's more
+ * (Part II-B).
+ */
+function additionalChildTaxCredit(
+  card: FederalCard,
+  children: number,
+  unused: number,
+  earned: number,
+  ficaPaid: number,
+  eic: number,
+): number {
+  if (children <= 0 || unused <= 0) return 0;
+  const a = card.additionalChildTaxCredit;
+  const line17 = Math.min(unused, children * a.perChild);
+  const line20 = Math.round(Math.max(0, earned - a.earnedAbove) * a.rate);
+  if (children < 3 || line20 >= line17) return Math.min(line17, line20);
+  return Math.min(line17, Math.max(line20, Math.max(0, ficaPaid - eic)));
+}
+
+/**
  * One Schedule SE: a sole proprietor's, or each partner's own. The Social
  * Security part stops at what's left of the wage base after that person's
  * own W-2 wages; under $400 of net earnings there is no tax at all.
@@ -669,7 +782,7 @@ function seSchedules(card: FederalCard, i: FederalInputs) {
   // proprietor's always was.
   if (i.partners.length === 0) {
     const u = scheduleSe(card, i.netProfit, i.seWages);
-    return { units: [u], schCHalf: u.half, partnerHalf: [] as number[] };
+    return { units: [{ ...u, person: i.schCOwner }], schCHalf: u.half, partnerHalf: [] as number[] };
   }
   const people: { person: 0 | 1; parts: number[]; partnerIdx: number[]; schC: boolean; wages: number }[] = [];
   const of = (person: 0 | 1, wages: number) => {
@@ -698,7 +811,7 @@ function seSchedules(card: FederalCard, i: FederalInputs) {
     const shares = p.parts.length === 1 ? [u.half] : splitHalf(u.half, p.parts);
     p.partnerIdx.forEach((k, j) => (partnerHalf[k] = shares[j]));
     if (p.schC) schCHalf = shares[shares.length - 1];
-    return u;
+    return { ...u, person: p.person };
   });
   return { units, schCHalf, partnerHalf };
 }
@@ -731,6 +844,8 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   const seEarnings = units.reduce((s, u) => s + u.earnings, 0);
   const seTax = units.reduce((s, u) => s + u.tax, 0);
   const halfSe = units.reduce((s, u) => s + u.half, 0);
+  const seTaxByPerson: [number, number] = [0, 0];
+  for (const u of units) seTaxByPerson[u.person] += u.tax;
 
   // Form 7206: the premiums, capped at the business's profit less the SE
   // and retirement plan deductions — or, for a more-than-2% S corporation
@@ -847,9 +962,11 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   } else if (i.scorp !== 0) {
     // The K-1 less the shareholder's health insurance deduction — and, with
     // a Schedule C beside the corporation, its profit net of its own SE
-    // deduction and retirement plan. A K-1 loss nets against the Schedule
-    // C's QBI the same way (Form 8995 adds the businesses up).
-    qbiBase = i.scorp - sehi - i.qbiCarryforward + (i.netProfit > 0 ? i.netProfit - halfSe - i.sep : 0);
+    // deduction and retirement plan. A loss on either side nets against the
+    // other (Form 8995 adds the businesses up): a 2025 return's $38,480 K-1
+    // and $11,544 Schedule C loss give the printed $5,387 (engine v14; the
+    // loss used to be left out).
+    qbiBase = i.scorp - sehi - i.qbiCarryforward + (i.netProfit > 0 ? i.netProfit - halfSe - i.sep : i.netProfit);
   } else qbiBase = i.netProfit - halfSe - sehi - i.sep - i.qbiCarryforward;
   if (i.rental?.qbi) qbiBase += rentalDeducted;
   qbiBase = Math.max(0, qbiBase);
@@ -874,17 +991,31 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   // income or nontaxable Social Security that is AGI.
   const ptc = i.coverage ? premiumTaxCredit(card, status, agi, i.coverage, i.extra.ptcAllowed) : null;
   const additionalTaxes = Math.max(0, (ptc?.repayment ?? 0) + i.extra.additionalTaxes);
-  const refundable = Math.max(0, (ptc?.net ?? 0) + i.extra.refundable);
 
   // Lines 18–22: the child tax credit is limited to the tax left after the
   // other nonrefundable credits (Credit Limit Worksheet A).
   const tax18 = incomeTax + additionalTaxes;
   const credits = i.childCareCredit + i.otherCredits;
-  const ctc = Math.max(
-    0,
-    Math.min(childTaxCredit(card, status, agi, i.children, i.others), Math.max(0, tax18 - credits)) + i.extra.childTaxCredit,
-  );
+  const ctcFull = childTaxCredit(card, status, agi, i.children, i.others);
+  const ctc = Math.max(0, Math.min(ctcFull, Math.max(0, tax18 - credits)) + i.extra.childTaxCredit);
   const line22 = Math.max(0, tax18 - ctc - credits);
+
+  // Lines 27 and 28 (engine v14): the earned income credit and the
+  // additional child tax credit, figured on this scenario's income — the
+  // before's higher income shrinks both, and without the dependents the
+  // child credit's refundable part goes with the rest of it. Earned income
+  // is the wages and the self-employment profit less the SE deduction (a
+  // Schedule C loss counts against it); an S corporation's K-1 isn't
+  // earned income. Other income stands in for investment income, which
+  // only matters at the EIC's limit.
+  const earned = Math.max(0, i.w2 + i.netProfit + partnerIncome - halfSe);
+  const eic = earnedIncomeCredit(card, status, earned, agi, i.children, Math.max(0, i.otherIncome), i.claimedAsDependent);
+  const se = card.selfEmployment;
+  /** Schedule 8812 line 23: the Social Security and Medicare taxes withheld from the wages, plus the SE deduction. */
+  const ficaPaid =
+    Math.round((Math.min(i.w2, se.wageBase) * se.socialSecurityRate) / 2) + Math.round((i.medicareWages * se.medicareRate) / 2) + halfSe;
+  const actc = additionalChildTaxCredit(card, i.children, Math.max(0, ctcFull - ctc), earned, ficaPaid, eic);
+  const refundable = Math.max(0, (ptc?.net ?? 0) + eic + actc + i.extra.refundable);
 
   // Form 8960: on the smaller of net investment income and AGI over the
   // threshold. Business income (Schedule C, a K-1 the owner works in) is
@@ -902,6 +1033,7 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   return {
     seEarnings,
     seTax,
+    seTaxByPerson,
     halfSe,
     sehi,
     additionalMedicare,
@@ -927,6 +1059,8 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
     credits,
     niit,
     totalTax: Math.max(0, line22 + seTax + additionalMedicare + niit + i.extra.otherTaxes),
+    eic,
+    actc,
     refundable,
     earnedIncome: i.w2 + Math.max(0, i.netProfit) + i.partners.reduce((s, p) => s + Math.max(0, p.ordinary + p.guaranteed), 0),
     dependentEarned,
@@ -1073,22 +1207,34 @@ function state(card: StateCard, status: FilingStatus, fed: Federal, s: StateInpu
   // Massachusetts lines 11a/11b: the Social Security and Medicare tax each
   // person paid on their own wages, capped per person — so whose wages are
   // whose matters, and a W-2 that leaves on the before takes its deduction
-  // with it.
+  // with it. A self-employed person's Schedule SE tax is Social Security
+  // and Medicare paid too (engine v14: a 2025 return with $8,423 of wages
+  // and $35,459 of SE tax prints the full $2,000).
   const wd = card.wageDeduction;
   const wageDeduction = wd
-    ? s.wagesByPerson.reduce((t, w) => t + Math.min(wd.cap, Math.round(Math.max(0, w) * wd.rate)), 0)
+    ? s.wagesByPerson.reduce(
+        (t, w, k) => t + Math.min(wd.cap, Math.round(Math.max(0, w) * wd.rate) + (fed.seTaxByPerson[k] ?? 0)),
+        0,
+      )
     : 0;
 
   const taxable = Math.max(
     0,
     income - deduction - (ex.kind === "deduction" ? exemption : 0) - medical - wageDeduction,
   );
-  let tax = printedTax(card.brackets[status], card.taxTable, taxable);
+  // New York's recapture works from the state's own AGI (IT-201 line 33;
+  // on IT-203 the federal-column figure, which this is as a resident).
+  let tax = card.recapture
+    ? recapturedTax(card.brackets[status], card.taxTable, taxable, income, card.recapture)
+    : printedTax(card.brackets[status], card.taxTable, taxable);
   if (card.surtax && taxable > card.surtax.above) {
     tax += Math.round((taxable - card.surtax.above) * card.surtax.rate);
   }
   const credit = ex.kind === "credit" ? exemption : 0;
-  const afterExemption = Math.max(0, tax - credit);
+  // A state earned income credit as a share of the federal one (Delaware's
+  // 20%), no more than the tax left: it goes where the federal credit goes.
+  const eitc = card.earnedIncomeCredit ? Math.min(Math.max(0, tax - credit), Math.round(fed.eic * card.earnedIncomeCredit.share)) : 0;
+  const afterExemption = Math.max(0, tax - credit - eitc);
   // A city's resident tax on the same taxable income, for a city resident only.
   const local = card.local && s.localResident ? printedTax(card.local.brackets[status], card.taxTable, taxable) : 0;
 
@@ -1183,6 +1329,47 @@ function nonresidentState(
 
   const share = fed.totalIncome > 0 ? stateSource / fed.totalIncome : 0;
   const stateAgi = Math.max(0, stateSource - Math.round(fed.adjustments * share));
+  const mode = creditMode(card);
+  const available = Math.max(0, s.pteCreditAvailable);
+
+  // New York's IT-203, line by line: 44 the tax on all income as a resident
+  // (with the recapture, on the federal column's AGI), 45 the income
+  // percentage — the New York column's AGI over the federal column's, four
+  // places — and 46 their product. The deduction and the dependent
+  // exemptions are inside line 44 once; prorating taxable income instead
+  // would count the exemptions out of the share a second time.
+  // South Carolina's Schedule NR ("taxable"): the same percentage of the
+  // deductions and exemptions comes off the state's share of income, and
+  // that taxable income is taxed on the schedule — its 0% and 3% bands
+  // count in full (a 2025 return: $4,941 printed, the proration of the tax
+  // gives $5,196, this $4,851; the rest is the state tax added back).
+  const method = card.nonresident?.method;
+  if (method === "income" || method === "taxable") {
+    /** AGI as a resident: the state's own figure, or federal AGI with the state's adjustments where the card starts lower (federal taxable income). */
+    const agiAsResident = card.base === "stateGrossIncome" ? resident.income : fed.agi + s.carriedAdjustment;
+    const pct = agiAsResident > 0 ? Math.min(1, round4(stateAgi / agiAsResident)) : 0;
+    const taxable = Math.round(totalTaxable * pct);
+    const stateTax =
+      method === "income"
+        ? Math.round(tax * pct)
+        : Math.max(0, printedTax(card.brackets[status], card.taxTable, taxable) - (card.exemption.kind === "credit" ? Math.round(resident.exemption * pct) : 0));
+    const local = card.local && s.localResident ? printedTax(card.local.brackets[status], card.taxTable, taxable) : 0;
+    const pteCredit = mode === "nonrefundable" ? Math.min(available, stateTax) : mode === "refundable" ? available : 0;
+    return {
+      ...resident,
+      income: stateAgi,
+      taxable,
+      tax: stateTax,
+      residentTax: tax,
+      exemption: 0,
+      local,
+      sharedResponsibility: 0,
+      pteCredit,
+      grossTax: stateTax + local,
+      netTax: stateTax + local - pteCredit,
+    };
+  }
+
   const deduction = standardDeductionFor(card, status, fed, s, fed.agi);
   const taxable = Math.max(
     0,
@@ -1193,8 +1380,11 @@ function nonresidentState(
   const pct = totalTaxable > 0 ? Math.min(1, round4(taxable / totalTaxable)) : 0;
   const exemption = card.exemption.kind === "credit" ? Math.round(resident.exemption * pct) : 0;
   const afterExemption = Math.max(0, stateTax - exemption);
-  const mode = creditMode(card);
-  const available = Math.max(0, s.pteCreditAvailable);
+  // A part-year city resident's tax (New York IT-203 line 51, Form
+  // IT-360.1): the city's rates on the city-resident period's income,
+  // taken as the state's taxable share — what was earned while living
+  // there — so it grows with that share on the before; the rest is fitted.
+  const local = card.local && s.localResident ? printedTax(card.local.brackets[status], card.taxTable, taxable) : 0;
   const pteCredit = mode === "nonrefundable" ? Math.min(available, afterExemption) : mode === "refundable" ? available : 0;
   return {
     ...resident,
@@ -1203,11 +1393,11 @@ function nonresidentState(
     tax: stateTax,
     residentTax: tax,
     exemption,
-    local: 0,
+    local,
     sharedResponsibility: 0,
     pteCredit,
-    grossTax: afterExemption,
-    netTax: afterExemption - pteCredit,
+    grossTax: afterExemption + local,
+    netTax: afterExemption + local - pteCredit,
   };
 }
 
@@ -1466,6 +1656,8 @@ type Model = {
   residuals: Mismatch[];
   /** What the engine assumed or set aside to get there, for the reviewer. */
   softNotes: string[];
+  /** After-return lines the return's own figures prove misread, as they should be (see `DeriveResult.afterFixes`). */
+  afterFixes: Partial<ReturnNumbers>;
   /** Fixed facts the notes and the attribution labels quote. */
   facts: {
     expenses: number;
@@ -1706,6 +1898,8 @@ function buildModel(
   const residuals: Mismatch[] = [];
   /** What was assumed or set aside along the way, for the reviewer. */
   const softNotes: string[] = [];
+  /** After-return lines the return's own figures prove misread, with what they should be: the builder corrects its after column with them. */
+  const afterFixes: Partial<ReturnNumbers> = {};
 
   /* 1 · what the engine needs to exist */
 
@@ -2512,8 +2706,8 @@ function buildModel(
     : null;
   // Line 32 bundles line 31 (an extension payment, excess Social Security
   // withheld) in with the refundable credits; only the credits are credits.
-  const otherPayments = n(after.otherPayments);
-  const refundableRead = Math.max(0, n(after.federalRefundableCredits) - otherPayments);
+  let otherPayments = n(after.otherPayments);
+  let refundableRead = Math.max(0, n(after.federalRefundableCredits) - otherPayments);
   // Qualified dividends and a net long-term gain are taxed by the worksheet
   // on both sides; a loss on line 7 is already inside other income. With a
   // Schedule D, only its long-term net is preferential.
@@ -2993,11 +3187,36 @@ function buildModel(
     "investment income the engine can't tell apart from other income, or a modified AGI above AGI",
   );
   if (extra.niit) refit();
+  // Line 32 more than this return's credits can come to (engine v14): the
+  // earned income credit, the additional child tax credit and the net
+  // premium credit as figured, plus up to $1,000 a person of the American
+  // opportunity credit's refundable part under its income limit ($90,000,
+  // $180,000 joint; none married filing separately). The rest is money
+  // paid in, not a credit — estimated payments (line 26) or an extension
+  // payment (line 31) read onto line 32. A 2023 return: $29,334 of
+  // "credits" at $135,898 of AGI, single, no dependents — line 33 less the
+  // withholding. It's moved to line 31, a payment on both sides; the after
+  // column takes the same fix (`afterFixes`) so its taxes aren't $29,334 low.
+  {
+    const aotcRoom = status !== "mfs" && check.agi < (status === "mfj" ? 180000 : 90000) ? 1000 * ((status === "mfj" ? 2 : 1) + children + others) : 0;
+    const unexplained = refundableRead - check.refundable;
+    if (unexplained > aotcRoom + TOL) {
+      softNotes.push(
+        `Line 32 was read as ${fmt(n(after.federalRefundableCredits))}, but at this income the refundable credits come to ${fmt(check.refundable)} (the earned income credit, the additional child tax credit and the premium tax credit)${
+          aotcRoom > 0 ? `, ${fmt(aotcRoom)} more at most with the American opportunity credit` : ""
+        }. The other ${fmt(unexplained)} is money paid in — estimated payments (line 26) or a payment with an extension (line 31) — so it's taken as line 31: a payment on both sides, not a credit off the tax`,
+      );
+      otherPayments += unexplained;
+      refundableRead -= unexplained;
+      after = { ...after, otherPayments };
+      afterFixes.otherPayments = otherPayments;
+    }
+  }
   extra.refundable = soft(
     `Refundable credits (line 32${otherPayments > 0 ? " less the other payments on line 31" : ""})`,
     refundableRead,
     check.refundable,
-    "an earned income credit, additional child tax credit or other refundable credit the engine doesn't compute; on the before's higher income it would likely be smaller, so the savings are if anything understated",
+    "an American opportunity credit or another refundable credit the engine doesn't compute, or an earned income credit on a child the dependents read don't show",
   );
   if (extra.refundable) refit();
   extra.otherTaxes = soft(
@@ -3025,7 +3244,7 @@ function buildModel(
   const stateDeduction = has(after.stateDeduction) ? after.stateDeduction : null;
   // A city resident's tax on the state return (New York City on the IT-201):
   // the line being read is what says the filer lives there.
-  const localResident = n(after.stateLocalTax) > 0;
+  let localResident = n(after.stateLocalTax) > 0;
   const stateInputsFor = (
     f: Federal,
     businessIncome: number,
@@ -3100,14 +3319,27 @@ function buildModel(
         }
       }
       const form = normalizeForm(meta.stateForm);
-      const onCardNonresident = !!sc.nonresident && !!form && form === normalizeForm(sc.nonresident.form);
+      /** The card's part-year return is the resident form with a schedule (South Carolina's Schedule NR). */
+      const partYearSchedule = sc.nonresident?.schedule ?? null;
+      const onCardNonresident = !!sc.nonresident && !partYearSchedule && !!form && form === normalizeForm(sc.nonresident.form);
       // A part-year or nonresident form the card doesn't name (most states'
       // cards carry the resident form alone), with its state-source income
       // read: figured the way most states figure one — tax as a resident
       // on all income, prorated by the state's share.
       const residentForm = !form || !sc.form || form === normalizeForm(sc.form);
       const genericNonresident = !residentForm && !onCardNonresident && has(after.stateSourceIncome);
-      const nonresident = onCardNonresident || genericNonresident;
+      // A part-year or nonresident schedule on the resident form itself
+      // (South Carolina's SC1040 with Schedule NR; North Carolina's Schedule
+      // PN, Colorado's DR 0104PN): a card that names the schedule, and a
+      // state-source income read below the return's total income. Only
+      // where the card names one: a source line read off a full-year return
+      // elsewhere (a District of Columbia D-40) stays a resident return.
+      const scheduleNonresident =
+        residentForm &&
+        !!partYearSchedule &&
+        has(after.stateSourceIncome) &&
+        after.stateSourceIncome < (has(after.totalIncome) ? after.totalIncome : n(after.agi)) - TOL;
+      const nonresident = onCardNonresident || genericNonresident || scheduleNonresident;
       const unitWithout = (want: (u: Unit, c: StateCard) => boolean) => units.find((u) => u.card && want(u, u.card));
       const noScorpRules = unitWithout((u, c) => u.form === "1120-S" && !c.entity);
       const noPartnershipRules = unitWithout((u, c) => u.form === "1065" && !c.partnership);
@@ -3150,6 +3382,11 @@ function buildModel(
         if (genericNonresident) {
           softNotes.push(
             `${sc.name} Form ${meta.stateForm} is a part-year or nonresident return the ${sc.name} card doesn't name; it's figured the way most states figure one — the tax as a resident on all income, prorated by the ${fmt(stateSource ?? 0)} of ${sc.name}-source income — and fitted to the return as printed`,
+          );
+        }
+        if (scheduleNonresident) {
+          softNotes.push(
+            `${sc.name} Form ${meta.stateForm ?? sc.form} carries a part-year or nonresident schedule (${partYearSchedule}): ${fmt(stateSource ?? 0)} of its income is ${sc.name}'s, less than the return's total. It's figured the way most states figure one — the tax as a resident on all income, prorated by that share — and fitted to the return as printed`,
           );
         }
         // A state that charges the corporation only a minimum (Massachusetts
@@ -3873,15 +4110,54 @@ function buildModel(
     );
     if (otherCreditExtra) afterRun = run(ALL_ON);
   }
+  /** The main state's total as the return prints it: gross of a refundable PTE credit, and of a credit for other states' tax claimed with the payments (the figured one; one only read is already outside the figure). */
+  const printedStateTotal = (o: Outcome) =>
+    o.st ? (creditMode(stateCard) === "refundable" ? o.st.grossTax : o.st.netTax) + (creditWithPayments ? o.st.otherStateCredit : 0) : 0;
+  // The state's total read off a line before the credits (Delaware's
+  // PIT-RES line 26 — a 2024 return: $28,469 read, while its $7,000 of
+  // payments and $20,919 still owed settle against $27,919): when the
+  // payments, the refund and the balance due add up to what the card gives
+  // and not to the line read, the line read was another one. Taken as the
+  // settled figure, on the after column too (`afterFixes`).
+  if (stateCard && afterRun.st && has(after.stateTotalTax) && has(after.statePayments) && (has(after.stateRefund) || has(after.stateAmountOwed))) {
+    const settled = after.statePayments - n(after.stateRefund) + n(after.stateAmountOwed);
+    const figured = printedStateTotal(afterRun);
+    if (off(after.stateTotalTax, figured) && off(after.stateTotalTax, settled) && !off(settled, figured)) {
+      softNotes.push(
+        `The ${stateCard.name} total was read as ${fmt(after.stateTotalTax)}, but the return's ${fmt(after.statePayments)} of payments${
+          has(after.stateRefund) ? ` less its ${fmt(after.stateRefund)} refund` : ""
+        }${has(after.stateAmountOwed) ? ` and ${fmt(after.stateAmountOwed)} still owed` : ""} settle against ${fmt(settled)}, which is what the ${stateCard.name} tables give: a line before the credits was read, so the total is taken as ${fmt(settled)}`,
+      );
+      after = { ...after, stateTotalTax: settled };
+      afterFixes.stateTotalTax = settled;
+    }
+  }
+  // A city resident whose city lines weren't read (a print without the
+  // IT-201's page 3: line 61 read, lines 47–54 not): when the total only
+  // adds up with the city's tax on the same income, the filer lives there
+  // (a 2025 return: $43,949 = $28,147 New York + $15,802 New York City).
+  if (
+    stateCard?.local &&
+    !localResident &&
+    !has(after.stateLocalTax) &&
+    afterRun.st &&
+    has(after.stateTotalTax) &&
+    off(after.stateTotalTax, printedStateTotal(afterRun))
+  ) {
+    localResident = true;
+    const withCity = run(ALL_ON);
+    if (withCity.st && !off(after.stateTotalTax, printedStateTotal(withCity))) {
+      afterRun = withCity;
+      softNotes.push(
+        `${stateCard.local.name}'s resident tax wasn't read, but the ${stateCard.name} total (${fmt(after.stateTotalTax)}) is ${stateCard.name}'s tax plus the city's on the same income (${fmt(withCity.st.local)}) to the dollar, so the filer is taken as a ${stateCard.local.name} resident on both sides`,
+      );
+    } else localResident = false;
+  }
   if (stateCard && afterRun.st && has(after.stateTotalTax)) {
-    const mode = creditMode(stateCard);
-    // As printed: gross of a refundable PTE credit, and of a credit for
-    // other states' tax claimed with the payments (the figured one; one
-    // only read is already outside the figure).
     stateExtra = soft(
       `${stateCard.name} total tax`,
       after.stateTotalTax,
-      (mode === "refundable" ? afterRun.st.grossTax : afterRun.st.netTax) + (creditWithPayments ? afterRun.st.otherStateCredit : 0),
+      printedStateTotal(afterRun),
       `dependents, a credit, or an adjustment the ${stateCard.name} card doesn't model${
         stateCard.wageDeduction && !wages.read && w2 > 0 && (status === "mfj" || status === "qss")
           ? `; the per-person Social Security / Medicare deduction was figured on one person's wages because the W-2 lines (taxpayer's and spouse's) weren't read`
@@ -3906,6 +4182,7 @@ function buildModel(
       after: afterRun,
       residuals,
       softNotes,
+      afterFixes,
       facts: {
         expenses,
         homeOffice,
@@ -4188,7 +4465,8 @@ function fillNumbers(
     out.stateTaxOnIncome = has(after.stateTaxOnIncome) ? sBefore.tax : null;
     // The city's resident tax follows the scenario where the card has its
     // brackets; a city tax the card can't figure rides along as read.
-    out.stateLocalTax = has(after.stateLocalTax) ? (stateCard.local ? sBefore.local : after.stateLocalTax) : null;
+    // Taken from the total when the line wasn't read, it's shown all the same.
+    out.stateLocalTax = has(after.stateLocalTax) ? (stateCard.local ? sBefore.local : after.stateLocalTax) : sBefore.local > 0 ? sBefore.local : null;
     out.stateExemptionCredits = stateCard.exemption.kind === "credit" && has(after.stateExemptionCredits) ? sBefore.exemption : null;
     out.statePteCreditAvailable = pteShare > 0 && mode !== "exclusion" ? pteShare : null;
     // A nonrefundable credit sits inside the state's total; a refundable one
@@ -4617,11 +4895,19 @@ export function deriveBefore(
       `${c.name}: the corporation's own ${rules.form} tax at ${Math.round(rules.rate * 10000) / 100}% of the net income allocated to the city at the return's ${Math.round(c.allocation * 10000) / 100}% business allocation — ${fmt(m.after.entity?.city ?? 0)} on the after, ${fmt(b.entity?.city ?? 0)} on the before, counted with the corporation's state tax. The fixed-dollar minimum is modeled; the capital-base and alternative taxes aren't (the income tax is the largest on any profitable year)`,
     );
   }
-  if (stateCard?.local && n(after.stateLocalTax) > 0) {
+  if (stateCard?.local && (n(after.stateLocalTax) > 0 || (m.after.st?.local ?? 0) > 0)) {
     notes.push(
       facts.stateSource !== null
-        ? `${stateCard.local.name} part-year resident tax (${fmt(n(after.stateLocalTax))}) carried across as read, inside the state's total on both sides: the card figures the city's tax for a full-year resident only, so it isn't re-figured on the before`
+        ? `${stateCard.local.name} part-year resident tax: the city's rates on the ${stateCard.name} share of taxable income — ${fmt(m.after.st?.local ?? 0)} on the after, ${fmt(b.st?.local ?? 0)} on the before, inside the state's total on both sides; the difference from the ${fmt(n(after.stateLocalTax))} printed (the city-resident period's own income) is carried across`
         : `${stateCard.local.name} resident tax on the ${stateCard.form}: ${fmt(m.after.st?.local ?? 0)} on the after, ${fmt(b.st?.local ?? 0)} on the before, inside the state's total on both sides`,
+    );
+  }
+  if (m.after.fed.eic > 0 || b.fed.eic > 0) {
+    notes.push(`Earned income credit ${fmt(m.after.fed.eic)} → ${fmt(b.fed.eic)} on the before's income (line 27, by the ${year} EIC table)`);
+  }
+  if (m.after.fed.actc > 0 || b.fed.actc > 0) {
+    notes.push(
+      `Additional child tax credit (the child credit's refundable part, Schedule 8812) ${fmt(m.after.fed.actc)} → ${fmt(b.fed.actc)}: on the before's higher tax more of the credit is used against the tax and less is refunded`,
     );
   }
   if (facts.coverage && b.fed.ptc) {
@@ -4658,7 +4944,8 @@ export function deriveBefore(
     }
   }
   if (facts.seTaxNote) notes.push(facts.seTaxNote);
-  if (facts.otherPayments > 0) {
+  // A line 32 taken as payments says so in its own note.
+  if (facts.otherPayments > 0 && m.afterFixes.otherPayments === undefined) {
     notes.push(
       `${fmt(facts.otherPayments)} on line 31 (paid with an extension, or excess Social Security withheld) is a payment, not a credit: it stays in the before's payments and out of its Federal Taxes`,
     );
@@ -4680,7 +4967,7 @@ export function deriveBefore(
     notes.push(
       stateCard.nonresident?.method === "maryland"
         ? `${stateCard.name} nonresident (Form ${stateCard.nonresident.form} with ${stateCard.nonresident.form}NR): the deduction and exemptions scaled by the ${stateCard.name} share of federal AGI, the resident tax on all income scaled by the share of taxable income that is ${stateCard.name}'s, plus the ${Math.round((stateCard.nonresident.specialRate ?? 0) * 10000) / 100}% special nonresident tax — ${fmt(facts.stateSource)} of ${stateCard.name}-source income on both sides (${fmt(b.st?.tax ?? 0)} + ${fmt(b.st?.nonresidentTax ?? 0)} on the before)`
-        : `${stateCard.name} part-year/nonresident (Form ${stateCard.nonresident?.form ?? meta.stateForm ?? "?"}): tax figured as a resident on all income, then prorated by the ${stateCard.name}-source share — ${fmt(n(b.numbers.stateSourceIncome))} of ${fmt(b.fed.totalIncome)} on the before${
+        : `${stateCard.name} part-year/nonresident (Form ${stateCard.nonresident?.form ?? meta.stateForm ?? "?"}${stateCard.nonresident?.schedule ? ` with ${stateCard.nonresident.schedule}` : ""}): tax figured as a resident on all income, then prorated by the ${stateCard.name}-source share — ${fmt(n(b.numbers.stateSourceIncome))} of ${fmt(b.fed.totalIncome)} on the before${
             n(b.numbers.stateSourceIncome) !== facts.stateSource ? ` (${fmt(facts.stateSource)} on the after: the business income in it grows with the write-offs gone)` : ""
           }`,
     );
@@ -4778,6 +5065,7 @@ export function deriveBefore(
     otherEntitiesBefore: b.otherEntityNumbers,
     otherStatesBefore: b.otherStateNumbers,
     derived: { version: DERIVE_VERSION, notes, proof },
+    afterFixes: m.afterFixes,
   };
 }
 
@@ -5013,8 +5301,10 @@ export function attributeStrategies(
   }
   // The recap's headline is before − after as READ; the engine's after
   // agrees within rounding. Whatever is left lands on the last step so the
-  // split adds up to the number on the page.
-  const readAfterTotal = totalTaxesOf(after, entity, {
+  // split adds up to the number on the page. A line the engine proved
+  // misread (`afterFixes`) is read as the builder writes it into the after
+  // column, or its whole amount would land on the last step.
+  const readAfterTotal = totalTaxesOf({ ...after, ...m.afterFixes }, entity, {
     states: (more.states ?? []).map((s) => s.numbers),
     entities: entity ? (more.entities ?? []).map((x) => x.numbers) : [],
     mainState: m.stateCode,
@@ -5099,12 +5389,16 @@ function kidsValue(m: Model): { value: RecapAnalysis["kids"]; note: string | nul
   const stateTax = (x: Outcome) => (x.st ? x.st.netTax : 0) + x.otherSt.reduce((t, o) => t + o.netTax, 0);
   const stateName = m.otherStates.length ? "State" : (m.card.state?.name ?? "State");
   const pieces = ({ with: w, without: wo }: (typeof sides)[number], worth: number) => {
-    const ctc = w.fed.childTaxCredit - wo.fed.childTaxCredit;
+    // The child credit with its refundable part (line 28), and the earned
+    // income credit the children raise (line 27).
+    const ctc = w.fed.childTaxCredit + w.fed.actc - (wo.fed.childTaxCredit + wo.fed.actc);
+    const eic = w.fed.eic - wo.fed.eic;
     const care = w.fed.credits - wo.fed.credits;
     const stateDiff = stateTax(wo) - stateTax(w);
-    const filing = worth - stateDiff - ctc - care;
+    const filing = worth - stateDiff - ctc - eic - care;
     const parts: string[] = [];
     if (ctc > 0) parts.push(`Child tax credit ${fmt(ctc)}`);
+    if (eic > 0) parts.push(`Earned income credit ${fmt(eic)}`);
     if (care > 0) parts.push(`Child and dependent care credit ${fmt(care)}`);
     if (headOfHousehold && filing > 0) parts.push(`Head of household instead of single ${fmt(filing)}`);
     else if (filing > 0) parts.push(`Other federal ${fmt(filing)}`);

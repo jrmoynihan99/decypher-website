@@ -61,7 +61,7 @@
  },
  {
   "name": "Case 02 · 2024 (DE PIT-RES, the renamed 200-01)",
-  "proves": "a renamed state form; line 21 read as line 20",
+  "proves": "a renamed state form; line 21 read as line 20; engine v14: the Delaware total read before the credits, settled by the payments and balance due",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -135,7 +135,7 @@
   },
   "expect": null,
   "federal": 184572,
-  "state": 42473,
+  "state": 41923,
   "verified": false,
   "notes": [
    "line 21"
@@ -143,7 +143,7 @@
  },
  {
   "name": "Case 03 · 2025 (Schedule C at a loss beside an S corporation, line 23 blank)",
-  "proves": "no SE tax implied by a Schedule C loss beside a K-1",
+  "proves": "no SE tax implied by a Schedule C loss beside a K-1; engine v14: the Schedule C loss nets against the K-1's QBI, Delaware's earned income credit, the refundable credits figured",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Married filing jointly",
@@ -213,16 +213,16 @@
    "stateAmountDue": 0
   },
   "expect": null,
-  "federal": 24237,
-  "state": 13192,
-  "verified": false,
+  "federal": 24009,
+  "state": 13404,
+  "verified": true,
   "notes": [
    "Self-employment tax taken as \\$0"
   ]
  },
  {
   "name": "Case 04 · 2025 (NY IT-201-X, amended)",
-  "proves": "an amended state form read as the form it amends",
+  "proves": "an amended state form read as the form it amends; engine v14: New York's tax benefit recapture, figured on the before's income",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Single",
@@ -269,12 +269,12 @@
   },
   "expect": null,
   "federal": 115085,
-  "state": 20901,
-  "verified": false
+  "state": 22731,
+  "verified": true
  },
  {
   "name": "Case 05 · 2023 (GA 500X, amended)",
-  "proves": "an amended state form",
+  "proves": "an amended state form; engine v14: the additional child tax credit figured (Schedule 8812)",
   "meta": {
    "taxYear": 2023,
    "filingStatus": "Married filing jointly",
@@ -325,7 +325,7 @@
   "expect": null,
   "federal": 40992,
   "state": 11199,
-  "verified": false
+  "verified": true
  },
  {
   "name": "Case 06 · 2025 (VA 760CG, the computer-generated 760)",
@@ -381,7 +381,7 @@
  },
  {
   "name": "Case 07 · 2023 (NY IT-201-X, amended)",
-  "proves": "an amended state form; line 21 read as line 20",
+  "proves": "an amended state form; line 21 read as line 20; engine v14: New York's tax benefit recapture",
   "meta": {
    "taxYear": 2023,
    "filingStatus": "Married filing jointly",
@@ -425,8 +425,8 @@
   },
   "expect": null,
   "federal": 29194,
-  "state": 8091,
-  "verified": false,
+  "state": 8109,
+  "verified": true,
   "notes": [
    "line 21"
   ]
@@ -703,7 +703,7 @@
  },
  {
   "name": "Case 12 · 2025 (W-2 box 3 beyond box 1)",
-  "proves": "SE wage base from box 3, solved from the SE tax",
+  "proves": "SE wage base from box 3, solved from the SE tax; engine v14: Massachusetts' wage deduction counts the Schedule SE tax",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Single",
@@ -758,7 +758,7 @@
   },
   "expect": null,
   "federal": 224972,
-  "state": 32215,
+  "state": 32214,
   "verified": false,
   "notes": [
    "Social Security wages"
@@ -888,7 +888,7 @@
  },
  {
   "name": "Case 15 · 2023 (NY IT-203, read summed with PA)",
-  "proves": "the IT-203 nonresident card",
+  "proves": "the IT-203 nonresident card; engine v14: line 32's $6,000 taken as a payment; New York City part-year tax figured",
   "meta": {
    "taxYear": 2023,
    "filingStatus": "Single",
@@ -945,7 +945,7 @@
   },
   "expect": null,
   "federal": 57704,
-  "state": 11312,
+  "state": 11516,
   "verified": false,
   "notes": [
    "Form IT-203"
@@ -953,7 +953,7 @@
  },
  {
   "name": "Case 16 · 2025 (NY IT-203, read summed with CA)",
-  "proves": "the IT-203 nonresident card",
+  "proves": "the IT-203 nonresident card; engine v14: IT-203's income percentage",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Single",
@@ -994,7 +994,7 @@
   },
   "expect": null,
   "federal": 21139,
-  "state": 907,
+  "state": 906,
   "verified": false,
   "notes": [
    "Form IT-203"
@@ -1002,7 +1002,7 @@
  },
  {
   "name": "Case 17 · 2024 (NY IT-203)",
-  "proves": "the IT-203 nonresident card",
+  "proves": "the IT-203 nonresident card; engine v14: the recapture, IT-203's income percentage, New York City part-year tax figured",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1048,7 +1048,7 @@
   },
   "expect": null,
   "federal": 33225,
-  "state": 8761,
+  "state": 8988,
   "verified": false,
   "notes": [
    "Form IT-203"
@@ -1096,7 +1096,7 @@
  },
  {
   "name": "Case 19 · 2024 (NY IT-203-X, line 17 read)",
-  "proves": "an amended nonresident form",
+  "proves": "an amended nonresident form; engine v14: the recapture and IT-203's income percentage reproduce the return",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1142,8 +1142,8 @@
   },
   "expect": null,
   "federal": 22712,
-  "state": 5278,
-  "verified": false,
+  "state": 5450,
+  "verified": true,
   "notes": [
    "Form IT-203"
   ]
@@ -1418,7 +1418,7 @@
  },
  {
   "name": "Case 24 · 2025 (a partnership's SE loss on the same Schedule SE)",
-  "proves": "engine v13: the Schedule C and the partner's K-1 loss on one Schedule SE, the K-1 read as rental income moved back, the other partner's K-1 set aside",
+  "proves": "engine v13: the Schedule C and the partner's K-1 loss on one Schedule SE, the K-1 read as rental income moved back, the other partner's K-1 set aside; engine v14: New York's tax benefit recapture on the before's income",
   "meta": {
    "taxYear": 2025,
    "filingStatus": "Married filing jointly",
@@ -1491,7 +1491,7 @@
   },
   "expect": null,
   "federal": 82154,
-  "state": 36323,
+  "state": 40210,
   "verified": true,
   "notes": [
    "the partnership's income \\(Schedule E Part II\\), not a rental",
@@ -1502,7 +1502,7 @@
  },
  {
   "name": "Case 25 · 2024 (Schedule C beside a partnership)",
-  "proves": "engine v13: a Schedule C beside a partnership on one person's Schedule SE, the W-2 the spouse's",
+  "proves": "engine v13: a Schedule C beside a partnership on one person's Schedule SE, the W-2 the spouse's; engine v14: New York's tax benefit recapture",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1579,8 +1579,8 @@
   },
   "expect": null,
   "federal": 166249,
-  "state": 55182,
-  "verified": false,
+  "state": 58047,
+  "verified": true,
   "notes": [
    "Schedule C beside the partnership has its \\$287,102 of expenses zeroed",
    "taken as the spouse's"

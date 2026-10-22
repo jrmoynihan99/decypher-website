@@ -211,6 +211,18 @@ const toRaw = (n: ReturnNumbers): RawNumbers =>
     RETURN_FIELD_KEYS.map((k) => [k, n[k] === null ? "" : String(n[k])]),
   ) as RawNumbers;
 
+/**
+ * The after column with the lines the engine proved misread put right
+ * (`DeriveResult.afterFixes`: line 32's estimated payments moved to line
+ * 31), so the recap's after side is figured the way the before was. The
+ * notes say what changed; the grid shows it and can be edited back.
+ */
+const withAfterFixes = (raw: RawNumbers, fixes: Partial<ReturnNumbers>): RawNumbers => {
+  const keys = Object.keys(fixes) as ReturnFieldKey[];
+  if (!keys.length) return raw;
+  return { ...raw, ...Object.fromEntries(keys.map((k) => [k, fixes[k] === null || fixes[k] === undefined ? "" : String(fixes[k])])) };
+};
+
 const toNumbers = (r: RawNumbers): ReturnNumbers =>
   Object.fromEntries(
     RETURN_FIELD_KEYS.map((k) => [
@@ -1222,7 +1234,7 @@ export default function TaxRecapBuilder({
         derivedNumbers: result.before,
       },
     }));
-    setNumbers((n) => ({ ...n, before: toRaw(result.before) }));
+    setNumbers((n) => ({ ...n, before: toRaw(result.before), after: withAfterFixes(n.after, result.afterFixes) }));
     setEntityNumbers((e) => ({
       ...e,
       before: toRawEntity(result.entityBefore),
@@ -1296,7 +1308,7 @@ export default function TaxRecapBuilder({
         derivedNumbers: result.before,
       },
     }));
-    setNumbers((n) => ({ ...n, before: toRaw(result.before) }));
+    setNumbers((n) => ({ ...n, before: toRaw(result.before), after: withAfterFixes(n.after, result.afterFixes) }));
     setEntityNumbers((e) => ({
       ...e,
       before: toRawEntity(result.entityBefore),

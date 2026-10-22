@@ -106,6 +106,28 @@ export type FederalCard = {
     phaseOutStep: number;
   };
   /**
+   * Schedule 8812 Part II: the additional child tax credit, the refundable
+   * part of the child credit the tax didn't use — up to `perChild` for each
+   * qualifying child, and no more than `rate` of earned income over
+   * `earnedAbove` (with three or more children, the Social Security and
+   * Medicare taxes paid when that's larger).
+   */
+  additionalChildTaxCredit: { perChild: number; earnedAbove: number; rate: number };
+  /**
+   * The earned income credit (Form 1040 line 27), one row per number of
+   * qualifying children — none, one, two, three or more: `rate` of earned
+   * income up to `earnedAmount`, less `phaseOutRate` of the larger of earned
+   * income and AGI over `phaseOutStart` (`phaseOutJoint` on a joint return),
+   * priced the way the EIC Table prices it, at the middle of each $50 row.
+   * None when married filing separately, for someone else's dependent, or
+   * with investment income over `investmentLimit`. Null when the year's
+   * figures aren't on the card: the credit is then carried as read.
+   */
+  earnedIncomeCredit: {
+    rows: { rate: number; earnedAmount: number; phaseOutRate: number; phaseOutStart: number; phaseOutJoint: number }[];
+    investmentLimit: number;
+  } | null;
+  /**
    * The Standard Deduction Worksheet for Dependents (someone can claim the
    * filer): the greater of `minimum` and earned income plus `earnedPlus`,
    * never more than the regular standard deduction.
@@ -240,6 +262,26 @@ export type StateCard = {
   /** A city tax on the same taxable income (New York City). */
   local: { name: string; brackets: ByStatus<Bracket[]> } | null;
   /**
+   * A tax benefit recapture (New York's tax computation worksheets, IT-201
+   * line 39): above `agiFrom` of the state's AGI the benefit of the lower
+   * brackets is taken back until all of taxable income is taxed at the rate
+   * of the bracket it ends in. It comes back a bracket at a time, each over
+   * `range` of AGI — the first from `agiFrom`, at the rate of the bracket
+   * just above it, each next one from the top of the bracket before (the
+   * worksheets' recapture base and incremental benefit amounts are those
+   * brackets' figures). Over `flatAbove` of AGI the top rate applies to all
+   * of it. Null where the state has none.
+   */
+  recapture: { agiFrom: number; range: number; flatAbove: number } | null;
+  /**
+   * A state earned income credit figured as `share` of the federal one and
+   * taken off the tax, no more than the tax (Delaware's 20%). It follows
+   * the federal credit, which the before's higher income usually takes
+   * away. A refundable state credit is a payment, not on the card. Null
+   * where the state has none.
+   */
+  earnedIncomeCredit: { share: number } | null;
+  /**
    * The state's nonresident / part-year form, and how it prorates. Null
    * means a nonresident return is refused.
    *
@@ -252,8 +294,20 @@ export type StateCard = {
    *    tax on all income is scaled by the share of taxable income that is
    *    left; and a special nonresident tax at `specialRate` is charged on
    *    that taxable income in place of the county tax.
+   *  - "income" (New York's IT-203): the resident tax on all income times
+   *    the income percentage — the state-source AGI over the AGI as a
+   *    resident, to four places (line 45) — so the deduction and the
+   *    exemptions come off in the resident tax, not again in the share.
+   *  - "taxable" (South Carolina's Schedule NR): the resident's taxable
+   *    income times the same income percentage — the deductions and
+   *    exemptions prorated — taxed on the state's own schedule.
+   *
+   * `schedule`: the part-year return is the resident form itself with this
+   * schedule attached (South Carolina's SC1040 with Schedule NR), so `form`
+   * is the resident form, and a return is part-year when its state-source
+   * income is read below its total income.
    */
-  nonresident: { form: string; method?: "proration" | "maryland"; specialRate?: number } | null;
+  nonresident: { form: string; method?: "proration" | "maryland" | "income" | "taxable"; specialRate?: number; schedule?: string } | null;
   /**
    * A medical-expense deduction the New Jersey way: health premiums the
    * client actually paid (marketplace premiums less the credit allowed)
@@ -366,6 +420,8 @@ export function noIncomeTaxCard(code: string): StateCard {
     taxTable: null,
     surtax: null,
     local: null,
+    recapture: null,
+    earnedIncomeCredit: null,
     nonresident: null,
     medical: null,
     sharedResponsibility: null,
@@ -445,6 +501,22 @@ const FEDERAL_2025: FederalCard = {
     phaseOutThreshold: { single: 200000, mfs: 200000, hoh: 200000, mfj: 400000, qss: 400000 },
     phaseOutPer: 50,
     phaseOutStep: 1000,
+  },
+  // The 2025 Act's $1,700 refundable part per child; 15% of earned income
+  // over $2,500 (Schedule 8812 lines 16b–20).
+  additionalChildTaxCredit: { perChild: 1700, earnedAbove: 2500, rate: 0.15 },
+  // Rev. Proc. 2024-40 §2.06: the maximums are the rates times the earned
+  // income amounts ($649, $4,328, $7,152, $8,046), and the published
+  // completed phase-outs follow from the starts ($19,104, $50,434, $57,310,
+  // $61,555 single).
+  earnedIncomeCredit: {
+    rows: [
+      { rate: 0.0765, earnedAmount: 8490, phaseOutRate: 0.0765, phaseOutStart: 10620, phaseOutJoint: 17730 },
+      { rate: 0.34, earnedAmount: 12730, phaseOutRate: 0.1598, phaseOutStart: 23350, phaseOutJoint: 30470 },
+      { rate: 0.4, earnedAmount: 17880, phaseOutRate: 0.2106, phaseOutStart: 23350, phaseOutJoint: 30470 },
+      { rate: 0.45, earnedAmount: 17880, phaseOutRate: 0.2106, phaseOutStart: 23350, phaseOutJoint: 30470 },
+    ],
+    investmentLimit: 11950,
   },
   // Rev. Proc. 2024-40 §2.15: a dependent's standard deduction is the greater
   // of $1,350 and earned income + $450, up to the regular amount.
@@ -536,6 +608,9 @@ const CALIFORNIA_2025: StateCard = {
   taxTable: { below: 100000, row: 100, rounding: "centred" },
   surtax: { rate: 0.01, above: 1000000 },
   local: null,
+  recapture: null,
+  // CalEITC is its own refundable credit (FTB 3514), a payment: not on the card.
+  earnedIncomeCredit: null,
   // Checked on Client B's 540NR (Texas resident, California-source income): both
   // the before (848) and the after (336) reproduce to the dollar.
   nonresident: { form: "540NR" },
@@ -616,6 +691,9 @@ const NEW_JERSEY_2025: StateCard = {
   taxTable: { below: 100000, row: 50, rounding: "midpoint" },
   surtax: null,
   local: null,
+  recapture: null,
+  // New Jersey's earned income tax credit is refundable (a payment): not on the card.
+  earnedIncomeCredit: null,
   nonresident: null,
   medical: { floorRate: 0.02, seHealthInsuranceFull: true },
   sharedResponsibility: {
@@ -680,6 +758,18 @@ const FEDERAL_2024: FederalCard = {
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 168600 },
   qbi: { ...FEDERAL_2025.qbi, threshold: { single: 191950, mfs: 191950, hoh: 191950, mfj: 383900, qss: 383900 } },
   childTaxCredit: { ...FEDERAL_2025.childTaxCredit, perChild: 2000 },
+  // Rev. Proc. 2023-34: $1,700 refundable per child; the EIC table's
+  // figures ($632, $4,213, $6,960, $7,830 maximums).
+  additionalChildTaxCredit: { perChild: 1700, earnedAbove: 2500, rate: 0.15 },
+  earnedIncomeCredit: {
+    rows: [
+      { rate: 0.0765, earnedAmount: 8260, phaseOutRate: 0.0765, phaseOutStart: 10330, phaseOutJoint: 17250 },
+      { rate: 0.34, earnedAmount: 12390, phaseOutRate: 0.1598, phaseOutStart: 22720, phaseOutJoint: 29640 },
+      { rate: 0.4, earnedAmount: 17400, phaseOutRate: 0.2106, phaseOutStart: 22720, phaseOutJoint: 29640 },
+      { rate: 0.45, earnedAmount: 17400, phaseOutRate: 0.2106, phaseOutStart: 22720, phaseOutJoint: 29640 },
+    ],
+    investmentLimit: 11600,
+  },
   // Rev. Proc. 2023-34: $1,300 and earned income + $450.
   dependentStandardDeduction: { minimum: 1300, earnedPlus: 450 },
   // Rev. Proc. 2023-34 §3.03. Checked on Client G's 2024 return: $1,317 of
@@ -718,6 +808,18 @@ const FEDERAL_2023: FederalCard = {
     hoh: b([[15700, 0.10], [59850, 0.12], [95350, 0.22], [182100, 0.24], [231250, 0.32], [578100, 0.35], [null, 0.37]]),
   },
   standardDeduction: { single: 13850, mfj: 27700, qss: 27700, mfs: 13850, hoh: 20800 },
+  // Rev. Proc. 2022-38: $1,600 refundable per child; the EIC table's
+  // figures ($600, $3,995, $6,604, $7,430 maximums).
+  additionalChildTaxCredit: { perChild: 1600, earnedAbove: 2500, rate: 0.15 },
+  earnedIncomeCredit: {
+    rows: [
+      { rate: 0.0765, earnedAmount: 7840, phaseOutRate: 0.0765, phaseOutStart: 9800, phaseOutJoint: 16370 },
+      { rate: 0.34, earnedAmount: 11750, phaseOutRate: 0.1598, phaseOutStart: 21560, phaseOutJoint: 28120 },
+      { rate: 0.4, earnedAmount: 16510, phaseOutRate: 0.2106, phaseOutStart: 21560, phaseOutJoint: 28120 },
+      { rate: 0.45, earnedAmount: 16510, phaseOutRate: 0.2106, phaseOutStart: 21560, phaseOutJoint: 28120 },
+    ],
+    investmentLimit: 11000,
+  },
   // Rev. Proc. 2022-38: $1,250 and earned income + $400.
   dependentStandardDeduction: { minimum: 1250, earnedPlus: 400 },
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 160200 },
@@ -758,6 +860,11 @@ const FEDERAL_2026: FederalCard = {
     hoh: b([[17700, 0.10], [67450, 0.12], [105700, 0.22], [201775, 0.24], [256200, 0.32], [640600, 0.35], [null, 0.37]]),
   },
   standardDeduction: { single: 16100, mfj: 32200, qss: 32200, mfs: 16100, hoh: 24150 },
+  // The earned income credit's 2026 figures aren't seeded: Rev. Proc.
+  // 2025-32 was revised on 2025-10-17 and changed one of its phase-out
+  // thresholds. Until they're added on the Tax Tables page the credit is
+  // carried as read.
+  earnedIncomeCredit: null,
   // Rev. Proc. 2025-32: $1,350 and earned income + $450 (verify on a 2026 return).
   dependentStandardDeduction: { minimum: 1350, earnedPlus: 450 },
   selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 184500 },
@@ -955,12 +1062,29 @@ export function sanitizeStateCard(raw: unknown, code: string, fallback?: StateCa
       r.local && typeof r.local === "object"
         ? { name: str(local.name, 40), brackets: byStatus(local.brackets, brackets) }
         : null,
+    // A card saved before the rule existed keeps the seed's.
+    recapture:
+      r.recapture === undefined
+        ? (fallback?.recapture ?? null)
+        : r.recapture && typeof r.recapture === "object"
+          ? { agiFrom: num(obj(r.recapture).agiFrom), range: num(obj(r.recapture).range), flatAbove: num(obj(r.recapture).flatAbove) }
+          : null,
+    earnedIncomeCredit:
+      r.earnedIncomeCredit === undefined
+        ? (fallback?.earnedIncomeCredit ?? null)
+        : r.earnedIncomeCredit && typeof r.earnedIncomeCredit === "object"
+          ? { share: num(obj(r.earnedIncomeCredit).share) }
+          : null,
     nonresident:
       r.nonresident && typeof r.nonresident === "object" && str(nonresident.form, 20)
         ? {
             form: str(nonresident.form, 20),
-            method: nonresident.method === "maryland" ? "maryland" : "proration",
+            method:
+              nonresident.method === "maryland" || nonresident.method === "income" || nonresident.method === "taxable"
+                ? nonresident.method
+                : "proration",
             specialRate: numOr(nonresident.specialRate, 0),
+            ...(str(nonresident.schedule, 30) ? { schedule: str(nonresident.schedule, 30) } : {}),
           }
         : null,
     medical:
@@ -1105,6 +1229,33 @@ export function sanitizeFederalCard(raw: unknown, fallback?: FederalCard | null)
             phaseOutPer: numOr(ctc.phaseOutPer, 0),
             phaseOutStep: numOr(ctc.phaseOutStep, 1000),
           },
+    // Cards saved before the refundable credits were modeled: the seed's.
+    additionalChildTaxCredit:
+      r.additionalChildTaxCredit === undefined
+        ? (fallback?.additionalChildTaxCredit ?? FEDERAL_2025.additionalChildTaxCredit)
+        : {
+            perChild: num(obj(r.additionalChildTaxCredit).perChild),
+            earnedAbove: num(obj(r.additionalChildTaxCredit).earnedAbove),
+            rate: num(obj(r.additionalChildTaxCredit).rate),
+          },
+    earnedIncomeCredit:
+      r.earnedIncomeCredit === undefined
+        ? (fallback?.earnedIncomeCredit ?? null)
+        : r.earnedIncomeCredit && typeof r.earnedIncomeCredit === "object"
+          ? {
+              rows: (Array.isArray(obj(r.earnedIncomeCredit).rows) ? (obj(r.earnedIncomeCredit).rows as unknown[]) : []).slice(0, 4).map((row) => {
+                const o = obj(row);
+                return {
+                  rate: num(o.rate),
+                  earnedAmount: num(o.earnedAmount),
+                  phaseOutRate: num(o.phaseOutRate),
+                  phaseOutStart: num(o.phaseOutStart),
+                  phaseOutJoint: num(o.phaseOutJoint),
+                };
+              }),
+              investmentLimit: num(obj(r.earnedIncomeCredit).investmentLimit),
+            }
+          : null,
     dependentStandardDeduction:
       r.dependentStandardDeduction === undefined
         ? (fallback?.dependentStandardDeduction ?? FEDERAL_2025.dependentStandardDeduction)
@@ -1257,6 +1408,22 @@ export function validateYearCard(card: YearCard): string[] {
   validateByStatus(ctc.phaseOutThreshold, "Child tax credit phase-out threshold", out);
   if (!fin(ctc.phaseOutPer) || ctc.phaseOutPer < 0) out.push("Child tax credit phase-out amount needs a number");
   if (!fin(ctc.phaseOutStep) || ctc.phaseOutStep <= 0) out.push("Child tax credit phase-out step must be positive");
+  const actc = f.additionalChildTaxCredit;
+  if (!fin(actc.perChild) || actc.perChild < 0 || !fin(actc.earnedAbove) || actc.earnedAbove < 0 || !fin(actc.rate) || actc.rate < 0 || actc.rate >= 1) {
+    out.push("Additional child tax credit needs an amount per child, an earned-income floor and a rate");
+  }
+  const eic = f.earnedIncomeCredit;
+  if (eic) {
+    if (eic.rows.length !== 4) out.push("Earned income credit needs four rows: no children, one, two, three or more");
+    eic.rows.forEach((row, i) => {
+      const w = `Earned income credit, ${["no children", "one child", "two children", "three or more"][i] ?? `row ${i + 1}`}`;
+      if (!fin(row.rate) || row.rate <= 0 || row.rate >= 1 || !fin(row.phaseOutRate) || row.phaseOutRate <= 0 || row.phaseOutRate >= 1) out.push(`${w}: the rates must be percentages`);
+      if (!fin(row.earnedAmount) || row.earnedAmount <= 0 || !fin(row.phaseOutStart) || row.phaseOutStart <= 0 || !fin(row.phaseOutJoint) || row.phaseOutJoint <= 0) {
+        out.push(`${w}: needs the earned income amount and both phase-out starts`);
+      }
+    });
+    if (!fin(eic.investmentLimit) || eic.investmentLimit < 0) out.push("Earned income credit: the investment income limit needs a number");
+  }
   const niit = f.netInvestmentIncomeTax;
   if (!fin(niit.rate) || niit.rate < 0 || niit.rate >= 1) out.push("Net investment income tax rate must be a percentage");
   validateByStatus(niit.threshold, "Net investment income tax threshold", out);
@@ -1323,6 +1490,13 @@ export function validateYearCard(card: YearCard): string[] {
       out.push(`${where} surtax needs a rate and a floor`);
     }
     if (s.local) validateBrackets(s.local.brackets, `${where} ${s.local.name || "local"} brackets`, out);
+    if (s.earnedIncomeCredit && (!fin(s.earnedIncomeCredit.share) || s.earnedIncomeCredit.share <= 0 || s.earnedIncomeCredit.share > 1)) {
+      out.push(`${where} earned income credit must be a share of the federal one`);
+    }
+    const rc = s.recapture;
+    if (rc && (!fin(rc.agiFrom) || rc.agiFrom <= 0 || !fin(rc.range) || rc.range <= 0 || !fin(rc.flatAbove) || rc.flatAbove <= rc.agiFrom)) {
+      out.push(`${where} tax benefit recapture needs a starting AGI, a phase-in range and the AGI above which the top rate applies to all income`);
+    }
     if (s.medical && (!fin(s.medical.floorRate) || s.medical.floorRate < 0 || s.medical.floorRate >= 1)) {
       out.push(`${where} medical deduction: the floor must be a percentage`);
     }

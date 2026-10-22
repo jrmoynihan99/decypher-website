@@ -68,6 +68,8 @@ function card(name: string, partial: Partial<StateCard>): StateCard {
     taxTable: null,
     surtax: null,
     local: null,
+    recapture: null,
+    earnedIncomeCredit: null,
     nonresident: null,
     medical: null,
     sharedResponsibility: null,
@@ -119,6 +121,9 @@ export const STATES_2025: Record<string, StateCard> = {
 
   CO: card("Colorado", {
     form: "DR 0104",
+    // Part-year and nonresident: the DR 0104 with the DR 0104PN (the
+    // Colorado share of income), prorated the usual way and fitted.
+    nonresident: { form: "DR 0104", schedule: "DR 0104PN", method: "income" },
     base: "federalTaxableIncome",
     brackets: flat(0.044),
     entity: entity("DR 0106", 0, pte(0.044, "refundable")),
@@ -156,12 +161,21 @@ export const STATES_2025: Record<string, StateCard> = {
     ),
     deduction: { kind: "standard", amount: by(3250, 6500, 3250, 3250, 6500) },
     exemption: { kind: "credit", amount: 110, count: ONE, dependentAmount: 110, phaseOut: null },
-    entity: entity("1100S", 175, null),
-    note: "Form 200-01, 2025: the same schedule for every status, $110 personal credit per exemption. Delaware S corporations pay no income tax; the $175 is the franchise tax minimum (verify — it depends on shares). No PTE election.",
+    // The nonrefundable earned income credit, 20% of the federal one.
+    // Checked on a 2025 PIT-RES: $1,064 federal → $212.
+    earnedIncomeCredit: { share: 0.2 },
+    // Delaware S corporations pay no income tax on the 1100S; the franchise
+    // tax goes with the annual report to the Division of Corporations, not
+    // on the return (two 2024–2025 1100S prints show $0).
+    entity: entity("1100S", 0, null),
+    note: "Form 200-01, 2025: the same schedule for every status, $110 personal credit per exemption, the nonrefundable earned income credit at 20% of the federal one. Delaware S corporations pay no income tax on the 1100S; the franchise tax is paid with the annual report, outside the return. No PTE election.",
   }),
 
   GA: card("Georgia", {
     form: "500",
+    // Part-year and nonresident: Form 500 with Schedule 3 (the Georgia
+    // column and its ratio), prorated the usual way and fitted.
+    nonresident: { form: "500", schedule: "Schedule 3", method: "taxable" },
     brackets: flat(0.0519),
     deduction: { kind: "standard", amount: by(12000, 24000, 12000, 12000, 24000) },
     exemption: { kind: "deduction", amount: 0, count: ONE, dependentAmount: 4000, phaseOut: null },
@@ -352,6 +366,9 @@ export const STATES_2025: Record<string, StateCard> = {
 
   NC: card("North Carolina", {
     form: "D-400",
+    // Part-year and nonresident: the D-400 with Schedule PN (taxable
+    // percentage of income), prorated the usual way and fitted.
+    nonresident: { form: "D-400", schedule: "Schedule PN", method: "income" },
     brackets: flat(0.0425),
     deduction: { kind: "standard", amount: by(12750, 25500, 19125, 12750, 25500) },
     entity: entity("CD-401S", 200, pte(0.0425, "refundable")),
@@ -407,10 +424,18 @@ export const STATES_2025: Record<string, StateCard> = {
     ),
     deduction: { kind: "standard", amount: by(8000, 16050, 11200, 8000, 16050) },
     exemption: { kind: "deduction", amount: 0, count: ONE, dependentAmount: 1000, phaseOut: null },
+    // The tax benefit recapture over $107,650 of New York AGI (IT-201
+    // instructions, tax computation worksheets 1–16): each bracket's
+    // benefit comes back over $50,000 of AGI, all of it at the top rate over
+    // $25,000,000. The worksheets' printed amounts are the brackets' own —
+    // single $568 and $1,831 at $215,400, joint $333 and $807 at $161,550.
+    // On IT-203 it's line 39's base tax, on the federal-column AGI.
+    recapture: { agiFrom: 107650, range: 50000, flatAbove: 25000000 },
     // Part-year / nonresident Form IT-203: the tax on all income as a
-    // resident (line 44) times the income percentage (line 45) — exactly
-    // the proration, with line 17's New York State column as the source.
-    nonresident: { form: "IT-203" },
+    // resident (line 44) times the income percentage (line 45, the New
+    // York State column's AGI over the federal column's), with line 17's
+    // New York State column as the source.
+    nonresident: { form: "IT-203", method: "income" },
     // New York City resident tax (IT-201 lines 47–54), on the same taxable
     // income; applied only when the return carries it (line 54 read).
     // Checked on Client J's 2025 return: $410,904 → $15,802.
@@ -456,11 +481,14 @@ export const STATES_2025: Record<string, StateCard> = {
         ],
       },
     },
-    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. Part-year / nonresident Form IT-203 modeled (base tax × income percentage, from line 17's New York State column). NOT MODELED: the tax benefit recapture above $107,650 of AGI (the higher rates phase in on all income). Engine v11 carries the gap as a fixed amount, which is exact when both sides sit in the same fully-recaptured bracket (single: AGI over $265,400 and taxable income under $1,077,550 — Client J's $2,399); Yonkers and the MCTMT. New York City resident tax IS modeled (3.078% to 3.876%, applied when IT-201 line 54 is read), and so is the corporation's NYC general corporation tax from a Form NYC-3L dropped as a third file (8.85% of allocated net income, fixed-dollar minimum by city receipts). S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
+    note: "IT-201, 2025: standard deduction $8,000 / $16,050 / $11,200, $1,000 per dependent. The tax benefit recapture above $107,650 of New York AGI IS modeled (engine v14, the IT-201 tax computation worksheets: Client J's $2,399). Part-year / nonresident Form IT-203 modeled (base tax × income percentage, from line 17's New York State column), with a part-year New York City resident's city tax figured on the New York taxable income. New York City resident tax IS modeled (3.078% to 3.876%, applied when IT-201 line 54 is read, or when the total only adds up with it), and so is the corporation's NYC general corporation tax from a Form NYC-3L dropped as a third file (8.85% of allocated net income, fixed-dollar minimum by city receipts). NOT MODELED: Yonkers and the MCTMT. S corporation fixed dollar minimum by New York receipts ($25 to $4,500); PTET brackets 6.85% to $2M, 9.65% to $5M, 10.3% to $25M, 10.9% over, refundable credit (IT-653).",
   }),
 
   OH: card("Ohio", {
     form: "IT 1040",
+    // Part-year and nonresident: the IT 1040 with the IT NRC, whose credit
+    // takes off the tax on the non-Ohio share — a proration, fitted.
+    nonresident: { form: "IT 1040", schedule: "IT NRC", method: "income" },
     brackets: brackets([[26050, 0], [100000, 0.0275], [null, 0.035]], [[26050, 0], [100000, 0.0275], [null, 0.035]]),
     exemption: { kind: "deduction", amount: 2400, count: ONE, dependentAmount: 2400, phaseOut: null },
     entity: entity("IT 4738", 0, pte(0.035, "refundable")),
@@ -513,6 +541,10 @@ export const STATES_2025: Record<string, StateCard> = {
 
   SC: card("South Carolina", {
     form: "SC1040",
+    // A part-year resident or nonresident files the SC1040 with Schedule NR
+    // (the South Carolina column of income): the deductions prorated by it
+    // and the share taxed on the schedule, fitted.
+    nonresident: { form: "SC1040", schedule: "Schedule NR", method: "taxable" },
     base: "federalTaxableIncome",
     brackets: brackets([[3560, 0], [17830, 0.03], [null, 0.062]], [[3560, 0], [17830, 0.03], [null, 0.062]]),
     exemption: { kind: "deduction", amount: 0, count: ONE, dependentAmount: 4930, phaseOut: null },
