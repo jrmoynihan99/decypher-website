@@ -113,7 +113,10 @@ export function toTaxFigures(recap: RecapLike, variant: VideoVariant): TaxFigure
     if (!kind) throw new RecapInputError(`No video strategy for "${a.label}". Add it to fromRecap.ts.`);
     return { kind, amount: a.savings };
   });
-  const scorp = recap.analysis?.scorpSavings?.amount ?? 0;
+  // The S corporation's self-employment tax avoided is its own strategy,
+  // and sits inside the before's total (`RecapSide.scorpSeTax`), so the
+  // strategies add up to the before less the after with nothing outside it.
+  const scorp = c.before.scorpSeTax;
   if (scorp > 0) strategies.push({ kind: "s_corp", amount: scorp });
   const firstName = recap.clientName.trim().split(/\s+/)[0] || recap.clientName;
   return {
@@ -126,7 +129,7 @@ export function toTaxFigures(recap: RecapLike, variant: VideoVariant): TaxFigure
       total_income_before: c.before.grossIncome,
       total_income_after: c.after.grossIncome,
       headline_income: c.currentYearIncome,
-      outside_savings: scorp,
+      outside_savings: 0,
     },
     strategies,
     referral_link: "",

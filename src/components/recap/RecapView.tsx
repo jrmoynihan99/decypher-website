@@ -70,11 +70,14 @@ export default function RecapView({
     c.priorYearIncome && c.priorYearIncome > 0
       ? (c.currentYearIncome - c.priorYearIncome) / c.priorYearIncome
       : null;
-  // The S corporation's SE-tax saving sits outside the before/after — both
-  // sides are S corporation returns — and is added on top, the way the
-  // Canva recaps show "bookkeeping savings" and "S-corp savings" separately.
-  const scorpSavings = recap.analysis?.scorpSavings?.amount ?? 0;
-  const totalSavings = c.savings + scorpSavings;
+  // The S corporation's SE-tax saving is in the before, on its own row
+  // (`RecapSide.scorpSeTax`): both returns are S corporation returns, so
+  // the comparison between them leaves it out, and the before is what the
+  // year would have cost without DeCypher. The savings are the before less
+  // the after; "between your two returns" is the part the returns show.
+  const scorpSavings = c.before.scorpSeTax;
+  const totalSavings = c.savings;
+  const betweenReturns = c.savings - scorpSavings;
   const attribution = recap.analysis?.attribution ?? [];
   // The before doesn't claim the dependents (engine v8 on): they're the
   // strategy split's first line. A recap saved earlier claims them on both
@@ -96,16 +99,16 @@ export default function RecapView({
     {
       label: "before decypher",
       title: `What ${recap.taxYear} would have cost.`,
-      sub: `Your income with nothing taken off it: no write-offs, no strategies${kidsOut ? ", no dependents claimed" : ""}.`,
+      sub: `Your income with nothing taken off it: no write-offs, no strategies${scorpSavings > 0 ? ", no S corporation" : ""}${kidsOut ? ", no dependents claimed" : ""}.`,
       stage: true,
-      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" rows={rows} entityKind={c.entityKind} />,
+      body: <Stage side={c.before} scale={c.before.grossIncome} tone="neg" rows={rows} entityKind={c.entityKind} scorpRow={scorpSavings > 0} />,
     },
     {
       label: "the difference",
       title: "Total tax savings",
       sub:
         scorpSavings > 0
-          ? `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
+          ? `What ${recap.taxYear} would have cost on income alone, self-employment tax included, less what it cost with your books done, your S corporation and every strategy applied.`
           : `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied.`,
       body: (
         <>
@@ -120,7 +123,7 @@ export default function RecapView({
               className="mx-auto mt-8 flex max-w-[720px] flex-wrap items-baseline justify-center gap-x-3 gap-y-1.5 text-center text-[14.5px] text-mist"
             >
               <span>
-                <span className="font-mono tabular-nums text-fog">{money(c.savings)}</span> between your two returns
+                <span className="font-mono tabular-nums text-fog">{money(betweenReturns)}</span> between your two returns
               </span>
               <span className="text-faint">+</span>
               <span>
@@ -138,7 +141,7 @@ export default function RecapView({
       sub: `Your books done and every strategy applied: the ${c.scorp ? "returns" : "return"} you’re filing.`,
       stage: true,
       body: (
-        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} rows={rows} entityKind={c.entityKind} />
+        <Stage side={c.after} scale={c.before.grossIncome} tone="pos" was={c.before} rows={rows} entityKind={c.entityKind} scorpRow={scorpSavings > 0} />
       ),
     },
     ...(attribution.length
@@ -153,16 +156,16 @@ export default function RecapView({
                   {attribution.map((a, i) => (
                     <StrategyLine key={i} label={a.label} note={a.note} value={a.savings} />
                   ))}
-                  {recap.analysis?.scorpSavings ? (
+                  {recap.analysis?.scorpSavings && scorpSavings > 0 ? (
                     <>
                       <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-white/15 pt-3.5">
                         <span className="font-display text-[15px] font-semibold text-mist">Between your two returns</span>
-                        <span className="font-mono text-[16px] font-semibold tabular-nums text-fog">{money(c.savings)}</span>
+                        <span className="font-mono text-[16px] font-semibold tabular-nums text-fog">{money(betweenReturns)}</span>
                       </div>
                       <StrategyLine
                         label="S corporation: self-employment tax avoided"
                         note={recap.analysis.scorpSavings.note}
-                        value={recap.analysis.scorpSavings.amount}
+                        value={scorpSavings}
                       />
                     </>
                   ) : null}
@@ -526,6 +529,7 @@ function Stage({
   was,
   rows,
   entityKind,
+  scorpRow = false,
 }: {
   side: RecapSide;
   /** The bar's one scale on both sides: the before return's total income. */
@@ -536,6 +540,8 @@ function Stage({
   /** The state and entity rows, labelled (`taxRows`). */
   rows: ReturnType<typeof taxRows>;
   entityKind: EntityKind;
+  /** Show the self-employment tax an S corporation avoids (`RecapSide.scorpSeTax`): the before's, and a dash on the after. */
+  scorpRow?: boolean;
 }) {
   const dash = (v: number) => (v === 0 ? "—" : signed(v));
   return (
@@ -577,6 +583,7 @@ function Stage({
           <ColumnHead>Taxes</ColumnHead>
           <div>
             <Row label="Federal taxes" value={money(side.federalTaxes)} />
+            {scorpRow ? <Row label="Self-employment tax without an S-corp" value={dash(side.scorpSeTax)} /> : null}
             {rows.states.map((r) => (
               <Row key={`s${r.index}`} label={r.label} value={dash(side.stateRows[r.index] ?? 0)} />
             ))}

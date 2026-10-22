@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/firebase/session";
 import { getRecap, listRecaps } from "@/lib/tax-recap/store";
 import { loadTables } from "@/lib/tax-recap/tables-store";
-import { listFailures } from "@/lib/tax-recap/failures-store";
+import { getFailure, listFailures } from "@/lib/tax-recap/failures-store";
 import { Eyebrow } from "@/components/estimator/fields";
 import TaxRecapBuilder from "@/components/portal/tax-recap/TaxRecapBuilder";
 import RecapList from "@/components/portal/tax-recap/RecapList";
@@ -12,17 +12,27 @@ export const metadata = { title: "Tax Recap — DeCypher Portal" };
 export default async function TaxRecapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ edit?: string }>;
+  searchParams: Promise<{ edit?: string; failure?: string }>;
 }) {
   // "receipts" is the Tax Recap tab's key — see lib/permissions for why.
   await requirePermission("receipts");
-  const { edit } = await searchParams;
-  const [recaps, editing, tables, failures] = await Promise.all([
+  const { edit, failure } = await searchParams;
+  const [recaps, editing, tables, failures, refused] = await Promise.all([
     listRecaps(),
     edit && !edit.includes("/") ? getRecap(edit) : Promise.resolve(null),
     loadTables(),
     listFailures(50).catch(() => []),
+    // Opened from a refused return ("Open in builder"): its kept files load with one click.
+    failure && !failure.includes("/") && !edit ? getFailure(failure).catch(() => null) : Promise.resolve(null),
   ]);
+  const fromFailure =
+    refused && refused.originals.length
+      ? {
+          id: refused.id,
+          label: `${refused.clientName || "Unnamed"} ${refused.meta.taxYear ?? ""}`.trim(),
+          files: refused.originals,
+        }
+      : null;
   const openFailures = failures.filter((f) => f.status === "open").length;
 
   return (
@@ -62,7 +72,12 @@ export default async function TaxRecapPage({
 
       <div className="mt-9">
         {/* Keyed so switching between "new" and "edit" remounts with fresh state. */}
-        <TaxRecapBuilder key={editing?.id ?? "new"} initial={editing} tables={tables} />
+        <TaxRecapBuilder
+          key={editing?.id ?? (fromFailure ? `failure-${fromFailure.id}` : "new")}
+          initial={editing}
+          tables={tables}
+          fromFailure={fromFailure}
+        />
       </div>
 
       <div className="mt-8">

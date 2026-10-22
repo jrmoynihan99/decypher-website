@@ -238,6 +238,8 @@ function stage(
     /** The state and entity rows, labelled (`taxRows`): one each, or every one when there are several. */
     rows: ReturnType<typeof taxRows>;
     entityKind: EntityKind;
+    /** Show the self-employment tax an S corporation avoids (`RecapSide.scorpSeTax`): the before's, a dash on the after. */
+    scorpRow?: boolean;
   },
 ): number {
   let y = top;
@@ -293,6 +295,7 @@ function stage(
   ]);
   const taxes = ledger(ctx, page, right, y, colW, [
     ["Federal taxes", money(s.federalTaxes)],
+    ...(o.scorpRow ? [["Self-employment tax without an S-corp", dash(s.scorpSeTax)] as LedgerRow] : []),
     ...o.rows.states.map((r): LedgerRow => [r.label, dash(s.stateRows[r.index] ?? 0)]),
     // The entity's own state tax: its own row for an S corporation (tax plus the elective tax, and a city's tax when it files one) or an LLC (annual tax plus fee).
     ...o.rows.entities.map((r): LedgerRow => [r.label, dash(s.entityRows[r.index] ?? 0)]),
@@ -319,10 +322,11 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
   const rows = taxRows(c, (code) => (code ? (US_STATES[code] ?? code) : "State"));
   const header = { left: "DeCypher Financials", right: `TAX RECAP  ·  ${recap.taxYear}` };
   const TOTAL = 5;
-  // An S corporation's SE-tax saving sits outside the before/after and is
-  // added on top, as the page does.
-  const scorpSavings = recap.analysis?.scorpSavings?.amount ?? 0;
-  const totalSavings = c.savings + scorpSavings;
+  // An S corporation's SE-tax saving is in the before, on its own row, as
+  // the page shows it: the savings are the before less the after.
+  const scorpSavings = c.before.scorpSeTax;
+  const totalSavings = c.savings;
+  const betweenReturns = c.savings - scorpSavings;
   const attribution = recap.analysis?.attribution ?? [];
   // The before doesn't claim the dependents (engine v8 on); a recap saved
   // earlier shows them beside the total, as the page does.
@@ -375,12 +379,13 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     let y = stage(ctx, page, PAGE.h - 96, {
       label: "Before DeCypher",
       title: `What ${recap.taxYear} would have cost`,
-      sub: `Your income with nothing taken off it: no write-offs, no strategies${kids?.inBefore ? ", no dependents claimed" : ""}.`,
+      sub: `Your income with nothing taken off it: no write-offs, no strategies${scorpSavings > 0 ? ", no S corporation" : ""}${kids?.inBefore ? ", no dependents claimed" : ""}.`,
       side: c.before,
       color: C.danger,
       scale: c.before.grossIncome,
       rows,
       entityKind: c.entityKind,
+      scorpRow: scorpSavings > 0,
     });
     y -= 14;
 
@@ -393,7 +398,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       page,
       ctx.reg,
       scorpSavings > 0
-        ? `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied, plus the self-employment tax your S corporation kept off the table.`
+        ? `What ${recap.taxYear} would have cost on income alone, self-employment tax included, less what it cost with your books done, your S corporation and every strategy applied.`
         : `What ${recap.taxYear} would have cost on income alone, less what it cost with your books done and every strategy applied.`,
       M + 260,
       y - 48,
@@ -403,7 +408,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     );
     if (scorpSavings > 0) {
       page.drawText(
-        `${money(c.savings)} between your two returns  +  ${money(scorpSavings)} of self-employment tax your S corporation avoided`,
+        `${money(betweenReturns)} between your two returns  +  ${money(scorpSavings)} of self-employment tax your S corporation avoided`,
         { x: M + 18, y: y - sh + 18, size: 9.5, font: ctx.reg, color: C.mist },
       );
     }
@@ -423,6 +428,7 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
       was: c.before,
       rows,
       entityKind: c.entityKind,
+      scorpRow: scorpSavings > 0,
     });
 
     // One line per strategy, adding up to the total.
@@ -444,10 +450,10 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         rightText(page, ctx.bold, money(value), M + W, y, 12, color);
         y -= 18;
       };
-      if (recap.analysis?.scorpSavings) {
-        total("Between your two returns", c.savings, C.fog);
+      if (scorpSavings > 0) {
+        total("Between your two returns", betweenReturns, C.fog);
         page.drawText("S corporation: self-employment tax avoided (estimated)", { x: M, y, size: 10.5, font: ctx.reg, color: C.fog });
-        rightText(page, ctx.bold, money(recap.analysis.scorpSavings.amount), M + W, y, 10.5, C.teal);
+        rightText(page, ctx.bold, money(scorpSavings), M + W, y, 10.5, C.teal);
         y -= 16;
       }
       total("Total tax savings", totalSavings, C.teal);

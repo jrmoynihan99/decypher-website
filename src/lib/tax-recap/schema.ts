@@ -850,6 +850,12 @@ export type ExtractedValue = {
   value: number | null;
   page: number | null;
   verified: boolean | null;
+  /**
+   * When the number isn't printed as one figure but amounts printed on
+   * `page` add up to it: those amounts (verify.ts). The reviewer sees the
+   * sum spelled out — "$1,500 + $665" — rather than only "not found".
+   */
+  parts?: number[];
 };
 
 export type ReturnExtract = {
@@ -1242,12 +1248,14 @@ function sanitizeFieldValues<K extends string>(rawFields: unknown, keys: K[]): R
     keys.map((key) => {
       const f = (rf[key] && typeof rf[key] === "object" ? rf[key] : {}) as Record<string, unknown>;
       const page = Number(f.page);
+      const parts = Array.isArray(f.parts) ? f.parts.map(Number).filter((v) => Number.isFinite(v) && v > 0).slice(0, 24) : [];
       return [
         key,
         {
           value: asLine(key, f.value),
           page: Number.isInteger(page) && page > 0 && page < 10_000 ? page : null,
           verified: typeof f.verified === "boolean" ? f.verified : null,
+          ...(parts.length > 1 ? { parts } : {}),
         } satisfies ExtractedValue,
       ];
     }),

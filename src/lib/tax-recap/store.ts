@@ -233,14 +233,13 @@ export async function listProofPairings(): Promise<ProofPairing[]> {
 }
 
 /**
- * The figure the client's page headlines: the savings between the two
- * returns plus, for an S corporation, the self-employment tax the structure
- * avoided — which sits outside the before/after comparison (see
- * `attributeStrategies`) and so outside `computeRecap().savings`. The list
- * and the stored `savings` field show the same number as the page.
+ * The figure the client's page headlines: the before less the after, the
+ * before carrying the self-employment tax an S corporation avoided on its
+ * own row (`RecapSide.scorpSeTax`) — so the list's before, after and
+ * savings columns add up. The stored `savings` field is the same number.
  */
 function headlineSavings(input: Pick<RecapInput, "before" | "after" | "priorYearIncome" | "entityBefore" | "entityAfter" | "analysis">): number {
-  return computeRecap(input).savings + (input.analysis?.scorpSavings?.amount ?? 0);
+  return computeRecap(input).savings;
 }
 
 /** What the portal's list shows — no extraction blob, no per-line numbers. */

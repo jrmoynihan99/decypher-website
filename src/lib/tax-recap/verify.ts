@@ -46,23 +46,49 @@ function amountsOn(pageText: string | undefined): number[] {
 }
 
 /**
- * Is `value` two printed amounts added together? Only asked of the fields
- * the field map defines as a sum the return never prints — the premiums on
- * two Forms 7206 (one per partner), Form 8582 lines 1c + 2c, the properties
- * on Schedule E line 21, the distributions on two K-1s, Form 568's fee plus
- * annual tax. The same amount twice (4,145 on each partner's 7206) counts
- * only when it's printed twice.
+ * Two printed amounts that add up to `value`, larger first, or null. For
+ * the fields the field map defines as a sum the return never prints — the
+ * premiums on two Forms 7206 (one per partner), Form 8582 lines 1c + 2c, the
+ * properties on Schedule E line 21, the distributions on two K-1s, Form
+ * 568's fee plus annual tax — this is the check; for any other line it's
+ * the explanation offered when the number isn't printed. The same amount
+ * twice (4,145 on each partner's 7206) counts only when it's printed twice.
  */
-function sumOfTwoOn(pageTexts: (string | undefined)[], value: number): boolean {
+function sumOfTwoOn(pageTexts: (string | undefined)[], value: number, min = 1): number[] | null {
   const target = Math.abs(Math.round(value));
   const counts = new Map<number, number>();
-  for (const t of pageTexts) for (const a of amountsOn(t)) counts.set(a, (counts.get(a) ?? 0) + 1);
+  for (const t of pageTexts) for (const a of amountsOn(t)) if (a >= min) counts.set(a, (counts.get(a) ?? 0) + 1);
   for (const [a, c] of counts) {
     const b = target - a;
     if (b <= 0) continue;
-    if (b === a ? c >= 2 : counts.has(b)) return true;
+    if (b === a ? c >= 2 : counts.has(b)) return a >= b ? [a, b] : [b, a];
   }
-  return false;
+  return null;
+}
+
+/**
+ * Three amounts printed on one page that add up to `value` (each printed
+ * amount used once), largest first, or null — the reader adds three lines
+ * for some (New York's withholding is lines 72 + 73 + 74). One page only:
+ * across a whole print some three amounts add up to almost anything.
+ */
+function sumOfThreeOn(pageText: string | undefined, value: number, min = 1): number[] | null {
+  const target = Math.abs(Math.round(value));
+  const list = amountsOn(pageText)
+    .filter((a) => a >= min && a < target)
+    .sort((a, b) => a - b);
+  if (list.length < 3 || list.length > 400) return null;
+  for (let i = 0; i < list.length - 2; i++) {
+    let l = i + 1;
+    let r = list.length - 1;
+    while (l < r) {
+      const s = list[i] + list[l] + list[r];
+      if (s === target) return [list[r], list[l], list[i]];
+      if (s < target) l++;
+      else r--;
+    }
+  }
+  return null;
 }
 
 /** Fields the field map defines as an addition of printed amounts. */
@@ -94,19 +120,29 @@ const SUM_FIELDS = new Set<string>([
  */
 const COLUMN_SUM_FIELDS = new Set<string>(["ptcPremiums", "ptcSlcsp"]);
 
-/** Is `value` some of the printed amounts added together? Bounded: the sums tracked never exceed the target. */
-function subsetSumOn(pageTexts: (string | undefined)[], value: number): boolean {
+/**
+ * Some of the printed amounts that add up to `value`, or null. Bounded: the
+ * sums tracked never exceed the target. Each sum remembers the amount that
+ * first reached it, and the sums are walked down so each printed amount is
+ * used once, which is what spells the column back out.
+ */
+function subsetSumOn(pageTexts: (string | undefined)[], value: number): number[] | null {
   const target = Math.abs(Math.round(value));
-  if (target <= 0) return false;
+  if (target <= 0 || target > 5_000_000) return null;
   const amounts = pageTexts.flatMap(amountsOn).filter((a) => a <= target);
-  if (amounts.length > 400) return false;
-  const reachable = new Uint8Array(target + 1);
-  reachable[0] = 1;
-  for (const a of amounts) {
-    for (let s = target; s >= a; s--) if (reachable[s - a]) reachable[s] = 1;
-    if (reachable[target]) return true;
+  if (amounts.length > 400) return null;
+  /** The index of the amount that first reached each sum; -1 for not reached, -2 for zero. */
+  const via = new Int32Array(target + 1).fill(-1);
+  via[0] = -2;
+  for (let i = 0; i < amounts.length; i++) {
+    const a = amounts[i];
+    for (let s = target; s >= a; s--) if (via[s] === -1 && via[s - a] !== -1) via[s] = i;
+    if (via[target] !== -1) break;
   }
-  return false;
+  if (via[target] === -1) return null;
+  const parts: number[] = [];
+  for (let s = target; s > 0; s -= amounts[via[s]]) parts.push(amounts[via[s]]);
+  return parts.sort((a, b) => b - a);
 }
 
 /**
@@ -116,6 +152,12 @@ function subsetSumOn(pageTexts: (string | undefined)[], value: number): boolean 
  * found nowhere in the document is flagged, not dropped — the reviewer
  * decides. A field that is a sum by definition (`SUM_FIELDS`) also passes
  * as two amounts on the cited page and its neighbours.
+ *
+ * Whatever adds up is recorded (`parts`), so the review note can say how:
+ * a sum field's two amounts, a column's months, and — for any other line
+ * that isn't printed — two amounts near the cited page or three on it.
+ * That last is an explanation, not a pass: the line stays flagged, since a
+ * line the return prints as one number shouldn't need adding up.
  */
 export function verifyFields<K extends string>(
   fields: Record<K, ExtractedValue>,
@@ -152,24 +194,46 @@ export function verifyFields<K extends string>(
     const anywhere = pageTexts.findIndex((t) => appearsOn(t, value));
     if (anywhere !== -1) {
       out[key] = { value, page: anywhere + 1, verified: true };
-    } else if (
-      SUM_FIELDS.has(key) &&
-      candidates.length &&
-      sumOfTwoOn(candidates.map((p) => pageTexts[p - 1]), value)
-    ) {
-      out[key] = { value, page: cited, verified: true };
-    } else if (
-      COLUMN_SUM_FIELDS.has(key) &&
-      candidates.length &&
-      subsetSumOn(candidates.map((p) => pageTexts[p - 1]), value)
-    ) {
-      out[key] = { value, page: cited, verified: true };
+      continue;
+    }
+    const near = candidates.map((p) => pageTexts[p - 1]);
+    // A line that's a sum by definition can be made of any printed amount;
+    // an explanation for any other line only of amounts of $100 or more —
+    // line numbers (1–99) would make a sum of almost anything.
+    const min = SUM_FIELDS.has(key) ? 1 : 100;
+    // A pair on one page first (so the note can name it), then across the
+    // cited page and its neighbours (two partners' 7206s side by side).
+    const onePage = candidates.map((p) => ({ p, parts: sumOfTwoOn([pageTexts[p - 1]], value, min) })).find((x) => x.parts);
+    const pair = onePage?.parts ?? (candidates.length > 1 ? sumOfTwoOn(near, value, min) : null);
+    const pairPage = onePage?.p ?? cited;
+    const column = !pair && COLUMN_SUM_FIELDS.has(key) && candidates.length ? subsetSumOn(near, value) : null;
+    if (SUM_FIELDS.has(key) && pair) {
+      out[key] = { value, page: pairPage, verified: true, parts: pair };
+    } else if (column) {
+      out[key] = { value, page: cited, verified: true, parts: column };
     } else {
-      out[key] = { ...f, verified: false };
+      const triple = !pair && cited ? sumOfThreeOn(pageTexts[cited - 1], value, min) : null;
+      const parts = pair ?? triple;
+      out[key] = { value, page: pair ? pairPage : f.page, verified: false, ...(parts ? { parts } : {}) };
       unverified.push(key);
     }
   }
   return { fields: out, unverified, noText: false };
+}
+
+const usd = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
+
+/**
+ * The review note for one line the check couldn't find printed: what it
+ * was read as, and either the amounts that add up to it or that nothing did.
+ */
+export function unverifiedNote(label: string, f: ExtractedValue): string {
+  const value = f.value === null ? "" : ` ${usd(f.value)}`;
+  const where = f.page ? ` on page ${f.page}` : "";
+  if (f.parts && f.parts.length > 1) {
+    return `${label}${value}: not printed as one number — ${f.parts.map(usd).join(" + ")}${where} add up to it. Check that's what this line should be`;
+  }
+  return `${label}${value}: not found anywhere in the PDF's text, and no two or three amounts${where} add up to it — check it by hand`;
 }
 
 export function verifyAgainstText(

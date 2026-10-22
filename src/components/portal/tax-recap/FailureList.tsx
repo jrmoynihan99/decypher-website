@@ -4,18 +4,51 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Chip, Panel } from "@/components/portal/widgets/ui";
 import { shortDate } from "@/lib/widget-format";
-import type { FailureFileKind, FailureStatus, FailureSummary } from "@/lib/tax-recap/failures-store";
+import type { FailureDoc, FailureFileKind, FailureStatus, FailureSummary } from "@/lib/tax-recap/failures-store";
 import { ENTITY_FIELD_KEYS, RETURN_FIELD_KEYS } from "@/lib/tax-recap/schema";
+import { DERIVE_VERSION, deriveBefore } from "@/lib/tax-recap/derive";
+import type { TableSet } from "@/lib/tax-recap/tables";
+
+/** One refusal run again with today's engine, from the numbers it recorded. */
+type Retried =
+  | { state: "running" }
+  | { state: "derives"; verified: boolean; carried: number }
+  | { state: "refused"; reason: string }
+  | { state: "error"; message: string };
+
+/**
+ * A recorded refusal handed to the engine as it is now — what `npm run
+ * recap:replay` does, in the browser: the numbers as read, the meta (with
+ * the entity's name and state from its read when the meta predates them),
+ * the entity return and everything else on the 1040.
+ */
+function replay(doc: FailureDoc, tables: TableSet): Retried {
+  const meta = {
+    ...doc.meta,
+    entityName: doc.meta.entityName ?? doc.extraction.entity?.entityName ?? null,
+    entityStateCode: doc.meta.entityStateCode ?? doc.extraction.entity?.stateCode ?? null,
+  };
+  const r = deriveBefore(doc.after, meta, tables, doc.entity, doc.more);
+  return r.ok
+    ? { state: "derives", verified: r.derived.proof?.verified ?? false, carried: r.derived.proof?.residuals.length ?? 0 }
+    : { state: "refused", reason: r.reasons[0] ?? "Refused" };
+}
 
 /**
  * The refused returns, newest first. Each opens to its reasons, the
  * mismatches (what the return printed against what the tables gave), the
  * reader's notes and the cross-check warnings; from there the JSON goes
  * to a laptop for `npm run recap:replay`, or the fixture goes straight
- * into tax-recap-derive-check.mjs. Kept PDFs download until they expire.
+ * into tax-recap-derive-check.mjs. The files as uploaded download all
+ * together as one zip or one at a time, for as long as the record is kept;
+ * the redacted copies staff chose to keep, until they expire.
  */
-export default function FailureList({ failures: fromServer }: { failures: FailureSummary[] }) {
+export default function FailureList({ failures: fromServer, tables }: { failures: FailureSummary[]; tables: TableSet }) {
   const router = useRouter();
+  /** Each refusal's result when run again with today's engine. */
+  const [retried, setRetried] = useState<Record<string, Retried>>({});
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [marking, setMarking] = useState(false);
   const [open, setOpen] = useState<string | null>(fromServer[0]?.id ?? null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +104,58 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
     }
   };
 
+  /**
+   * Run every refusal in view again with the engine as it is now, one at a
+   * time so each row shows its result as it lands. Nothing is read again
+   * and nothing is saved: it says which would go through today.
+   */
+  const retryAll = async () => {
+    const list = failures;
+    if (!list.length) return;
+    setError(null);
+    setRetried({});
+    setProgress({ done: 0, total: list.length });
+    for (const [i, f] of list.entries()) {
+      setRetried((r) => ({ ...r, [f.id]: { state: "running" } }));
+      let result: Retried;
+      try {
+        const res = await fetch(`/api/portal/tax-recap/failures/${f.id}`);
+        const doc = (await res.json().catch(() => null)) as FailureDoc | null;
+        result = res.ok && doc ? replay(doc, tables) : { state: "error", message: "Couldn't load the record" };
+      } catch (e) {
+        result = { state: "error", message: e instanceof Error ? e.message : "Failed" };
+      }
+      setRetried((r) => ({ ...r, [f.id]: result }));
+      setProgress({ done: i + 1, total: list.length });
+      // Let the row paint before the next one runs.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
+
+  /** The refusals the last retry got through, marked fixed in one go. */
+  const passing = failures.filter((f) => retried[f.id]?.state === "derives" && f.status !== "fixed");
+  const markPassingFixed = async () => {
+    setMarking(true);
+    setError(null);
+    try {
+      for (const f of passing) {
+        const res = await fetch(`/api/portal/tax-recap/failures/${f.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "fixed", note: [f.note, `Goes through on engine v${DERIVE_VERSION} (retried ${new Date().toISOString().slice(0, 10)})`].filter(Boolean).join(" · ") }),
+        });
+        if (res.ok) setStatuses((s) => ({ ...s, [f.id]: "fixed" }));
+      }
+      router.refresh();
+    } finally {
+      setMarking(false);
+    }
+  };
+  const retryCounts = Object.values(retried).reduce(
+    (c, r) => ({ ...c, [r.state]: (c[r.state] ?? 0) + 1 }),
+    {} as Partial<Record<Retried["state"], number>>,
+  );
+
   /** Fetch the full record and put a recap:check fixture on the clipboard. */
   const copyFixture = async (f: FailureSummary) => {
     setBusy(f.id);
@@ -113,6 +198,44 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
         </div>
       }
     >
+      {failures.length ? (
+        <div className="border-b border-white/[0.06] px-5 py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={!!progress && progress.done < progress.total}
+              onClick={retryAll}
+              className="cursor-pointer rounded-full bg-teal px-5 py-2.5 font-display text-[14px] font-semibold text-night transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+            >
+              {progress && progress.done < progress.total
+                ? `Retrying… ${progress.done} of ${progress.total}`
+                : `Retry ${filter === "all" ? "all" : `the ${failures.length} ${filter}`} with the current engine (v${DERIVE_VERSION})`}
+            </button>
+            {progress ? (
+              <span className="font-body text-[12.5px] text-mist">
+                {retryCounts.derives ?? 0} go through now
+                {retryCounts.refused ? ` · ${retryCounts.refused} still refused` : ""}
+                {retryCounts.error ? ` · ${retryCounts.error} couldn't load` : ""}
+              </span>
+            ) : null}
+            {progress && progress.done === progress.total && passing.length ? (
+              <button type="button" disabled={marking} onClick={markPassingFixed} className={`${action} hover:border-teal hover:text-teal`}>
+                {marking ? "Marking…" : `Mark the ${passing.length} that go through as fixed`}
+              </button>
+            ) : null}
+          </div>
+          {progress ? (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="h-full rounded-full bg-teal transition-[width] duration-200" style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />
+            </div>
+          ) : (
+            <p className="mb-0 mt-2 text-[12px] leading-snug text-dusk">
+              Runs each refusal again from the numbers it recorded, with the engine as it is now — nothing is read again or saved. For one that goes
+              through, &ldquo;Open in builder&rdquo; loads its files (when they were kept) to make the recap.
+            </p>
+          )}
+        </div>
+      ) : null}
       {!failures.length ? (
         <p className="px-5 py-4 text-[13px] text-dusk">
           {fromServer.length ? "Nothing with that status." : "No refusals recorded yet — the next one the engine makes lands here on its own."}
@@ -124,6 +247,8 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
             const kept = (Object.entries(f.files) as [FailureFileKind, NonNullable<FailureSummary["files"][FailureFileKind]>][]).filter(
               ([, v]) => v && new Date(v.expiresAt).getTime() > Date.now(),
             );
+            /** The files as dropped: kept until the record is deleted. */
+            const originals = f.originals;
             return (
               <li key={f.id} className="px-5 py-4">
                 <button
@@ -136,12 +261,24 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
                     {f.taxYear ?? "year ?"} · {f.filingStatus ?? "status ?"} · {f.stateCode ?? "no state"}
                     {f.entityForm ? ` · ${f.entityForm}` : ""} · engine v{f.engineVersion || "?"}
                     {f.stage === "rederive" ? " · on recompute" : ""}
+                    {originals.length ? ` · ${originals.length} file${originals.length === 1 ? "" : "s"}` : ""}
                   </span>
                   <Chip tone={f.status === "open" ? "warn" : f.status === "fixed" ? "pos" : "mute"}>{f.status}</Chip>
+                  <RetryChip result={retried[f.id]} />
                   <span className="ml-auto font-body text-[11.5px] text-dusk">
                     {f.createdAt ? shortDate(new Date(f.createdAt)) : "—"} · {f.createdBy}
                   </span>
                 </button>
+                {retried[f.id]?.state === "refused" ? (
+                  <p className="mb-0 mt-1.5 text-[12px] leading-snug text-ember">
+                    Still refused on v{DERIVE_VERSION}: {(retried[f.id] as { reason: string }).reason}
+                  </p>
+                ) : null}
+                {retried[f.id]?.state === "derives" && originals.length ? (
+                  <a href={`/portal/tax-recap?failure=${f.id}`} className={`${action} mt-2 inline-block border-teal/40 text-teal`}>
+                    Open in builder with its {originals.length === 1 ? "file" : `${originals.length} files`}
+                  </a>
+                ) : null}
                 {!isOpen ? (
                   <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-snug text-mist">{f.reasons[0]}</p>
                 ) : (
@@ -196,6 +333,23 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
                         <p className="text-[12.5px] text-mist">{f.note}</p>
                       </Section>
                     ) : null}
+                    {originals.length ? (
+                      <Section title="Files as uploaded">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <a href={`/api/portal/tax-recap/failures/${f.id}/originals`} className={`${action} border-teal/40 text-teal`}>
+                            Download all {originals.length > 1 ? `${originals.length} ` : ""}(zip)
+                          </a>
+                          <a href={`/portal/tax-recap?failure=${f.id}`} className={action}>
+                            Open in builder
+                          </a>
+                          {originals.map((o) => (
+                            <a key={o.index} href={`/api/portal/tax-recap/failures/${f.id}/originals?index=${o.index}`} className={`${action} normal-case tracking-normal`}>
+                              {o.name} · {(o.size / (1024 * 1024)).toFixed(1)} MB
+                            </a>
+                          ))}
+                        </div>
+                      </Section>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-2">
                       <a href={`/api/portal/tax-recap/failures/${f.id}?download=1`} className={action}>
                         JSON for replay
@@ -205,10 +359,10 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
                       </button>
                       {kept.map(([kind, v]) => (
                         <a key={kind} href={`/api/portal/tax-recap/failures/${f.id}/file?kind=${kind}`} className={action}>
-                          {kind === "entity" ? (f.entityForm ?? "entity") : kind} PDF · until {shortDate(new Date(v.expiresAt))}
+                          redacted {kind === "entity" ? (f.entityForm ?? "entity") : kind} PDF · until {shortDate(new Date(v.expiresAt))}
                         </a>
                       ))}
-                      {!kept.length ? <span className="font-body text-[11.5px] text-dusk">No PDF kept</span> : null}
+                      {!kept.length && !originals.length ? <span className="font-body text-[11.5px] text-dusk">No PDF kept</span> : null}
                       <span className="mx-1 text-dusk">|</span>
                       {f.status !== "fixed" ? (
                         <button type="button" disabled={busy === f.id} onClick={() => setStatus(f, "fixed")} className={`${action} hover:border-teal hover:text-teal`}>
@@ -238,6 +392,17 @@ export default function FailureList({ failures: fromServer }: { failures: Failur
       )}
     </Panel>
   );
+}
+
+/** A row's result from "Retry": running, goes through (verified or how many lines carried), or still refused. */
+function RetryChip({ result }: { result: Retried | undefined }) {
+  if (!result) return null;
+  if (result.state === "running") return <Chip tone="mute">retrying…</Chip>;
+  if (result.state === "derives") {
+    return <Chip tone="pos">{result.verified ? "goes through · verified" : `goes through · ${result.carried} carried`}</Chip>;
+  }
+  if (result.state === "refused") return <Chip tone="warn">still refused</Chip>;
+  return <Chip tone="mute">couldn&rsquo;t load</Chip>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

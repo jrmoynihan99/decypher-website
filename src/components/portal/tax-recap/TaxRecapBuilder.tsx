@@ -326,6 +326,9 @@ const DIRECT_MAX = 3.5 * 1024 * 1024;
 /** Mirrors UPLOAD_CHUNK_BYTES / UPLOAD_MAX_BYTES in lib/tax-recap/uploads.ts. */
 const CHUNK = 750 * 1024;
 const PER_REQUEST = 4;
+/** The originals kept with a refused return (failures-store's MAX_ORIGINALS, FAILURE_FILE_MAX_BYTES). */
+const MAX_ORIGINALS = 12;
+const ORIGINAL_MAX_BYTES = 24 * 1024 * 1024;
 /**
  * The largest return accepted. A ProSeries export is 1–3 MB however long
  * the print; a scan is 15–20 MB, has no text layer to redact or cross-check
@@ -357,7 +360,11 @@ function KeepLine({
   onKeep,
   hasEntity,
 }: {
-  failure: { id: string; kept: Partial<Record<Kind, "keeping" | "kept" | "failed">> };
+  failure: {
+    id: string;
+    kept: Partial<Record<Kind, "keeping" | "kept" | "failed">>;
+    originals?: { count: number; state: "saving" | "saved" | "failed" };
+  };
   onKeep: () => void;
   hasEntity: boolean;
 }) {
@@ -365,6 +372,8 @@ function KeepLine({
   const started = states.length > 0;
   const done = started && states.every((s) => s === "kept");
   const failed = states.some((s) => s === "failed");
+  const o = failure.originals;
+  const files = o ? `the ${o.count === 1 ? "file" : `${o.count} files`} you dropped, unchanged` : null;
   return (
     <span className="flex flex-wrap items-center gap-2 text-[12px] text-dusk">
       <span>
@@ -372,15 +381,17 @@ function KeepLine({
         <Link href="/portal/tax-recap/failures" className="text-mist underline-offset-2 hover:underline">
           refused returns
         </Link>
-        ): the numbers, the reader&rsquo;s notes and the reasons — no PDF.
+        ): the numbers, the reader&rsquo;s notes, the reasons{files ? ` and ${files}` : ""}.
+        {o?.state === "saving" ? " Saving the files…" : null}
+        {o?.state === "failed" ? <span className="text-danger"> Not every file could be saved.</span> : null}
       </span>
       {!started ? (
         <button type="button" onClick={onKeep} className={btnGhost}>
-          Keep the redacted return{hasEntity ? "s" : ""} with it (14 days)
+          Keep the redacted cop{hasEntity ? "ies" : "y"} the reader saw too (14 days)
         </button>
       ) : (
         <span className={failed ? "text-danger" : done ? "text-teal" : ""}>
-          {failed ? "Couldn't keep the copy — try again later" : done ? "Kept for 14 days" : "Keeping…"}
+          {failed ? "Couldn't keep the copy — try again later" : done ? "Redacted copy kept for 14 days" : "Keeping…"}
         </span>
       )}
     </span>
@@ -390,13 +401,17 @@ function KeepLine({
 export default function TaxRecapBuilder({
   initial,
   tables,
+  fromFailure = null,
 }: {
   initial: RecapDoc | null;
   /** The year cards the engine derives with — seeds plus anything saved on the Tax Tables page. */
   tables: TableSet;
+  /** Opened from a refused return that kept its files (Refused returns → "Open in builder"): they load with one click. */
+  fromFailure?: { id: string; label: string; files: { index: number; name: string; size: number }[] } | null;
 }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>(initial ? "review" : "upload");
+  const [failureLoad, setFailureLoad] = useState<"idle" | "loading" | "loaded" | "failed">("idle");
   /** The before drop zone, shown only once a derivation was refused and staff chose a print. */
   const [showBefore, setShowBefore] = useState(false);
   /** Every line in the review grid, blank ones included — on by default when the engine asked for a line to be typed. */
@@ -487,13 +502,15 @@ export default function TaxRecapBuilder({
 
   /**
    * A refusal is recorded the moment it happens (lib/tax-recap/failures-store):
-   * what the engine was handed and what it said, no PDF. The redacted
+   * what the engine was handed and what it said, and the files staff
+   * dropped, unchanged, until the record is deleted (`keepOriginals`). The redacted
    * copies that went to the reader are held here in memory so staff can
-   * choose to keep them with the record for a fortnight.
+   * choose to keep them with the record too.
    */
   const [failure, setFailure] = useState<{
     id: string;
     kept: Partial<Record<Kind, "keeping" | "kept" | "failed">>;
+    originals?: { count: number; state: "saving" | "saved" | "failed" };
   } | null>(null);
   const preparedRef = useRef<Partial<Record<Kind, { data: Blob; name: string; pages: number }>>>({});
   const readInfoRef = useRef<Partial<Record<Kind, { warnings: string[]; total: number; sent: number }>>>({});
@@ -511,6 +528,8 @@ export default function TaxRecapBuilder({
   ) => {
     setFailure(null);
     const info = readInfoRef.current;
+    // Every file dropped for this recap, the before print too, as dropped.
+    const originals = [...new Set([...picked.map((p) => p.file), ...(sides.before.file ? [sides.before.file] : [])])];
     try {
       const res = await fetch("/api/portal/tax-recap/failures", {
         method: "POST",
@@ -535,10 +554,54 @@ export default function TaxRecapBuilder({
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string };
-      if (res.ok && data.ok && data.id) setFailure({ id: data.id, kept: {} });
+      if (res.ok && data.ok && data.id) {
+        setFailure({ id: data.id, kept: {} });
+        void keepOriginals(data.id, originals);
+      }
     } catch {
       /* recording a failure must never get in the reviewer's way */
     }
+  };
+
+  /**
+   * Send the files staff dropped to the recorded refusal, byte for byte —
+   * the PDFs as they came off the computer, not the redacted copies — so
+   * the Refused returns page hands them back as they were, for as long as
+   * the record is kept.
+   * Runs on its own; a file that won't go is said on the refusal line and
+   * never holds up the reviewer.
+   */
+  const keepOriginals = async (id: string, files: File[]) => {
+    const sendable = files.filter((f) => f.size > 0 && f.size <= ORIGINAL_MAX_BYTES).slice(0, MAX_ORIGINALS);
+    if (!sendable.length) return;
+    const mark = (state: "saving" | "saved" | "failed") =>
+      setFailure((f) => (f && f.id === id ? { ...f, originals: { count: sendable.length, state } } : f));
+    mark("saving");
+    let ok = sendable.length === files.length;
+    for (const [index, file] of sendable.entries()) {
+      try {
+        const total = Math.ceil(file.size / CHUNK);
+        for (let i = 0; i < total; i += PER_REQUEST) {
+          const part = new FormData();
+          part.append("index", String(index));
+          part.append("total", String(total));
+          part.append("size", String(file.size));
+          part.append("name", file.name);
+          for (let j = i; j < Math.min(total, i + PER_REQUEST); j++) {
+            part.append(`chunk-${j}`, file.slice(j * CHUNK, (j + 1) * CHUNK), String(j));
+          }
+          let sent = false;
+          for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+            const r = await fetch(`/api/portal/tax-recap/failures/${id}/originals`, { method: "POST", body: part }).catch(() => null);
+            sent = !!r?.ok;
+          }
+          if (!sent) throw new Error("upload failed");
+        }
+      } catch {
+        ok = false;
+      }
+    }
+    mark(ok ? "saved" : "failed");
   };
 
   /** Keep the redacted copies that went to the reader with the recorded failure. */
@@ -574,6 +637,29 @@ export default function TaxRecapBuilder({
       } catch {
         setFailure((f) => (f && f.id === id ? { ...f, kept: { ...f.kept, [kind]: "failed" } } : f));
       }
+    }
+  };
+
+  /**
+   * The files a refused return kept, fetched back as they were dropped and
+   * dropped again — the same path a drag from the desktop takes, so they're
+   * redacted and read the usual way.
+   */
+  const loadFailureFiles = async () => {
+    if (!fromFailure) return;
+    setFailureLoad("loading");
+    try {
+      const files = await Promise.all(
+        fromFailure.files.map(async (f) => {
+          const r = await fetch(`/api/portal/tax-recap/failures/${fromFailure.id}/originals?index=${f.index}`);
+          if (!r.ok) throw new Error(`couldn't fetch ${f.name}`);
+          return new File([await r.blob()], f.name, { type: "application/pdf" });
+        }),
+      );
+      addFiles(files);
+      setFailureLoad("loaded");
+    } catch {
+      setFailureLoad("failed");
     }
   };
 
@@ -1421,7 +1507,10 @@ export default function TaxRecapBuilder({
         ? "1120-S"
         : null);
   const formLabel = entityForm ?? "1120-S";
-  const scorpSavings = analysis?.scorpSavings?.amount ?? 0;
+  /** The S corporation's SE tax avoided, inside the before's total (`RecapSide.scorpSeTax`). */
+  const scorpSavings = computed.before.scorpSeTax;
+  /** What the two returns themselves show, without it. */
+  const betweenReturns = computed.savings - scorpSavings;
 
   const setCell = (
     kind: "before" | "after",
@@ -1647,13 +1736,13 @@ export default function TaxRecapBuilder({
               {money(computed.before.totalTaxes)} down to{" "}
               {money(computed.after.totalTaxes)}
               {scorpSavings > 0
-                ? `, plus ${money(scorpSavings)} of self-employment tax the S corporation avoided`
+                ? ` (the before includes ${money(scorpSavings)} of self-employment tax the S corporation avoided)`
                 : ""}
               .
             </p>
           </div>
           <div className="font-display text-[34px] font-bold leading-none tabular-nums text-teal">
-            {money(computed.savings + scorpSavings)}
+            {money(computed.savings)}
           </div>
         </div>
 
@@ -1728,6 +1817,25 @@ export default function TaxRecapBuilder({
       >
         {stage === "upload" ? (
           <>
+            {fromFailure && failureLoad !== "loaded" ? (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-teal/30 bg-teal/[0.05] px-4 py-3 text-[13px] text-mist">
+                <span>
+                  From the refused return <span className="text-fog">{fromFailure.label}</span>:{" "}
+                  {fromFailure.files.map((f) => f.name).join(", ")}
+                </span>
+                <button
+                  type="button"
+                  disabled={failureLoad === "loading"}
+                  onClick={loadFailureFiles}
+                  className={btnGhost}
+                >
+                  {failureLoad === "loading"
+                    ? "Loading…"
+                    : `Load ${fromFailure.files.length === 1 ? "the file" : `the ${fromFailure.files.length} files`}`}
+                </button>
+                {failureLoad === "failed" ? <span className="text-danger">Couldn&rsquo;t load them — try again</span> : null}
+              </div>
+            ) : null}
             <div
               className={`grid gap-4 ${showBefore ? "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : ""}`}
             >
@@ -2246,11 +2354,7 @@ export default function TaxRecapBuilder({
                 value={money(computed.after.totalTaxes)}
               />
               <Kpi
-                label={
-                  scorpSavings > 0
-                    ? "Before − after"
-                    : "Total tax savings"
-                }
+                label="Total tax savings"
                 value={money(computed.savings)}
                 tone={computed.savings >= 0 ? "pos" : "neg"}
               />
@@ -2267,19 +2371,12 @@ export default function TaxRecapBuilder({
               </Note>
             ) : null}
             {scorpSavings > 0 ? (
-              <div className="mt-3">
-                <KpiRow cols={2}>
-                  <Kpi
-                    label="S-corp: self-employment tax avoided (estimated)"
-                    value={money(scorpSavings)}
-                  />
-                  <Kpi
-                    label="Total tax savings"
-                    value={money(computed.savings + scorpSavings)}
-                    tone="pos"
-                  />
-                </KpiRow>
-              </div>
+              <Note className="!mt-2">
+                Before DeCypher includes {money(scorpSavings)} of self-employment
+                tax the S corporation avoided (estimated): what the K-1 income
+                would carry on a Schedule C. Between the two returns
+                themselves: {money(betweenReturns)}.
+              </Note>
             ) : null}
 
             <div className="mt-5 grid gap-6 md:grid-cols-2">
@@ -2311,6 +2408,13 @@ export default function TaxRecapBuilder({
                       size="sm"
                     />
                   )}
+                  {computed.breakdown.scorpSeTax > 0 ? (
+                    <LineRow
+                      label="S-corp: self-employment tax avoided (in the before)"
+                      value={money(computed.breakdown.scorpSeTax)}
+                      size="sm"
+                    />
+                  ) : null}
                   <LineRow
                     label="Federal income tax saved"
                     value={money(computed.breakdown.incomeTaxSaved)}
@@ -2399,20 +2503,28 @@ export default function TaxRecapBuilder({
                       value={a.savings}
                     />
                   ))}
+                  {analysis.scorpSavings && scorpSavings > 0 ? (
+                    <>
+                      <LineRow
+                        label="Between the two returns"
+                        value={money(betweenReturns)}
+                        size="sm"
+                        total
+                      />
+                      <StrategyRow
+                        label="S corporation: self-employment tax avoided"
+                        note={analysis.scorpSavings.note}
+                        value={scorpSavings}
+                      />
+                    </>
+                  ) : null}
                   <LineRow
-                    label={analysis.scorpSavings ? "Before − after" : "Total tax savings"}
+                    label="Total tax savings"
                     value={money(computed.savings)}
                     size="sm"
                     total
                     tone="pos"
                   />
-                  {analysis.scorpSavings ? (
-                    <StrategyRow
-                      label="S corporation: self-employment tax avoided"
-                      note={analysis.scorpSavings.note}
-                      value={analysis.scorpSavings.amount}
-                    />
-                  ) : null}
                 </div>
                 <Note className="!mt-2">
                   Computed by switching each strategy on in turn and re-running
@@ -3270,6 +3382,8 @@ function Cell({
     value: number | null;
     page: number | null;
     verified: boolean | null;
+    /** The printed amounts that add up to the value, when it isn't printed as one (verify.ts). */
+    parts?: number[];
   } | null;
   derived?: boolean;
   onChange: (raw: string) => void;
@@ -3294,10 +3408,22 @@ function Cell({
   } else if (derived) {
     tag = <span className="text-teal">derived</span>;
   } else if (extracted.verified === true) {
-    tag = <span className="text-teal">p. {extracted.page} ✓</span>;
-  } else if (extracted.verified === false) {
+    // A line that's a sum by definition: the amounts it was added from.
+    const sum = extracted.parts && extracted.parts.length > 1 ? ` = ${extracted.parts.map(money).join(" + ")}` : "";
     tag = (
-      <span className="text-ember">
+      <span className="text-teal" title={sum ? `Page ${extracted.page}: ${extracted.parts?.map(money).join(" + ")}` : undefined}>
+        p. {extracted.page} ✓{sum}
+      </span>
+    );
+  } else if (extracted.verified === false) {
+    // Not printed as one number: the amounts that add up to it, when some do.
+    const sum = extracted.parts && extracted.parts.length > 1 ? extracted.parts.map(money).join(" + ") : null;
+    tag = sum ? (
+      <span className="text-ember" title={`Not printed as one number: ${sum} on page ${extracted.page} add up to it — check that's what this line should be`}>
+        p. {extracted.page} — {sum}? check
+      </span>
+    ) : (
+      <span className="text-ember" title="Not found anywhere in the PDF's text, and no two or three amounts on the page add up to it">
         p. {extracted.page} — not found in text, check
       </span>
     );

@@ -16,6 +16,7 @@ import {
   remapEntityPages,
   remapPages,
   unbundleStatePenalty,
+  unverifiedNote,
   verifyAgainstText,
   verifyEntityAgainstText,
 } from "./verify";
@@ -520,9 +521,15 @@ function userPrompt(kind: ReadKind, hints: string | null): string {
 
 /* ─────────────────────────────── the call ───────────────────────────────── */
 
-/** What a read cost and how long it took, with the model and effort it ran at. */
+/**
+ * What a read cost and how long it took, with the model and effort it ran at.
+ * `inputTokens` is only the part billed at full price; the instructions
+ * served from the prompt cache, or written to it, are counted beside it.
+ */
 export type ReadUsage = {
   inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   model: string;
   effort: ReadEffort;
@@ -586,7 +593,12 @@ async function readPdf(
       // Thinking counts against this, so there's room for a "high" read.
       max_tokens: 32000,
       ...(setting.thinking ? { thinking: setting.thinking } : {}),
-      system,
+      // Each reader's instructions are the same on every read, so they're
+      // cached: a read starting within five minutes of the last one of its
+      // kind pays a tenth for them. The marker stops before the PDF — each
+      // return is read once, and caching it would add a quarter to the
+      // biggest part of every read for a hit that never comes.
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
         {
           role: "user",
@@ -662,6 +674,8 @@ async function readPdf(
     parsed: toFieldShape(parsed),
     usage: {
       inputTokens: message.usage.input_tokens,
+      cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0,
       outputTokens: message.usage.output_tokens,
       model,
       effort,
@@ -669,6 +683,10 @@ async function readPdf(
     },
   };
 }
+
+/** A read's tokens for the log: full-price input, the cache's share of it, output. */
+const tokensLogged = (u: ReadUsage) =>
+  `${u.inputTokens} in + ${u.cacheReadTokens} cached + ${u.cacheWriteTokens} cache-written / ${u.outputTokens} out`;
 
 const noTextWarning = (pageTexts: string[] | null) =>
   pageTexts
@@ -698,11 +716,13 @@ export async function extractReturn(
 
   const warnings: string[] = [...unbundled.notes];
   const labelOf = (k: string) => RETURN_FIELDS.find((f) => f.key === k)?.label ?? k;
-  if (unverified.length) {
-    warnings.push(`Couldn't find these numbers in the PDF text, check them by hand: ${unverified.map(labelOf).join(", ")}`);
-  }
+  // One note per line the text check couldn't find printed, with the amounts
+  // that add up to it when some do (read off the remapped fields, so the
+  // page is the return's own).
+  for (const k of unverified) warnings.push(unverifiedNote(labelOf(k), extract.fields[k]));
   for (const o of unverifiedOther) {
-    warnings.push(`Couldn't find these numbers on the ${o.stateCode} return, check them by hand: ${o.keys.map(labelOf).join(", ")}`);
+    const fields = extract.otherStates?.find((s) => s.stateCode === o.stateCode)?.fields;
+    for (const k of o.keys) if (fields) warnings.push(unverifiedNote(`${o.stateCode} return: ${labelOf(k)}`, fields[k]));
   }
   if (extract.otherStates?.length) {
     warnings.push(
@@ -714,7 +734,7 @@ export async function extractReturn(
 
   console.log(
     `[tax-recap] read ${kind} return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
-      `${pageTexts?.length ?? "?"} pages sent, ${usage.inputTokens} in / ${usage.outputTokens} out, ${unverified.length} unverified`,
+      `${pageTexts?.length ?? "?"} pages sent, ${tokensLogged(usage)}, ${unverified.length} unverified`,
   );
 
   return { extract, warnings, usage };
@@ -745,16 +765,15 @@ export async function extractEntityReturn(
 
   const warnings: string[] = [];
   const formName = kind === "city" ? (extract.stateForm ?? "city return") : (extract.returnForm ?? "entity return");
-  if (unverified.length) {
-    const labels = unverified.map((k) => ENTITY_FIELDS.find((f) => f.key === k)?.label ?? k);
-    warnings.push(`Couldn't find these numbers in the ${formName} text, check them by hand: ${labels.join(", ")}`);
+  for (const k of unverified) {
+    warnings.push(unverifiedNote(`${formName}: ${ENTITY_FIELDS.find((f) => f.key === k)?.label ?? k}`, extract.fields[k]));
   }
   if (noText) warnings.push(noTextWarning(pageTexts));
   if (extract.notes) warnings.push(`Reader notes (${formName}): ${extract.notes}`);
 
   console.log(
     `[tax-recap] read ${kind} return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
-      `${pageTexts?.length ?? "?"} pages sent, ${usage.inputTokens} in / ${usage.outputTokens} out, ${unverified.length} unverified`,
+      `${pageTexts?.length ?? "?"} pages sent, ${tokensLogged(usage)}, ${unverified.length} unverified`,
   );
 
   return { extract, warnings, usage };

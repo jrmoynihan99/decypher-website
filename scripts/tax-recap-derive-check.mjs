@@ -21,7 +21,14 @@ import { computeRecap } from "../src/lib/tax-recap/compute.ts";
 import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers } from "../src/lib/tax-recap/schema.ts";
 import { cardFor, validateYearCard } from "../src/lib/tax-recap/tables.ts";
 
-const numbers = (v) => ({ ...emptyNumbers(), ...v });
+/**
+ * The S corporation's SE tax avoided: on the recap it sits in the before
+ * (compute.ts `RecapSide.scorpSeTax`), so the headline is the strategy
+ * split plus it, and the before less the after with it in.
+ */
+const scorpOf = (analysis) => Math.max(0, Math.round(analysis?.scorpSavings?.amount ?? 0));
+
+const numbers =(v) => ({ ...emptyNumbers(), ...v });
 const entityNumbers = (v) => ({ ...emptyEntityNumbers(), ...v });
 
 /* ── Client A 2025, single, CA Form 540 ─────────────────────────────
@@ -1193,7 +1200,7 @@ for (const p of PAIRINGS) {
       analysis,
     }).savings;
     const sum = analysis.attribution.reduce((s, a) => s + a.savings, 0);
-    const sumOk = sum === headline && headline === savings + (analysis.kids?.inBefore ? analysis.kids.before : 0);
+    const sumOk = sum + scorpOf(analysis) === headline && headline === savings + (analysis.kids?.inBefore ? analysis.kids.before : 0) + scorpOf(analysis);
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
     for (const a of analysis.attribution) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
@@ -1635,7 +1642,7 @@ for (const p of PAIRINGS) {
     // federal credit has phased out).
     const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
-    const sumOk = sum === headline && headline === 197100;
+    const sumOk = sum + scorpOf(analysis) === headline && headline - scorpOf(analysis) === 197100;
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}, by hand $197,100):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}  ${a.note}`);
@@ -1786,7 +1793,7 @@ for (const p of PAIRINGS) {
     const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
     // Two dependents, but the child tax credit has phased out on both sides and a joint return has no status riding on them.
-    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    const sumOk = sum + scorpOf(analysis) === headline && headline === savings + scorpOf(analysis) && analysis?.kids === null;
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}, no kids line):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
@@ -1906,7 +1913,7 @@ let CLIENT_J = null;
     const analysis = attributeStrategies(after, meta, undefined, entity);
     const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
-    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    const sumOk = sum + scorpOf(analysis) === headline && headline === savings + scorpOf(analysis) && analysis?.kids === null;
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
@@ -2022,7 +2029,7 @@ let CLIENT_J = null;
     const analysis = attributeStrategies(after, meta, undefined, entity);
     const headline = computeRecap({ before: r.before, after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: entity, analysis }).savings;
     const sum = analysis ? analysis.attribution.reduce((s, a) => s + a.savings, 0) : NaN;
-    const sumOk = sum === headline && headline === savings && analysis?.kids === null;
+    const sumOk = sum + scorpOf(analysis) === headline && headline === savings + scorpOf(analysis) && analysis?.kids === null;
     if (!sumOk) failed++;
     console.log(`  by strategy (${sumOk ? "adds up" : "DOES NOT ADD UP"} to ${money(headline)}):`);
     for (const a of analysis?.attribution ?? []) console.log(`   - ${a.label.padEnd(44)} ${money(a.savings).padStart(10)}`);
@@ -2393,6 +2400,76 @@ console.log("\nThe carried lines figured (engine v14)");
     "a part-year schedule on the resident form (South Carolina's Schedule NR) is prorated",
     resident.ok && partYear.ok && partYear.before.stateSourceIncome === 120000 && partYear.derived.notes.some((s) => /part-year or nonresident schedule/.test(s)) && partYear.before.stateTotalTax < resident.before.stateTotalTax,
     partYear.ok && resident.ok ? `SC before ${partYear.before.stateTotalTax} prorated, ${resident.before.stateTotalTax} as a resident` : [...(resident.ok ? [] : resident.reasons), ...(partYear.ok ? [] : partYear.reasons)].join(" / "),
+  );
+}
+
+{
+  // The recap's before carries the S corporation's SE tax avoided on its
+  // own row (2026-10-22: a before of $79,713 and an after of $26,827 beside
+  // $69,741 of savings — the $16,855 was added to the savings alone). The
+  // before less the after is now the headline; the split plus the S-corp
+  // line is too; and a recap without an S corporation is untouched.
+  const d = PAIRINGS.find((p) => p.name.startsWith("Client D"));
+  const r = deriveBefore(d.after, d.meta, undefined, d.entity);
+  const analysis = attributeStrategies(d.after, d.meta, undefined, d.entity);
+  const plain = computeRecap({ before: r.before, after: d.after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: d.entity });
+  const c = computeRecap({ before: r.before, after: d.after, priorYearIncome: null, entityBefore: r.entityBefore, entityAfter: d.entity, analysis });
+  const split = analysis.attribution.reduce((s, a) => s + a.savings, 0);
+  const scorp = scorpOf(analysis);
+  check(
+    "the S corporation's SE tax avoided is in the before: before − after is the headline",
+    scorp > 0 &&
+      c.before.scorpSeTax === scorp &&
+      c.after.scorpSeTax === 0 &&
+      c.before.totalTaxes - c.after.totalTaxes === c.savings &&
+      c.savings === split + scorp &&
+      plain.before.scorpSeTax === 0 &&
+      plain.savings + scorp + (c.breakdown.kids ?? 0) === c.savings,
+    `before ${c.before.totalTaxes} (${scorp} of it the S-corp line) − after ${c.after.totalTaxes} = ${c.savings}; split ${split} + ${scorp}`,
+  );
+}
+
+{
+  // The text check's review note spells out a sum (2026-10-22): a line the
+  // reader added up from printed amounts says which ones, on which page.
+  const { verifyFields, unverifiedNote } = await import("../src/lib/tax-recap/verify.ts");
+  // (Over 200 characters in all: less is taken for a scan with no text to check.)
+  const pages = [
+    "Form IT-201 page 4 Payments and refundable credits. 72 New York State tax withheld 1,500. 73 City withheld 665. 74 Yonkers withheld 310. 76 Total payments 9,000. Enter the amount from line 76 on line 77.",
+    "Form 7206 Self-Employed Health Insurance Deduction line 1 4,145. Form 7206 (spouse) line 1 4,145. Other 23 18 2,999.",
+  ];
+  const field = (value, page) => ({ value, page, verified: null });
+  const r = verifyFields(
+    {
+      // printed as is: page 1's total
+      statePayments: field(9000, 1),
+      // the reader added lines 72 + 73 + 74 on page 1
+      stateWithholding: field(1500 + 665 + 310, 1),
+      // a sum field (two partners' 7206): passes, with its parts
+      sehiPaid: field(8290, 2),
+      // read from nowhere
+      stateTotalTax: field(9876, 1),
+      // two amounts on page 1: explained, still flagged
+      stateRefund: field(1500 + 665, 1),
+      // only line numbers add up to it (72 + 74): not offered as an explanation
+      stateAmountOwed: field(146, 1),
+    },
+    ["statePayments", "stateWithholding", "sehiPaid", "stateTotalTax", "stateRefund", "stateAmountOwed"],
+    pages,
+  );
+  const f = r.fields;
+  const notes = r.unverified.map((k) => unverifiedNote(k, f[k]));
+  check(
+    "the text check names the amounts that add up to a line",
+    f.statePayments.verified === true &&
+      f.sehiPaid.verified === true && f.sehiPaid.parts?.join() === "4145,4145" &&
+      f.stateWithholding.verified === false && f.stateWithholding.parts?.join() === "1500,665,310" &&
+      f.stateRefund.verified === false && f.stateRefund.parts?.join() === "1500,665" &&
+      notes.some((s) => s === "stateWithholding $2,475: not printed as one number — $1,500 + $665 + $310 on page 1 add up to it. Check that's what this line should be") &&
+      f.stateTotalTax.verified === false && !f.stateTotalTax.parts &&
+      notes.some((s) => /stateTotalTax \$9,876: not found anywhere/.test(s)) &&
+      f.stateAmountOwed.verified === false && !f.stateAmountOwed.parts,
+    notes.join(" | "),
   );
 }
 

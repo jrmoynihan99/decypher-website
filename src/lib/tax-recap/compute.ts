@@ -56,6 +56,13 @@ export type RecapSide = {
   /** One figure per entity return: the first entity's, then each other entity's. Adds up to `entityTaxes`. */
   entityRows: number[];
   penalties: number;
+  /**
+   * The before only: the self-employment tax the K-1 income would carry
+   * without the S corporation (the engine's `scorpSavings` estimate) — what
+   * the client would have paid as a sole proprietor. 0 on the after, and on
+   * a recap without an S corporation. Inside `totalTaxes`.
+   */
+  scorpSeTax: number;
   totalTaxes: number;
 };
 
@@ -121,6 +128,7 @@ export function sideSummary(r: ReturnNumbers, e: EntityNumbers | null = null, mo
     stateRows,
     entityRows,
     penalties,
+    scorpSeTax: 0,
     totalTaxes: federal + state + entity + penalties,
   };
 }
@@ -160,6 +168,8 @@ export type RecapComputed = {
   breakdown: {
     /** What the dependents the before doesn't claim add to it; 0 when it claims them. */
     kids: number;
+    /** The S corporation's self-employment tax avoided, on the before (`RecapSide.scorpSeTax`). */
+    scorpSeTax: number;
     deductionsFound: number;
     seTaxSaved: number;
     incomeTaxSaved: number;
@@ -253,7 +263,7 @@ export function computeRecap(
   const kids = input.analysis?.kids?.inBefore ?? null;
   const mainState = input.stateCode ?? null;
   const asFiled = sideSummary(input.before, eb, { states: otherStates.map((s) => s.before), entities: otherEntities.map((x) => x.before), mainState });
-  const before: RecapSide = kids
+  const withKids: RecapSide = kids
     ? {
         ...asFiled,
         federalTaxes: asFiled.federalTaxes + kids.federal,
@@ -262,6 +272,14 @@ export function computeRecap(
         totalTaxes: asFiled.totalTaxes + kids.federal + kids.state,
       }
     : asFiled;
+  // Both returns are S corporation returns, so the self-employment tax the
+  // structure avoids is in neither; the before is what the year would have
+  // cost without DeCypher, so it carries it on its own row (the site owner's
+  // call, 2026-10-22: a before and an after that didn't add up to the
+  // savings beside them made the recap's math look wrong). The before less
+  // the after is then the whole saving, S corporation included.
+  const scorpSe = Math.max(0, Math.round(input.analysis?.scorpSavings?.amount ?? 0));
+  const before: RecapSide = scorpSe > 0 ? { ...withKids, scorpSeTax: scorpSe, totalTaxes: withKids.totalTaxes + scorpSe } : withKids;
   const after = sideSummary(input.after, ea, { states: otherStates.map((s) => s.after), entities: otherEntities.map((x) => x.after), mainState });
   const a = input.after;
   const b = input.before;
@@ -348,7 +366,8 @@ export function computeRecap(
     after,
     savings: before.totalTaxes - after.totalTaxes,
     breakdown: {
-      kids: before.totalTaxes - asFiled.totalTaxes,
+      kids: withKids.totalTaxes - asFiled.totalTaxes,
+      scorpSeTax: before.scorpSeTax,
       deductionsFound: before.businessNetIncome - after.businessNetIncome,
       seTaxSaved: n(b.seTax) - n(a.seTax),
       incomeTaxSaved: n(b.incomeTax) - n(a.incomeTax),

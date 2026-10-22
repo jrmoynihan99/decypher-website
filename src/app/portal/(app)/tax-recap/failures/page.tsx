@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requirePermission } from "@/lib/firebase/session";
 import { KEEP_DAYS, listFailures } from "@/lib/tax-recap/failures-store";
+import { loadTables } from "@/lib/tax-recap/tables-store";
 import { Eyebrow } from "@/components/estimator/fields";
 import FailureList from "@/components/portal/tax-recap/FailureList";
 
@@ -12,7 +13,8 @@ export const metadata = { title: "Tax Recap failures — DeCypher Portal" };
  */
 export default async function TaxRecapFailuresPage() {
   await requirePermission("receipts");
-  const failures = await listFailures();
+  // The tables the builder derives with, so "Retry" runs the engine as the builder would.
+  const [failures, tables] = await Promise.all([listFailures(), loadTables()]);
 
   return (
     <>
@@ -33,12 +35,14 @@ export default async function TaxRecapFailuresPage() {
         recorded here: the numbers as read, the reader&rsquo;s notes, the cross-check warnings
         and the reasons. That is enough to replay the refusal on a laptop (
         <code className="font-mono text-[12px] text-mist">npm run recap:replay</code>) and turn
-        it into a test, with no PDF. The redacted returns are kept only when someone pressed
-        &ldquo;keep the returns&rdquo; on the refusal, and for {KEEP_DAYS} days.
+        it into a test. The files dropped for a refusal are kept with it as they were uploaded
+        (from 2026-10-22 on) until the refusal is deleted; the redacted copies the reader saw,
+        when someone pressed &ldquo;keep&rdquo;, for {`${KEEP_DAYS} days`}. &ldquo;Retry&rdquo; runs
+        every refusal again with the engine as it is now.
       </p>
 
       <div className="mt-9">
-        <FailureList failures={failures} />
+        <FailureList failures={failures} tables={tables} />
       </div>
     </>
   );
