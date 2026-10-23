@@ -2105,7 +2105,7 @@ export default function TaxRecapBuilder({
               </Field>
               <Field
                 label="Prior-year income"
-                hint="Optional. From last year's return — not in these PDFs"
+                hint="Optional. Last year's income from every source (business receipts, W-2s, interest, gains), the way this year's is figured — not in these PDFs"
               >
                 <NumInput
                   value={priorYearIncome}

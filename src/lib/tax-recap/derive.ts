@@ -109,7 +109,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "14";
+export const DERIVE_VERSION = "15";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -553,6 +553,8 @@ type Federal = {
   seTax: number;
   /** Each person's Schedule SE tax (taxpayer, spouse): Social Security and Medicare paid as self-employment tax, which Massachusetts' wage deduction counts. */
   seTaxByPerson: [number, number];
+  /** Each person's Schedule SE net earnings (line 6): what they've used of the wage base and the additional Medicare threshold. */
+  seEarningsByPerson: [number, number];
   halfSe: number;
   /** Form 7206 line 14 → Schedule 1 line 17. */
   sehi: number;
@@ -845,7 +847,11 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
   const seTax = units.reduce((s, u) => s + u.tax, 0);
   const halfSe = units.reduce((s, u) => s + u.half, 0);
   const seTaxByPerson: [number, number] = [0, 0];
-  for (const u of units) seTaxByPerson[u.person] += u.tax;
+  const seEarningsByPerson: [number, number] = [0, 0];
+  for (const u of units) {
+    seTaxByPerson[u.person] += u.tax;
+    seEarningsByPerson[u.person] += u.earnings;
+  }
 
   // Form 7206: the premiums, capped at the business's profit less the SE
   // and retirement plan deductions — or, for a more-than-2% S corporation
@@ -1034,6 +1040,7 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
     seEarnings,
     seTax,
     seTaxByPerson,
+    seEarningsByPerson,
     halfSe,
     sehi,
     additionalMedicare,
@@ -1686,6 +1693,8 @@ type Model = {
     schCogs: number;
     /** Schedule C line 31 on the after: the side business beside an S corporation (0 when there is none; a sole proprietor's is `expenses` and co.). */
     schCNet: number;
+    /** Whose Schedule C it is (0 the taxpayer, 1 the spouse), as the SE tax as printed settled it. */
+    schCOwner: 0 | 1;
     /** A Schedule C with no expenses beside the corporation: a payroll cleanup, the owners' pay run through it — and whether it's the officer's pay or pay among the write-offs. */
     payrollSchC: { amount: number; asSalary: boolean } | null;
     /** Line 31: paid with an extension, excess Social Security withheld — payments, not credits. */
@@ -4206,6 +4215,7 @@ function buildModel(
         stateWithholding: stateWithholding.officer + stateWithholding.employee,
         schCogs,
         schCNet: shape !== "soleProp" ? netAfter : 0,
+        schCOwner: base.schCOwner,
         payrollSchC: payrollSchC ? { amount: netAfter, asSalary: payrollAsSalary } : null,
         otherPayments,
         preferential,
@@ -5325,25 +5335,72 @@ export function attributeStrategies(
   }
 
   // The SE tax the K-1 income would carry on a Schedule C — Schedule SE
-  // with the whole wage base (a sole proprietor has no W-2) plus the
-  // additional Medicare tax over the threshold. Gross of the payroll tax the
-  // corporation paid on the salary: as a sole proprietor that pay would have
-  // been profit under SE tax too, so this understates rather than overstates.
+  // plus the additional Medicare tax over the threshold — on top of what the
+  // year has without the S corporation: another business's self-employment
+  // earnings (a Schedule C or a partnership share beside it) and other
+  // employers' wages use up the Social Security wage base and the threshold
+  // first (engine v15; before, a Schedule C past the wage base had the K-1
+  // charged Social Security a second time). The owner's own pay from the
+  // corporation doesn't, on a W-2 or a payroll cleanup's Schedule C: as a
+  // sole proprietor that pay would have been profit under SE tax too, so
+  // this understates rather than overstates.
   let scorpSavings: RecapAnalysis["scorpSavings"] = null;
   if (m.shape === "scorp") {
     const k1 = n(after.scorpIncome);
     const se = m.card.federal.selfEmployment;
     const am = m.card.federal.additionalMedicare;
+    const owner = facts.wages.officer;
+    const cleanup = facts.payrollSchC ? Math.round(Math.max(0, facts.payrollSchC.amount) * se.netEarningsFactor) : 0;
+    const otherSe = m.after.fed.seEarningsByPerson.map((v, k) => Math.max(0, v - (k === facts.schCOwner ? cleanup : 0)));
+    // On a joint return whose W-2 lines weren't read, line 1z doesn't say
+    // whose the other employer's wages are, and here it matters. The owner
+    // with two W-2s over the wage base has Social Security withheld twice,
+    // and the return claims the excess back (Schedule 3 line 11, inside
+    // lines 31 and 32): the wages are the owner's only when it does. Short
+    // of that they're the spouse's, the usual case (Client N: $178,897 that
+    // as the owner's would have meant $2,653 back, against $177 on line 32).
+    const outsideAll = facts.wages.outside[0] + facts.wages.outside[1];
+    const joint = m.status === "mfj" || m.status === "qss";
+    const guessed = joint && !facts.wages.read && outsideAll > 0;
+    const ssRate = se.socialSecurityRate / 2;
+    const excessIfOwner = Math.round(Math.max(0, facts.wages.officerBox1 + outsideAll - se.wageBase) * ssRate);
+    const claimed = has(after.otherPayments) ? after.otherPayments : n(after.federalRefundableCredits);
+    const ownerOutside = !guessed ? facts.wages.outside[owner] : excessIfOwner > 0 && claimed + TOL >= excessIfOwner ? outsideAll : 0;
+    const usedBase = Math.min(se.wageBase, ownerOutside + otherSe[owner]);
+    const floor = Math.max(0, am.threshold[m.status] - facts.wages.outside[0] - facts.wages.outside[1] - otherSe[0] - otherSe[1]);
     const earnings = Math.round(k1 * se.netEarningsFactor);
     const seTax =
       earnings >= 400
-        ? Math.round(Math.min(earnings, se.wageBase) * se.socialSecurityRate) + Math.round(earnings * se.medicareRate)
+        ? Math.round(Math.min(earnings, se.wageBase - usedBase) * se.socialSecurityRate) + Math.round(earnings * se.medicareRate)
         : 0;
-    const extra = Math.round(Math.max(0, earnings - am.threshold[m.status]) * am.rate);
+    const extra = Math.round(Math.max(0, earnings - floor) * am.rate);
+    const from = [
+      m.kinds.schC && !facts.payrollSchC ? "the Schedule C" : "",
+      m.kinds.partnership ? "the partnership" : "",
+    ].filter(Boolean).join(" and ");
+    const used = [
+      otherSe[owner] > 0 ? `${fmt(otherSe[owner])} of self-employment earnings from ${from || "another business"} beside it` : "",
+      ownerOutside > 0 ? `${fmt(ownerOutside)} of W-2 wages from another employer` : "",
+    ].filter(Boolean).join(" and ");
+    const stacked =
+      usedBase <= 0 || earnings < 400
+        ? ""
+        : usedBase >= se.wageBase
+          ? `, on top of ${used}, which already reach the ${fmt(se.wageBase)} Social Security wage base, so only the Medicare part applies`
+          : `, on top of ${used}, which use ${fmt(usedBase)} of the ${fmt(se.wageBase)} Social Security wage base`;
     scorpSavings = {
       amount: seTax + extra,
-      note: `Estimated: the Schedule SE tax${extra > 0 ? " and additional Medicare tax" : ""} that ${fmt(k1)} of ordinary income would carry as self-employment earnings on a Schedule C. As K-1 income from the S corporation it carries none`,
+      note: `Estimated: the Schedule SE tax${extra > 0 ? " and additional Medicare tax" : ""} that ${fmt(k1)} of ordinary income would carry as self-employment earnings on a Schedule C${stacked}. As K-1 income from the S corporation it carries none`,
     };
+    if (guessed && earnings >= 400) {
+      notes.push(
+        ownerOutside > 0
+          ? `The S corporation line takes the ${fmt(outsideAll)} of W-2 wages from another employer as the owner's: with the owner's pay they cross the ${fmt(se.wageBase)} Social Security wage base, and the return claims the ${fmt(excessIfOwner)} of excess Social Security withheld that gives`
+          : excessIfOwner > 0
+            ? `The S corporation line takes the ${fmt(outsideAll)} of W-2 wages from another employer as the spouse's: as the owner's, with the owner's pay, they'd cross the ${fmt(se.wageBase)} Social Security wage base and the return would claim ${fmt(excessIfOwner)} of excess Social Security withheld, but it claims ${fmt(claimed)}`
+            : `The S corporation line takes the ${fmt(outsideAll)} of W-2 wages from another employer as the spouse's (the W-2 lines weren't read and nothing on the return says otherwise); if they're the owner's, type the W-2 lines (taxpayer's and spouse's) in the after column and recompute — the line goes down`,
+      );
+    }
   }
 
   if (kids.note) notes.push(kids.note);

@@ -20,9 +20,12 @@
  *    PTE tax the corporation pays) is its own row, "State S-corp tax &
  *    PTET", on top of the shareholder's state tax — the Canva recaps carry
  *    it that way. Business net income is the K-1 for such a client.
- *  - "This year's income" is what the business took in: gross receipts,
- *    plus W-2 wages for a sole proprietor (an S corporation's owner is paid
- *    out of those receipts).
+ *  - "This year's income" is every income source on the return: the before's
+ *    total income (line 9), so every business at its gross receipts (the
+ *    before zeroes the expenses), W-2s from other employers, interest,
+ *    dividends, gains and rents. The owner's pay from their own S
+ *    corporation is counted once, inside its receipts (the tax team's call,
+ *    2026-10-23).
  * On the filing page, Owed = what's due now + what was already paid: the
  * whole year's bill including any penalty, which is how the recaps show it.
  */
@@ -189,6 +192,7 @@ export type RecapComputed = {
     /** Sum of the `due` figures — the "Total" box on the filing page. */
     total: number;
   };
+  /** The recap's "<year> income": every income source, the before's total income (`before.grossIncome`). */
   currentYearIncome: number;
   /** What the business took in: Schedule C line 1, or the entity returns' line 1a. */
   receipts: number;
@@ -325,13 +329,15 @@ export function computeRecap(
   });
 
   // What the businesses took in: each entity's receipts, and the Schedule
-  // C's beside a partnership (a sole proprietor's own business next to the
-  // K-1). The Schedule C beside an S corporation is left out, as it always
-  // was: it can be the owner's make-up payroll, which the corporation's
-  // receipts already count.
+  // C's beside them (a sole proprietor's own business next to the K-1, or
+  // the months before an S election). Beside an S corporation, a Schedule
+  // C with nothing deducted is left out: that's the owner's make-up payroll
+  // (the engine's payroll cleanup), which the corporation's receipts
+  // already count.
   const entityReceipts = (after?: EntityNumbers | null, before?: EntityNumbers | null) =>
     has(after?.grossReceipts) ? (after?.grossReceipts as number) : has(before?.grossReceipts) ? (before?.grossReceipts as number) : null;
   const schCReceipts = has(a.grossReceipts) ? a.grossReceipts : has(b.grossReceipts) ? b.grossReceipts : null;
+  const schCPayroll = schCReceipts !== null && Math.abs(n(a.businessNetIncome) - schCReceipts) <= 2;
   // A Schedule C netting to $0 beside a K-1 only passes the entity's income through.
   const schCOwn = n(a.businessNetIncome) !== 0 || n(b.businessNetIncome) !== 0;
   const anyScorp =
@@ -342,7 +348,7 @@ export function computeRecap(
   else {
     const parts = [entityReceipts(ea, eb), ...otherEntities.map((x) => entityReceipts(x.after, x.before))];
     if (!otherEntities.length && parts[0] === null) receipts = before.businessNetIncome;
-    else receipts = parts.reduce<number>((s, v) => s + n(v), 0) + (anyScorp || !schCOwn ? 0 : n(schCReceipts));
+    else receipts = parts.reduce<number>((s, v) => s + n(v), 0) + (!schCOwn || (anyScorp && schCPayroll) ? 0 : n(schCReceipts));
   }
 
   // The first entity's row shows whenever the client's business runs through
@@ -388,7 +394,10 @@ export function computeRecap(
         otherStateFiling.reduce((s, l) => s + l.due, 0) +
         otherEntityFiling.reduce((s, l) => s + l.due, 0),
     },
-    currentYearIncome: receipts + (scorp ? 0 : n(a.w2Income ?? b.w2Income)),
+    // Not `receipts`: that left out a Schedule C beside an S corporation (a
+    // real business when the election came mid-year), other employers'
+    // W-2s and investment income, so the before's taxes could outrun it.
+    currentYearIncome: before.grossIncome,
     receipts,
     priorYearIncome: input.priorYearIncome,
     scorp,
