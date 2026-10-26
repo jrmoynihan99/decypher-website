@@ -345,13 +345,14 @@ const PER_REQUEST = 4;
 const MAX_ORIGINALS = 12;
 const ORIGINAL_MAX_BYTES = 24 * 1024 * 1024;
 /**
- * The largest return accepted. A ProSeries export is 1–3 MB however long
- * the print; a scan is 15–20 MB, has no text layer to redact or cross-check
- * by, and takes minutes to read. The cap is the line between the two, so
- * every return that gets in can be redacted before it leaves.
+ * The largest return accepted. A ProSeries export is usually 1–3 MB, but
+ * one with attachments can run much bigger. Size isn't what keeps scans
+ * out: a scan has no text layer to redact by and `redactionBlock` refuses
+ * it whatever it weighs. What leaves is a re-rendered copy of the kept
+ * pages, so the original's size doesn't reach the server's caps.
  */
-const FILE_MAX = 6 * 1024 * 1024;
-const FILE_MAX_LABEL = "6 MB";
+const FILE_MAX = 20 * 1024 * 1024;
+const FILE_MAX_LABEL = "20 MB";
 
 const kindLabel = (k: ReturnKind | null, form: EntityForm | null = null) =>
   k === "entity"

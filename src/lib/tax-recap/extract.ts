@@ -112,7 +112,7 @@ export function readThinking(
 
 /**
  * Raw-byte cap on a PDF handed to the model. The builder only accepts
- * exports up to 6MB and sends a redacted, images-only copy of the kept
+ * exports up to 20MB and sends a redacted, images-only copy of the kept
  * pages, which runs 2-4MB however big the original; anything over
  * DIRECT_UPLOAD_MAX_BYTES reaches here through the chunked upload
  * (lib/tax-recap/uploads.ts) rather than one request body. Scans are turned
