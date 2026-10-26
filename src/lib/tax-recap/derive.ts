@@ -81,6 +81,7 @@ import { sideSummary, totalTaxesOf } from "./compute";
 import {
   ENTITY_FIELDS,
   RETURN_FIELDS,
+  SCHEDULE_1_ADJUSTMENTS,
   SCH_C_LINE_KEYS,
   emptyEntityNumbers,
   emptyNumbers,
@@ -109,7 +110,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "15";
+export const DERIVE_VERSION = "16";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -190,6 +191,22 @@ const has = (v: number | null | undefined): v is number =>
 const n = (v: number | null | undefined) => (has(v) ? v : 0);
 /** Forms round to the dollar, so identities hold within $2 (same as compute.ts). */
 const TOL = 2;
+
+/**
+ * The Schedule 1 Part II lines kept on the before as filed, with what the
+ * notes call them. They're inside `carried` (line 10 less the lines the
+ * engine figures or switches off); read line by line, they name it.
+ */
+const KEPT_ADJUSTMENTS: { key: ReturnFieldKey; name: string }[] = [
+  { key: "educatorExpenses", name: "educator expenses" },
+  { key: "form2106Expenses", name: "Form 2106 business expenses" },
+  { key: "movingExpenses", name: "Armed Forces moving expenses" },
+  { key: "earlyWithdrawalPenalty", name: "the early withdrawal penalty" },
+  { key: "alimonyPaid", name: "alimony paid" },
+  { key: "studentLoanInterest", name: "student loan interest" },
+  { key: "archerMsaDeduction", name: "the Archer MSA deduction" },
+  { key: "otherAdjustments", name: "other adjustments (lines 24a–24z)" },
+];
 const off = (x: number, y: number) => Math.abs(x - y) > TOL;
 const fmt = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
 const label = (k: ReturnFieldKey) => RETURN_FIELDS.find((f) => f.key === k)?.label ?? k;
@@ -1726,6 +1743,8 @@ type Model = {
     sep: number;
     ira: number;
     hsa: number;
+    /** The rest of Schedule 1 Part II as read, line by line (student loan interest and the like): inside `carried`, kept on the before. */
+    keptAdjustments: { name: string; line: string; amount: number }[];
     /** Dependents on the return: the count read, or the qualifying children and other dependents the credit on line 19 implies when that's more. */
     dependents: number;
     /** Schedule 3 line 2 as read. */
@@ -4236,6 +4255,9 @@ function buildModel(
         sep,
         ira,
         hsa,
+        keptAdjustments: KEPT_ADJUSTMENTS.flatMap(({ key, name }) =>
+          n(after[key]) > 0 ? [{ name, line: SCHEDULE_1_ADJUSTMENTS.find((a) => a.key === key)?.line ?? "", amount: n(after[key]) }] : [],
+        ),
         claimedAsDependent,
         city: (() => {
           const u = scorpUnits.find((x) => x.cityIn && x.cityRules);
@@ -4428,6 +4450,9 @@ function fillNumbers(
   out.sepDeduction = fi.sep > 0 ? fi.sep : null;
   out.iraDeduction = s.retirement ? after.iraDeduction : null;
   out.hsaDeduction = s.retirement ? after.hsaDeduction : null;
+  // The rest of Schedule 1 Part II: line 15 is this run's own, the others as filed.
+  out.seTaxDeduction = b.halfSe > 0 ? b.halfSe : null;
+  for (const { key } of KEPT_ADJUSTMENTS) out[key] = after[key];
   // Schedule A travels with the return; the before's total is re-figured
   // at its income, and the standard deduction wins when it's larger.
   if (fi.itemized) {
@@ -4943,12 +4968,21 @@ export function deriveBefore(
   }
   {
     // What's left of the "other" adjustments once the IRA and HSA come out:
-    // student loan interest, educator expenses and the like stay as filed.
+    // student loan interest, educator expenses and the like stay as filed,
+    // each named by its line. Whatever no line accounts for is said as
+    // that, never guessed at: a $70,000 SEP the reader skipped was once
+    // called "student loan interest, educator expenses or similar" here.
     const kept = Math.max(0, facts.carried - facts.ira - facts.hsa);
     if (kept > 0) {
+      const named = facts.keptAdjustments;
+      const unplaced = kept - named.reduce((s, a) => s + a.amount, 0);
+      const parts = named.map((a) => `${a.name} ${fmt(a.amount)} (Schedule 1 line ${a.line})`);
+      if (unplaced > TOL) parts.push(`${fmt(unplaced)} not placed on any Schedule 1 line`);
       notes.push(
-        `Other adjustments to income (${fmt(kept)}: student loan interest, educator expenses or similar) carried over unchanged, as a before print keeps them${
-          facts.ira + facts.hsa === 0 ? ". If any of it is an IRA or HSA deduction, read Schedule 1 lines 20 and 13 so the before can leave it off" : ""
+        `Other adjustments to income carried over unchanged, as a before print keeps them: ${parts.join(", ")}${
+          unplaced > TOL
+            ? `. If the ${fmt(unplaced)} is a SEP, IRA or HSA contribution (Schedule 1 lines 16, 20, 13), enter it on that line and recompute, so the before leaves it off`
+            : ""
         }`,
       );
     }

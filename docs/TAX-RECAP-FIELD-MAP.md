@@ -68,6 +68,8 @@ Same schema for before and after. Federal lines are Form 1040 (2025 layout) unle
 | SEP, SIMPLE and qualified plans | Schedule 1 line 16 — reduces QBI and the health insurance cap; off on the before (Client F: 3,000) | — | — |
 | IRA deduction | Schedule 1 line 20 — off on the before (Client F: 2,500) | — | — |
 | HSA deduction | Schedule 1 line 13, not a payroll HSA — off on the before, with a state's add-back of it | — | — |
+| Deductible part of SE tax | Schedule 1 line 15 — read for the line 10 check only; the before's is figured from its own Schedule SE (engine v16) | 8,693 | 3,937 |
+| The rest of Schedule 1 Part II | Lines 11 (educator), 12 (Form 2106), 14 (Armed Forces moving), 18 (early withdrawal penalty), 19a (alimony), 21 (student loan interest), 23 (Archer MSA) and 25 (lines 24a–24z) — kept on the before as filed, named by line in the notes (engine v16) | — | — |
 | Itemized deductions | Schedule A line 17, read whenever the print has a Schedule A (Client F: 45,683; Client E: 23,598 under the standard deduction) | — | — |
 | State and local taxes paid / deducted | Schedule A lines 5d / 5e (Client F: 19,963 / 19,963) | — | — |
 | Medical expenses | Schedule A line 1 (both: 0) | — | — |
@@ -519,3 +521,16 @@ v11–v13 carried a household line the tables couldn't reproduce as a fixed amou
 **Also:** a Schedule C loss beside an S corporation nets against the K-1's QBI (Form 8995 adds the businesses up; Case 03's printed $5,387 is 20% of $38,480 − $11,544).
 
 **What's still carried, and why it's harmless or small:** a second business's own 8995-A limit (QBI gaps of a few hundred dollars); household employment taxes (Schedule H — the same before and after, correctly carried); a fringe benefit run through officer pay; Massachusetts' Schedule Y deductions (the self-employed health insurance, ~5% of it); Virginia 760PY's day-based exemptions and Arizona 140PY's adjustments; an entity minimum fee the reader didn't find (the same on both sides). Returns read before v13 with two states added together need a re-upload, not code.
+
+## Schedule 1 Part II read line by line: engine v16 (2026-10-26)
+
+A client's recap left out his $70,000 SEP (Schedule 1 line 16). The reader skipped the line — it read line 17 on the same page — so the $70,000 landed in `carried` (line 10 less the half SE tax, the health insurance and the SEP as read), which the before keeps as filed. The note called it "student loan interest, educator expenses or similar", the recap was saved, and $25,628 of savings never showed ($21,807 → $46,580 with it on line 16). A sweep of the 88 saved recaps found four others carrying an unnamed amount ($1,815, $1,669, $543, $222).
+
+The engine's money doesn't change. What changed is that nothing on Schedule 1 can go unnoticed:
+
+- **Every line is read.** Lines 11 through 25 are fields now (`SCHEDULE_1_ADJUSTMENTS` in schema.ts), with line 15 read too. They add up to line 26, which is Form 1040 line 10, so on a correct read nothing is left over. The reader is told to check that before answering.
+- **A difference is caught in the builder** (`unplacedAdjustments`: line 9 − line 11a − the lines read; half the SE tax stands in for an unread line 15, so recaps read before v16 are checked too). Off by more than $2, the builder sends the Schedule 1 page and the 1040's first page back for a second, Schedule 1-only read (`focus: "adjustments"` on the extract route; `onlyPages` in pdf-prepare) and keeps whichever read adds up better.
+- **What still doesn't add up is asked, not refused.** On review, a derived before shows the amount and asks which line it's on — SEP, IRA, HSA, student loan interest — or "something else, keep it on the before". A line puts it on the after column and recomputes the before; saving waits for an answer. Lines read too high (the lines add up to more than line 10) ask for the misread cell to be fixed, or confirmed as read.
+- **The before names what it keeps.** The note lists each kept line by its line number ("student loan interest $2,500 (Schedule 1 line 21)") and calls anything unplaced exactly that, with what to do if it's a SEP, IRA or HSA. The before column shows the kept lines as filed and its own line 15.
+
+The team's rule (2026-10-26) is that Schedule 1 adjustments can be strategies; the plannable ones are, and are already left off the before (lines 13, 16, 20, and 17 for a sole proprietor; decided 2026-10-05). The rest — educator expenses, student loan interest, the early withdrawal penalty, alimony, jury duty pay — stay on the before, now by name. Archer MSA (line 23) and the retirement-type line 24 items are rare enough to keep on the before until one turns up.

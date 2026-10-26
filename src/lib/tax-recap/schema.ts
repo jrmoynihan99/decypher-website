@@ -240,10 +240,60 @@ export const RETURN_FIELDS = [
     group: "federal",
     optional: true,
   },
+  /* ── Schedule 1 Part II, line by line (line 17 is with the health coverage lines): what makes up line 10 ── */
+  {
+    key: "educatorExpenses",
+    label: "Educator expenses",
+    source: "Schedule 1 line 11 — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "form2106Expenses",
+    label: "Reservist, performing artist, fee-basis official expenses",
+    source: "Schedule 1 line 12 (Form 2106) — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "hsaDeduction",
+    label: "HSA deduction",
+    source: "Schedule 1 line 13 (Form 8889) — off on the before, like the SEP",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "movingExpenses",
+    label: "Moving expenses (Armed Forces)",
+    source: "Schedule 1 line 14 (Form 3903) — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "seTaxDeduction",
+    label: "Deductible part of SE tax",
+    source: "Schedule 1 line 15 — figured again on the before from the business",
+    group: "federal",
+    optional: true,
+  },
   {
     key: "sepDeduction",
     label: "SEP, SIMPLE and qualified plans",
     source: "Schedule 1 line 16",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "earlyWithdrawalPenalty",
+    label: "Penalty on early withdrawal of savings",
+    source: "Schedule 1 line 18 — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "alimonyPaid",
+    label: "Alimony paid",
+    source: "Schedule 1 line 19a — kept on the before",
     group: "federal",
     optional: true,
   },
@@ -255,9 +305,23 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   {
-    key: "hsaDeduction",
-    label: "HSA deduction",
-    source: "Schedule 1 line 13 (Form 8889) — off on the before, like the SEP",
+    key: "studentLoanInterest",
+    label: "Student loan interest deduction",
+    source: "Schedule 1 line 21 — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "archerMsaDeduction",
+    label: "Archer MSA deduction",
+    source: "Schedule 1 line 23 — kept on the before",
+    group: "federal",
+    optional: true,
+  },
+  {
+    key: "otherAdjustments",
+    label: "Other adjustments (Sch 1 line 25)",
+    source: "Schedule 1 line 25: lines 24a–24z added up (jury duty pay, and the rest) — kept on the before",
     group: "federal",
     optional: true,
   },
@@ -669,6 +733,57 @@ export const RETURN_FIELD_KEYS = RETURN_FIELDS.map((f) => f.key) as ReturnFieldK
 
 /** The numbers a recap is computed from — one set per return. */
 export type ReturnNumbers = Record<ReturnFieldKey, number | null>;
+
+/* ─────────────────────────── Schedule 1 Part II ─────────────────────────── */
+
+/**
+ * Every line of Schedule 1 Part II, in the form's order. They add up to
+ * line 26, which is Form 1040 line 10 — line 9 less line 11a — so with each
+ * read there is nothing left over. The SEP, IRA and HSA lines (and the
+ * health insurance line, for a sole proprietor) are left off the before as
+ * strategies; line 15 is figured again from the business; the rest are kept
+ * on the before as filed.
+ */
+export const SCHEDULE_1_ADJUSTMENTS = [
+  { key: "educatorExpenses", line: "11" },
+  { key: "form2106Expenses", line: "12" },
+  { key: "hsaDeduction", line: "13" },
+  { key: "movingExpenses", line: "14" },
+  { key: "seTaxDeduction", line: "15" },
+  { key: "sepDeduction", line: "16" },
+  { key: "sehiDeduction", line: "17" },
+  { key: "earlyWithdrawalPenalty", line: "18" },
+  { key: "alimonyPaid", line: "19a" },
+  { key: "iraDeduction", line: "20" },
+  { key: "studentLoanInterest", line: "21" },
+  { key: "archerMsaDeduction", line: "23" },
+  { key: "otherAdjustments", line: "25" },
+] as const satisfies readonly { key: ReturnFieldKey; line: string }[];
+
+export const SCHEDULE_1_ADJUSTMENT_KEYS = SCHEDULE_1_ADJUSTMENTS.map((a) => a.key) as ReturnFieldKey[];
+
+/** Forms round to the dollar; a line 10 within this of its lines adds up. */
+export const ADJUSTMENTS_TOLERANCE = 2;
+
+/**
+ * What Form 1040 line 10 holds beyond the Schedule 1 lines read: 0 when
+ * every adjustment is on its line. Positive is an adjustment the reader
+ * skipped (a $70,000 SEP once went this way and the before kept it, so it
+ * never showed as savings); negative, a line read too high. Null when lines
+ * 9 and 11a weren't both read, or the return has no adjustments at all.
+ *
+ * Recaps read before every line was asked for (engine v16) have no line 15;
+ * half the SE tax stands in for it, which is what it is, within a dollar a
+ * schedule.
+ */
+export function unplacedAdjustments(r: ReturnNumbers): number | null {
+  if (typeof r.totalIncome !== "number" || typeof r.agi !== "number") return null;
+  const total = r.totalIncome - r.agi;
+  const read = SCHEDULE_1_ADJUSTMENT_KEYS.reduce((s, k) => s + (r[k] ?? 0), 0);
+  const halfSe = r.seTaxDeduction === null && typeof r.seTax === "number" ? Math.round(r.seTax / 2) : 0;
+  if (total === 0 && read === 0) return null;
+  return total - read - halfSe;
+}
 
 /* ─────────────────────────── a second state return ─────────────────────────── */
 

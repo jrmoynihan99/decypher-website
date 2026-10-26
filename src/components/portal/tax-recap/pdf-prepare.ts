@@ -312,10 +312,12 @@ export async function analyzePdf(file: File): Promise<PdfAnalysis> {
  * `extraTokens` are words learned from another return dropped alongside,
  * painted out of this one too. `kind` overrides the detected kind (a print
  * that couldn't be told apart is read as whatever the builder says it is).
+ * `onlyPages` sends just those pages (1-indexed, as printed) instead of the
+ * selection — the Schedule 1 re-read — redacted the same way.
  */
 export async function preparePdf(
   input: File | PdfAnalysis,
-  opts: { kind?: ReturnKind; extraTokens?: string[]; extraShortTokens?: string[] } = {},
+  opts: { kind?: ReturnKind; extraTokens?: string[]; extraShortTokens?: string[]; onlyPages?: number[] } = {},
 ): Promise<PreparedPdf> {
   const a = input instanceof File ? await analyzePdf(input) : input;
   const file = a.file;
@@ -360,7 +362,8 @@ export async function preparePdf(
     dataFontFound ? a.valueCounts : null,
     dataFontFound ? a.filledCounts : null,
   );
-  const pages = selection.fallback ? texts.map((_, i) => i + 1) : selection.pages;
+  const only = (opts.onlyPages ?? []).filter((p) => Number.isInteger(p) && p >= 1 && p <= texts.length);
+  const pages = only.length ? [...new Set(only)].sort((x, y) => x - y) : selection.fallback ? texts.map((_, i) => i + 1) : selection.pages;
   const dataFonts = new Set(a.dataFonts);
 
   const boxesByPage = new Map<number, Box[]>();

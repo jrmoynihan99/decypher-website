@@ -18,7 +18,7 @@
 import { readFileSync } from "node:fs";
 import { attributeStrategies, deriveBefore, entityTax } from "../src/lib/tax-recap/derive.ts";
 import { computeRecap } from "../src/lib/tax-recap/compute.ts";
-import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers } from "../src/lib/tax-recap/schema.ts";
+import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers, unplacedAdjustments } from "../src/lib/tax-recap/schema.ts";
 import { cardFor, validateYearCard } from "../src/lib/tax-recap/tables.ts";
 
 /**
@@ -65,6 +65,7 @@ const PAIRINGS = [
       taxableIncome: 107070,
       incomeTax: 18544,
       seTax: 22743,
+      seTaxDeduction: 11372, // Schedule 1 line 15: line 9 − line 11a, the only adjustment
       otherTaxes: 22743,
       federalTotalTax: 41287,
       federalPayments: 9600,
@@ -114,6 +115,7 @@ const PAIRINGS = [
       taxableIncome: 78876,
       incomeTax: 12267,
       seTax: 17385,
+      seTaxDeduction: 8693, // Schedule 1 line 15: line 9 − line 11a, the only adjustment
       otherTaxes: 17385,
       federalTotalTax: 29652,
       federalPayments: 1600,
@@ -182,6 +184,7 @@ const PAIRINGS = [
       taxableIncome: 38054,
       incomeTax: 4331,
       seTax: 9871,
+      seTaxDeduction: 4936, // Schedule 1 line 15: half of 9,871
       otherTaxes: 9871,
       additionalTaxes: 948,
       federalTotalTax: 15150,
@@ -448,6 +451,7 @@ const PAIRINGS = [
       taxableIncome: 154224,
       incomeTax: 23757,
       seTax: 34094,
+      seTaxDeduction: 17048, // Schedule 1 line 15: line 9 − line 11a, each spouse's half rounded
       otherTaxes: 34094,
       federalTotalTax: 57851,
       federalPayments: 0,
@@ -1240,6 +1244,46 @@ for (const p of PAIRINGS) {
   const ok = r.ok && r.before.agi === 139588 && r.derived.notes.some((s) => /carried over unchanged/.test(s));
   if (!ok) failed++;
   console.log(`  ${ok ? "ok" : "WRONG"}  $10,000 SEP carried: before AGI ${r.ok ? money(r.before.agi) : "refused: " + r.reasons.join(" | ")}`);
+
+  // Engine v16: Schedule 1 Part II read line by line. The $10,000 on no
+  // line is said as that, never guessed at (it was once a $70,000 SEP the
+  // reader skipped, noted as "student loan interest or similar"), and the
+  // builder asks about it: line 10 less the lines read, half the $11,007
+  // SE tax standing in for an unread line 15.
+  const unplacedNote = r.ok ? r.derived.notes.find((s) => /^Other adjustments to income/.test(s)) ?? "" : "";
+  const unplacedOk =
+    /\$10,000 not placed on any Schedule 1 line/.test(unplacedNote) &&
+    /If the \$10,000 is a SEP, IRA or HSA contribution/.test(unplacedNote) &&
+    !/student loan interest/.test(unplacedNote) &&
+    unplacedAdjustments({ ...clientA.after, agi: 62396 }) === 10000;
+  if (!unplacedOk) failed++;
+  console.log(`  ${unplacedOk ? "ok" : "WRONG"}  …said as unplaced, not guessed at: ${unplacedNote}`);
+
+  // The same $10,000 read as $2,500 of student loan interest, $300 of
+  // educator expenses and the deductible SE tax: the before keeps it all,
+  // each part by its line, and $7,200 is still on no line.
+  const named = { ...clientA.after, agi: 62396, studentLoanInterest: 2500, educatorExpenses: 300, seTaxDeduction: 5504 };
+  const rn = deriveBefore(
+    { ...named, qbiDeduction: 9329, taxableIncome: 37317, incomeTax: 4241, federalTotalTax: 15248, federalAmountOwed: 5648, stateTotalTax: 1784, stateAmountOwed: 1046, stateTotalDue: 1046 },
+    clientA.meta,
+  );
+  const namedNote = rn.ok ? rn.derived.notes.find((s) => /^Other adjustments to income/.test(s)) ?? "" : "";
+  const namedOk =
+    rn.ok &&
+    rn.before.agi === 139588 &&
+    rn.before.studentLoanInterest === 2500 &&
+    rn.before.educatorExpenses === 300 &&
+    rn.before.seTaxDeduction === 11372 &&
+    /educator expenses \$300 \(Schedule 1 line 11\), student loan interest \$2,500 \(Schedule 1 line 21\), \$7,200 not placed/.test(namedNote) &&
+    unplacedAdjustments(named) === 7200;
+  if (!namedOk) failed++;
+  console.log(`  ${namedOk ? "ok" : "WRONG"}  …the lines read named and kept on the before: ${namedNote}`);
+
+  // Every line read: nothing left over, nothing to ask.
+  const placed = { ...named, otherAdjustments: 7200 };
+  const placedOk = unplacedAdjustments(placed) === 0 && unplacedAdjustments({ ...placed, seTaxDeduction: null }) === 0;
+  if (!placedOk) failed++;
+  console.log(`  ${placedOk ? "ok" : "WRONG"}  …and with every line read, nothing is unplaced (line 15 read, or half the SE tax for it)`);
 }
 
 /* ── An HSA on Schedule 1 is DeCypher's (the tax team's call, 2026-10-05) ──

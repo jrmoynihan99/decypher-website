@@ -7,6 +7,7 @@ import {
   OTHER_STATE_FIELD_KEYS,
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
+  SCHEDULE_1_ADJUSTMENT_KEYS,
   sanitizeEntityExtract,
   sanitizeExtract,
   type EntityExtract,
@@ -199,6 +200,15 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+/** The Schedule 1-only read: the 1040's schema with `lines` limited to Part II and the two lines it adds up between. */
+const ADJUSTMENTS_OUTPUT_SCHEMA = {
+  ...OUTPUT_SCHEMA,
+  properties: {
+    ...OUTPUT_SCHEMA.properties,
+    lines: { ...OUTPUT_SCHEMA.properties.lines, items: lineSchema(["totalIncome", "agi", ...SCHEDULE_1_ADJUSTMENT_KEYS]) },
+  },
+};
+
 /** The entity schema, with `lines` limited to the given keys (the city reader asks for its six lines only). */
 const entityOutputSchema = (keys: readonly string[]) => ({
   type: "object",
@@ -292,6 +302,27 @@ const CONVENTIONS = `Conventions of these prints:
 - Each value's "page" is the 1-indexed page of THIS PDF where you read it. Cite the page of the primary form line, not a summary that repeats it.
 - Names, addresses and identifying numbers may be painted over with black boxes. That is expected; read the numbers around them.`;
 
+/**
+ * Schedule 1 Part II, every line: shared by the 1040 reader and the second,
+ * Schedule 1-only read the builder asks for when the lines don't add up to
+ * line 10 (a $70,000 line 16 was once skipped while line 17 on the same
+ * page was read).
+ */
+const SCHEDULE_1_LINES = `- Schedule 1 Part II (Adjustments to Income): report every line with a printed amount, each off its own line. They add up to Schedule 1 line 26, which is Form 1040 line 10; before answering, check that the ones you report do, and if they don't, look at the page again for the line you missed.
+- educatorExpenses: Schedule 1 line 11 (educator expenses). Omit when blank.
+- form2106Expenses: Schedule 1 line 12 (business expenses of reservists, performing artists and fee-basis government officials, Form 2106). Omit when blank.
+- hsaDeduction: Schedule 1 line 13 (health savings account deduction, Form 8889). Only the Schedule 1 line: an HSA paid through payroll (W-2 box 12 code W) isn't on it. Omit when blank.
+- movingExpenses: Schedule 1 line 14 (moving expenses for members of the Armed Forces, Form 3903). Omit when blank.
+- seTaxDeduction: Schedule 1 line 15 (deductible part of self-employment tax). Omit when blank.
+- sepDeduction: Schedule 1 line 16 (self-employed SEP, SIMPLE and qualified plans). Omit when blank.
+- sehiDeduction: Schedule 1 line 17 (self-employed health insurance deduction). Omit when blank.
+- earlyWithdrawalPenalty: Schedule 1 line 18 (penalty on early withdrawal of savings). Omit when blank.
+- alimonyPaid: Schedule 1 line 19a (alimony paid). Omit when blank.
+- iraDeduction: Schedule 1 line 20 (IRA deduction). Omit when blank.
+- studentLoanInterest: Schedule 1 line 21 (student loan interest deduction). Omit when blank.
+- archerMsaDeduction: Schedule 1 line 23 (Archer MSA deduction). Omit when blank.
+- otherAdjustments: Schedule 1 line 25 (total other adjustments: lines 24a through 24z added up). Omit when blank.`;
+
 const SYSTEM = `You read US individual income tax returns printed from Intuit ProSeries and report specific line values as JSON.
 
 ${CONVENTIONS}
@@ -328,9 +359,7 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - qbiW2Wages: Form 8995-A line 4 (allocable share of W-2 wages), added across the business columns. Same condition.
 - qbiUbia: Form 8995-A line 7 (allocable share of the unadjusted basis of qualified property), added across the business columns. Omit when blank.
 - qbiLossCarryforward: Form 8995 line 3, the qualified business net loss carryforward from the prior year, as a positive number. Omit when blank or when the return uses Form 8995-A.
-- sepDeduction: Schedule 1 line 16 (self-employed SEP, SIMPLE and qualified plans). Omit when blank.
-- iraDeduction: Schedule 1 line 20 (IRA deduction). Omit when blank.
-- hsaDeduction: Schedule 1 line 13 (health savings account deduction, Form 8889). Only the Schedule 1 line: an HSA paid through payroll (W-2 box 12 code W) isn't on it. Omit when blank.
+${SCHEDULE_1_LINES}
 - itemizedDeductions: Schedule A line 17 (total itemized deductions), when the print has a Schedule A — even if the return took the standard deduction instead. Omit when there is no Schedule A.
 - saltPaid: Schedule A line 5d (state and local taxes added up, before the cap). Omit when there is no Schedule A.
 - saltDeducted: Schedule A line 5e (state and local taxes after the cap). Omit when there is no Schedule A.
@@ -395,7 +424,7 @@ More than one state return (a move during the year, income earned in another sta
 
 Health coverage lines (sehiDeduction and sehiPaid whenever the return has them; the Form 8962 lines only when Form 8962 is in the print — omit those otherwise):
 - additionalTaxes: Form 1040 line 17 (Schedule 2 line 3), the excess advance premium tax credit repayment. Omit when blank.
-- sehiDeduction: Schedule 1 line 17, self-employed health insurance deduction. Omit when blank.
+- sehiDeduction: Schedule 1 line 17, listed with Schedule 1 above.
 - sehiPaid: Form 7206 line 1, the premiums paid; with several Forms 7206 (one per spouse or business), their line 1 amounts added up. Omit when there is no Form 7206.
 - medicareWages: Form 7206 line 11, the Medicare wages from an S corporation the taxpayer owns more than 2% of. Omit when blank.
 - ptcFamilySize: Form 8962 line 1.
@@ -409,6 +438,18 @@ Health coverage lines (sehiDeduction and sehiPaid whenever the return has them; 
 - ptcRepayment: Form 8962 line 29; omit when blank.
 
 Also report the taxpayer's name as printed on Form 1040, the tax year, the filing status, and the two-letter state code of the state return. Use an empty string for any text you can't determine and 0 for an unknown tax year.`;
+
+const ADJUSTMENTS_SYSTEM = `You read Schedule 1 (Form 1040) Part II, Adjustments to Income, from US individual income tax returns printed from Intuit ProSeries, and report every line as JSON.
+
+${CONVENTIONS}
+- The pages sent are the return's Schedule 1 and the Form 1040 page with lines 9 through 11a. Go down Schedule 1 Part II line by line, from line 11 to line 26, and report every line with a printed amount: a skipped line is the mistake this read exists to catch.
+
+Lines:
+- totalIncome: Form 1040 line 9.
+- agi: Form 1040 line 11a (or line 11 on older layouts).
+${SCHEDULE_1_LINES}
+
+Also report the tax year and the filing status. The taxpayer's name, the state code, the state form and otherStates aren't needed here: empty strings and an empty list.`;
 
 const ENTITY_SYSTEM = `You read US pass-through entity income tax returns printed from Intuit ProSeries — an S corporation's Form 1120-S or a partnership's Form 1065, with the state's own return for the entity — and report specific line values as JSON.
 
@@ -504,11 +545,14 @@ Also report the corporation's name as printed and the tax year. Use an empty str
  */
 export const HINTS_MAX = 2000;
 
-type ReadKind = "before" | "after" | "entity" | "city";
+/** `adjustments` is the second, Schedule 1-only read of the after return. */
+type ReadKind = "before" | "after" | "entity" | "city" | "adjustments";
 
 function userPrompt(kind: ReadKind, hints: string | null): string {
   const base =
-    kind === "entity"
+    kind === "adjustments"
+      ? `These are the Schedule 1 and Form 1040 page 1 of the client's final return. A first read's Schedule 1 lines didn't add up to Form 1040 line 10, so a line was missed or misread. Read every line of Schedule 1 Part II as your instructions describe and return the JSON.`
+      : kind === "entity"
       ? `This is the entity's return (Form 1120-S or Form 1065, with its state return) for the client's business, as filed. Read the lines described in your instructions from this PDF and return the JSON.`
       : kind === "city"
         ? `This is the city's own return for the client's corporation (New York City Form NYC-3L or NYC-4S), as filed. Read the lines described in your instructions from this PDF and return the JSON.`
@@ -580,7 +624,7 @@ async function readPdf(
   schema: Record<string, unknown>,
   hints: string | null,
 ): Promise<{ parsed: unknown; usage: ReadUsage }> {
-  const label = kind === "entity" ? "entity return" : kind === "city" ? "city return" : `${kind} return`;
+  const label = kind === "entity" ? "entity return" : kind === "city" ? "city return" : kind === "adjustments" ? "after return, Schedule 1" : `${kind} return`;
   // Streamed so a long read (a 40-page client copy takes a while) can't trip
   // an idle-connection timeout somewhere between here and the API.
   const model = modelName();
@@ -701,9 +745,18 @@ export async function extractReturn(
   pageMap: number[] | null = null,
   /** What the browser learned from the full print (which W-2s the business issued), for the reader. */
   hints: string | null = null,
+  /**
+   * "adjustments": the second read of the after return's Schedule 1 alone,
+   * for when the first read's Part II lines didn't add up to line 10. Only
+   * those lines and lines 9 and 11a come back.
+   */
+  focus: "adjustments" | null = null,
 ): Promise<ExtractResult> {
   checkPdf(pdf);
-  const { parsed, usage } = await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA, hints);
+  const { parsed, usage } =
+    focus === "adjustments"
+      ? await readPdf(pdf, "adjustments", ADJUSTMENTS_SYSTEM, ADJUSTMENTS_OUTPUT_SCHEMA, null)
+      : await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA, hints);
   const raw = sanitizeExtract(parsed);
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 
@@ -733,7 +786,7 @@ export async function extractReturn(
   if (extract.notes) warnings.push(`Reader notes: ${extract.notes}`);
 
   console.log(
-    `[tax-recap] read ${kind} return with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
+    `[tax-recap] read ${kind} return${focus ? ` (${focus} only)` : ""} with ${usage.model} (effort ${usage.effort}) in ${usage.seconds}s: ` +
       `${pageTexts?.length ?? "?"} pages sent, ${tokensLogged(usage)}, ${unverified.length} unverified`,
   );
 

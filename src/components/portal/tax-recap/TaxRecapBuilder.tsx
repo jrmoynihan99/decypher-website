@@ -28,6 +28,7 @@ import {
 import { entityEins, entityFormFromFileName, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
 import { US_STATES, type TableSet } from "@/lib/tax-recap/tables";
 import {
+  ADJUSTMENTS_TOLERANCE,
   CITY_FIELD_KEYS,
   DEFAULT_NEXT_STEPS,
   DEFAULT_STRATEGIES,
@@ -37,6 +38,7 @@ import {
   OTHER_STATE_FIELD_KEYS,
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
+  SCHEDULE_1_ADJUSTMENT_KEYS,
   asMoney,
   displayName,
   emptyEntityNumbers,
@@ -44,6 +46,7 @@ import {
   numbersFromEntityExtract,
   numbersFromExtract,
   stateNumbersFromExtract,
+  unplacedAdjustments,
   type DerivedBefore,
   type EntityExtract,
   type EntityFieldGroup,
@@ -289,6 +292,18 @@ const moreFrom = (entities: MoreEntity[], states: MoreState[]): DeriveMore => ({
   })),
   states: states.map((s) => ({ stateCode: s.stateCode, stateForm: s.stateForm, numbers: toStateNumbers(s.numbers.after) })),
 });
+
+/**
+ * Where staff can put a Schedule 1 amount the reader didn't place: the
+ * lines DeCypher claims as strategies, and the most common of the rest (it
+ * stays on the before, but under its own name).
+ */
+const PLACE_ON: { key: ReturnFieldKey; label: string }[] = [
+  { key: "sepDeduction", label: "SEP / solo 401(k) · line 16" },
+  { key: "iraDeduction", label: "IRA · line 20" },
+  { key: "hsaDeduction", label: "HSA · line 13" },
+  { key: "studentLoanInterest", label: "Student loan interest · line 21" },
+];
 
 const GROUPS: { id: FieldGroup; title: string }[] = [
   { id: "income", title: "Income" },
@@ -765,6 +780,13 @@ export default function TaxRecapBuilder({
     w2Pages: EntityW2Page[] | null = null,
     /** An entity return beyond the first: which of `moreEntities` it fills. */
     slot?: number,
+    /**
+     * The second, Schedule 1-only read of the after return (see
+     * `placeAdjustments`): just these pages, or the usual selection when
+     * none could be found. It leaves the side's page counts, preview and
+     * kept copy as the first read set them.
+     */
+    focus?: { pages: number[] },
   ) => {
     const patch = (p: Partial<SideState>) =>
       slot === undefined
@@ -772,13 +794,14 @@ export default function TaxRecapBuilder({
         : setMoreEntities((m) => m.map((x, i) => (i === slot ? { ...x, side: { ...x.side, ...p } } : x)));
     const say = (message: string) => patch({ file: source.file, status: "reading", message });
 
-    say("Opening the PDF…");
+    if (!focus) say("Opening the PDF…");
     // Reads the page text, trims the return to the pages the recap needs and
     // paints out the identity fields — all here, before anything leaves.
     const prepared = await preparePdf(source.analysis ?? source.file, {
       kind: kind === "entity" || kind === "city" ? kind : "individual",
       extraTokens: shared.tokens,
       extraShortTokens: shared.short,
+      onlyPages: focus?.pages,
     });
     // A print that can't be redacted is never sent (see pdf-prepare).
     if (prepared.blocked) throw new Error(prepared.blocked);
@@ -789,30 +812,35 @@ export default function TaxRecapBuilder({
       };
       w.__taxRecapPrepared = {
         ...(w.__taxRecapPrepared ?? {}),
-        [kind]: prepared,
+        [focus ? `${kind}:adjustments` : kind]: prepared,
       };
     }
-    // The copies a refusal can keep are the 1040's and the first entity return's.
-    if (slot === undefined) preparedRef.current[kind] = { data: prepared.data, name: source.file.name, pages: prepared.sentPages };
-    patch({
-      pages: prepared.totalPages,
-      sentPages: prepared.sentPages,
-      localName: kind === "entity" || kind === "city" ? prepared.identity.entityName : prepared.identity.name,
-      redaction: {
-        redacted: prepared.identity.redacted,
-        boxes: prepared.identity.boxes,
-        preview: prepared.preview,
-      },
-    });
+    if (!focus) {
+      // The copies a refusal can keep are the 1040's and the first entity return's.
+      if (slot === undefined) preparedRef.current[kind] = { data: prepared.data, name: source.file.name, pages: prepared.sentPages };
+      patch({
+        pages: prepared.totalPages,
+        sentPages: prepared.sentPages,
+        localName: kind === "entity" || kind === "city" ? prepared.identity.entityName : prepared.identity.name,
+        redaction: {
+          redacted: prepared.identity.redacted,
+          boxes: prepared.identity.boxes,
+          preview: prepared.preview,
+        },
+      });
+    }
 
     const what =
       kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : kind === "city" ? "the city return" : "the return";
-    const readingMsg = prepared.trimmed
-      ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
-      : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
+    const readingMsg = focus
+      ? `Schedule 1's adjustments didn't add up to Form 1040 line 10 — reading ${prepared.sentPages === 1 ? "that page" : `those ${prepared.sentPages} pages`} again…`
+      : prepared.trimmed
+        ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
+        : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
 
     const fd = new FormData();
     fd.append("kind", kind);
+    if (focus) fd.append("focus", "adjustments");
     fd.append("pageTexts", JSON.stringify(prepared.pageTexts));
     // Page numbers the model cites are positions in the trimmed copy; this
     // maps them back so the reviewer sees the page of the real return.
@@ -917,12 +945,74 @@ export default function TaxRecapBuilder({
         }`,
       );
     }
-    if (slot === undefined) readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
+    if (slot === undefined && !focus) readInfoRef.current[kind] = { warnings, total: prepared.totalPages, sent: prepared.sentPages };
     return {
       extract: data.extract,
       warnings,
       localName: prepared.identity.name,
       entityName: prepared.identity.entityName,
+    };
+  };
+
+  /**
+   * Schedule 1 Part II as read, against Form 1040 line 10 (line 9 less line
+   * 11a). The lines add up to it on every return, so a difference is a line
+   * the reader skipped or misread — once a $70,000 SEP, which the before
+   * then kept, so the recap never showed it as savings. One more read of
+   * the Schedule 1 pages alone; whichever read adds up better is kept, and
+   * whatever still doesn't is asked about on review.
+   */
+  const placeAdjustments = async (
+    first: ReturnExtract,
+    source: { file: File; analysis: PdfAnalysis | null },
+    shared: { tokens: string[]; short: string[] },
+  ): Promise<{ extract: ReturnExtract; warnings: string[] }> => {
+    const was = unplacedAdjustments(numbersFromExtract(first));
+    if (was === null || Math.abs(was) <= ADJUSTMENTS_TOLERANCE) return { extract: first, warnings: [] };
+    // Schedule 1 by its Part II (line 11's label is on no other form), the
+    // 1040's first page by line 9's, and wherever the first read found a
+    // Schedule 1 line. None found (a scrambled text layer): the usual pages.
+    const pages = new Set<number>();
+    (source.analysis?.texts ?? []).forEach((t, i) => {
+      if (/educator expenses/i.test(t) || /this is your total income/i.test(t)) pages.add(i + 1);
+    });
+    for (const k of SCHEDULE_1_ADJUSTMENT_KEYS) {
+      const p = first.fields[k]?.page;
+      if (p) pages.add(p);
+    }
+    const gap = (u: number) => (u > 0 ? `${money(u)} of line 10 on no line read` : `the lines read ${money(-u)} more than line 10`);
+    let second: ReturnExtract;
+    try {
+      second = (await readOne("after", source, shared, null, undefined, { pages: [...pages] })).extract as ReturnExtract;
+    } catch (e) {
+      return {
+        extract: first,
+        warnings: [`Schedule 1 doesn't add up to Form 1040 line 10 (${gap(was)}), and a second read of its page couldn't be made: ${e instanceof Error ? e.message : "it failed"}`],
+      };
+    }
+    // The second read's Part II in place of the first's. Lines 9 and 11a stay
+    // the first read's: it had the whole return in front of it.
+    const merged: ReturnExtract = { ...first, fields: { ...first.fields } };
+    for (const k of SCHEDULE_1_ADJUSTMENT_KEYS) merged.fields[k] = second.fields[k];
+    const now = unplacedAdjustments(numbersFromExtract(merged)) ?? 0;
+    if (Math.abs(now) >= Math.abs(was)) {
+      return {
+        extract: first,
+        warnings: [`Schedule 1 doesn't add up to Form 1040 line 10 (${gap(was)}), and a second read of the Schedule 1 page didn't place it either — it's asked about above the numbers`],
+      };
+    }
+    const label = (k: ReturnFieldKey) => RETURN_FIELDS.find((f) => f.key === k)?.label ?? k;
+    const changed = SCHEDULE_1_ADJUSTMENT_KEYS.filter((k) => first.fields[k]?.value !== second.fields[k]?.value).map((k) => {
+      const v = second.fields[k]?.value;
+      return `${label(k)} ${v === null || v === undefined ? "blank" : money(v)}${second.fields[k]?.page ? ` (page ${second.fields[k].page})` : ""}`;
+    });
+    return {
+      extract: merged,
+      warnings: [
+        `Schedule 1 didn't add up to Form 1040 line 10 on the first read (${gap(was)}); a second read of the Schedule 1 page ${
+          Math.abs(now) <= ADJUSTMENTS_TOLERANCE ? "put it right" : `got it closer (${gap(now)}, asked about above the numbers)`
+        }: ${changed.join(", ")}. Check against the page`,
+      ],
     };
   };
 
@@ -1043,7 +1133,14 @@ export default function TaxRecapBuilder({
         // too, so the reviewer knows why the lines are blank.
         const w2Pages = eins.length ? entityW2Pages(afterTexts, eins) : null;
         const r = await readOne("after", sorted.after, tokens, w2Pages);
-        const ex = r.extract as ReturnExtract;
+        const read = r.extract as ReturnExtract;
+        // The Schedule 1 lines checked against line 10, read again if they
+        // don't add up.
+        const placed = await placeAdjustments(read, sorted.after, tokens);
+        const ex = placed.extract;
+        const warnings = [...r.warnings, ...placed.warnings];
+        const info = readInfoRef.current.after;
+        if (info) info.warnings = warnings;
         // The name is painted out before the model sees the page, so the
         // one read locally off the 1040 fills the client field.
         const named = ex.taxpayerName
@@ -1057,7 +1154,7 @@ export default function TaxRecapBuilder({
             message: "",
             problems: [],
             extract: named,
-            warnings: r.warnings,
+            warnings,
           },
         }));
         setNumbers((n) => ({ ...n, after: toRaw(numbersFromExtract(named)) }));
@@ -1365,7 +1462,8 @@ export default function TaxRecapBuilder({
    * wrong number and should follow the fix.
    */
   const [rederiveError, setRederiveError] = useState<string[] | null>(null);
-  const rederive = () => {
+  /** `afterRaw`: an after column just set and not yet in state (the Schedule 1 answer). */
+  const rederive = (afterRaw: RawNumbers = numbers.after) => {
     const a = sides.after.extract;
     if (!a) return;
     const meta: DeriveMeta = {
@@ -1373,7 +1471,7 @@ export default function TaxRecapBuilder({
       taxYear: /^\d{4}$/.test(taxYear.trim()) ? Number(taxYear) : a.taxYear,
       stateCode: stateCode.trim() || a.stateCode,
     };
-    const aNum = toNumbers(numbers.after);
+    const aNum = toNumbers(afterRaw);
     const eNum = toEntityNumbers(entityNumbers.after);
     const more = moreFrom(moreEntities, moreStates);
     const result = deriveBefore(aNum, meta, tables, eNum, more);
@@ -1714,8 +1812,27 @@ export default function TaxRecapBuilder({
           ...sides.city.warnings.map((w) => `City return: ${w}`),
         ]
       : [];
+  /**
+   * Schedule 1 Part II against Form 1040 line 10, on the after column as it
+   * stands — when the before was derived (a before print isn't figured from
+   * these lines). What no line accounts for stays on the before and can't
+   * show as savings, so staff say which line it's on, or that it stays.
+   * Saving waits for the answer; a changed amount asks again.
+   */
+  const [keptUnplaced, setKeptUnplaced] = useState<number | null>(null);
+  const afterNow = toNumbers(numbers.after);
+  const unplaced = sides.before.derived ? unplacedAdjustments(afterNow) : null;
+  const askAdjustments = unplaced !== null && Math.abs(unplaced) > ADJUSTMENTS_TOLERANCE && keptUnplaced !== unplaced;
+  const lineTen = (afterNow.totalIncome ?? 0) - (afterNow.agi ?? 0);
+  const placeOn = (key: ReturnFieldKey) => {
+    if (unplaced === null) return;
+    const next = { ...numbers.after, [key]: String((afterNow[key] ?? 0) + unplaced) };
+    setNumbers((n) => ({ ...n, after: next }));
+    rederive(next);
+  };
+
   const canSave =
-    clientName.trim().length > 0 && /^\d{4}$/.test(taxYear.trim()) && !saving;
+    clientName.trim().length > 0 && /^\d{4}$/.test(taxYear.trim()) && !saving && !askAdjustments;
 
   /* ─────────────────────────────── done ───────────────────────────────── */
 
@@ -2038,7 +2155,7 @@ export default function TaxRecapBuilder({
                 // the engine asked for) should flow through.
                 <button
                   type="button"
-                  onClick={rederive}
+                  onClick={() => rederive()}
                   className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1.2px] text-muted hover:text-fog"
                 >
                   Recompute the before column
@@ -2138,7 +2255,7 @@ export default function TaxRecapBuilder({
                   The before column is empty: the engine refused (the reasons are under &ldquo;Things to look at&rdquo;). Every line is shown — type what it asked for in the{" "}
                   <span className="text-fog">after</span> column, then recompute. Or type the before column by hand.
                 </span>
-                <button type="button" onClick={rederive} className={btnGhost}>
+                <button type="button" onClick={() => rederive()} className={btnGhost}>
                   Recompute the before column
                 </button>
                 {rederiveError ? (
@@ -2151,6 +2268,40 @@ export default function TaxRecapBuilder({
                     ))}
                   </ul>
                 ) : null}
+              </div>
+            ) : null}
+            {askAdjustments && unplaced !== null ? (
+              <div className="border-b border-ember/30 bg-ember/[0.06] px-4 py-3">
+                <p className="text-[13px] leading-snug text-mist">
+                  {unplaced > 0 ? (
+                    <>
+                      <span className="font-semibold text-fog">
+                        {`Schedule 1 has ${money(unplaced)} the reader didn’t place on a line.`}
+                      </span>{" "}
+                      Its adjustments come to {money(lineTen)} (Form 1040 line 10); the lines read add up to {money(lineTen - unplaced)}. Until
+                      it&rsquo;s placed the before keeps it, so it can&rsquo;t show as savings. Which line is it on?
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-fog">
+                        {`The Schedule 1 lines read add up to ${money(-unplaced)} more than Form 1040 line 10 (${money(lineTen)}).`}
+                      </span>{" "}
+                      One of them is misread: check them against the page, fix the cell, and recompute the before column.
+                    </>
+                  )}
+                </p>
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {unplaced > 0
+                    ? PLACE_ON.map((p) => (
+                        <button key={p.key} type="button" onClick={() => placeOn(p.key)} className={`${btnGhost} !px-4 !py-1.5 !text-[13px]`}>
+                          {p.label}
+                        </button>
+                      ))
+                    : null}
+                  <button type="button" onClick={() => setKeptUnplaced(unplaced)} className={`${btnGhost} !px-4 !py-1.5 !text-[13px]`}>
+                    {unplaced > 0 ? "Something else · keep it on the before" : "They're right as read"}
+                  </button>
+                </div>
               </div>
             ) : null}
             <div className="grid grid-cols-2 items-end gap-3 border-b border-edge px-4 py-2.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -2777,7 +2928,9 @@ export default function TaxRecapBuilder({
               ) : null}
               {!canSave && !saving ? (
                 <span className="text-[12px] text-dusk">
-                  Needs a client name and a four-digit year.
+                  {askAdjustments
+                    ? "Answer the Schedule 1 question at the top of “Check the numbers” first."
+                    : "Needs a client name and a four-digit year."}
                 </span>
               ) : null}
             </div>
