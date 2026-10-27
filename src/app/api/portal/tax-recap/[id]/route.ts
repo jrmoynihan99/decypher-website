@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { gate } from "../_gate";
 import {
@@ -106,6 +107,7 @@ export async function PATCH(
 
   try {
     const recap = await updateRecap(id, edits, session.email);
+    revalidatePath("/"); // the home page totals every recap
     return NextResponse.json({ ok: true, recap });
   } catch (e) {
     if (e instanceof TaxRecapStoreError) {
@@ -131,6 +133,7 @@ export async function DELETE(
   try {
     await deleteRecap(id);
     console.log(`[tax-recap] ${session.email} deleted recap ${id}`);
+    revalidatePath("/");
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof TaxRecapStoreError) {

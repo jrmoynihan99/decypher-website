@@ -54,6 +54,15 @@ export default async function TaxRecapPage({
           Refused returns{openFailures ? ` · ${openFailures}` : ""}
         </Link>
         <Link
+          href="/portal/tax-recap/savings"
+          className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-mist"
+        >
+          <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M3 3v18h18M7 15l3.5-4 3 2.5L21 7" />
+          </svg>
+          Savings board
+        </Link>
+        <Link
           href="/portal/tax-recap/tables"
           className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 font-display text-[13px] font-semibold text-fog no-underline transition-colors hover:border-mist"
         >

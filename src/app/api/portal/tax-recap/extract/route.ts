@@ -20,7 +20,7 @@ import {
  *              "city" (the city's own return for it, NYC-3L)
  *   file       the ProSeries PDF (up to ~4MB)
  *     — or —
- *   uploadId   id of a file staged in pieces via ../upload (up to 24MB)
+ *   uploadId   id of a file staged in pieces via ../upload (up to 48MB)
  *   pageTexts  optional JSON string[] — per-page text pulled by pdfjs in the
  *              browser, used to verify every extracted number against the
  *              page it was cited from

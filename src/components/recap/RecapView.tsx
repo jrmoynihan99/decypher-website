@@ -3,13 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import CipherRain from "@/components/effects/CipherRain";
 import NeuralWeb from "@/components/effects/NeuralWeb";
-import { MoneyFlow } from "@/components/portal/widgets/ui";
+import CountUp from "@/components/ui/CountUp";
 import RecapDeck, { Keycap, type Slide } from "@/components/recap/RecapDeck";
 import RecapHero from "@/components/recap/RecapHero";
 import Reveal from "@/components/reveal/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
-import { prefersReducedMotion } from "@/lib/decrypt";
 import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
@@ -800,41 +799,6 @@ function Due({ value }: { value: number }) {
     <span className={`font-mono text-[15px] font-semibold tabular-nums ${refund ? "text-teal" : "text-danger"}`}>
       {money(Math.abs(value))}
       <span className="ml-1.5 font-body text-[11px] font-medium uppercase tracking-[1px] opacity-80">{refund ? "refund" : "due"}</span>
-    </span>
-  );
-}
-
-/**
- * Rolls up from zero the first time it scrolls into view — the reveal the
- * Canva version couldn't do. `delay` holds it back further, for figures
- * that land one after another.
- */
-function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [shown, setShown] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // reduced motion: still waits for the scroll, but lands without the beat
-    const wait = prefersReducedMotion() ? 0 : 250 + delay;
-    let timer = 0;
-    const io = new IntersectionObserver(
-      ([en]) => {
-        if (!en.isIntersecting) return;
-        io.disconnect();
-        timer = window.setTimeout(() => setShown(value), wait);
-      },
-      { threshold: 0.4 },
-    );
-    io.observe(el);
-    return () => {
-      io.disconnect();
-      clearTimeout(timer);
-    };
-  }, [value, delay]);
-  return (
-    <span ref={ref}>
-      <MoneyFlow value={shown} />
     </span>
   );
 }

@@ -316,10 +316,21 @@ history to migrate. Years before the last sync simply read empty until then.
 
 ## Public stats
 
-`lib/quickbooks/public-stats.ts` resolves a `{{creatorRevenue}}` token written
-as a stat *value* in Sanity → Site Settings → Stats, replacing it with total
-income across every connected creator, all time, compact-formatted so
-StatsGrid's roll-up animation parses it.
+`lib/quickbooks/public-stats.ts` resolves three tokens written as a stat
+*value* in Sanity → Site Settings → Stats:
+
+| Token | Figure |
+|---|---|
+| `{{creatorRevenue}}` | Total income across every connected creator, all time, compact ("$4.6M+") so StatsGrid's roll-up parses it. |
+| `{{creatorCount}}` | How many creators are connected in Creator Finances — every company in the active environment whose connection isn't disabled — as "150+". |
+| `{{taxSavings}}` | Every tax recap's savings, added up (`lib/tax-recap/public-stats.ts`), compact. |
+
+Each stat remembers which token it carried (`LiveStat.live`): on the home
+page the revenue and tax-savings cards become the tabs over the stage (the
+revenue graph, the tax savings strip — see `docs/PORTAL.md` → Tax Recap →
+The home page), and the rest sit above them as plain figures.
+`npm run stats:activate-live-all` flips the two remaining stats to their
+tokens, after the resolver is deployed.
 
 Applied at the template-dispatch layer (`RenderPage` / `RenderThankYou`), not
 inside `getSiteSettings()` — the root layout calls that for the nav and footer,

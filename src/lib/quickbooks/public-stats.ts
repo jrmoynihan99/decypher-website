@@ -3,6 +3,7 @@ import { cache } from "react";
 import { listCreatorFinances } from "./snapshots";
 import { primaryBucket } from "./aggregate";
 import { monthRange } from "./periods";
+import { taxSavingsSummary } from "@/lib/tax-recap/public-stats";
 import type { CreatorFinanceRow, MoneyCents } from "./types";
 import type { SiteSettings, StatContent } from "@/sanity/types";
 
@@ -23,14 +24,35 @@ import type { SiteSettings, StatContent } from "@/sanity/types";
  * card is a smaller lie than a wrong number on a marketing page.
  */
 
-/** Tokens an editor may put in a Site Settings stat value. */
-export const STAT_TOKENS = ["{{creatorRevenue}}"] as const;
+/**
+ * Tokens an editor may put in a Site Settings stat value:
+ *   {{creatorRevenue}}  total income across every connected creator, all time
+ *   {{taxSavings}}      every tax recap's savings, added up (lib/tax-recap/public-stats.ts)
+ *   {{creatorCount}}    how many creators are connected in Creator Finances, as "150+"
+ */
+export const STAT_TOKENS = ["{{creatorRevenue}}", "{{taxSavings}}", "{{creatorCount}}"] as const;
+export type LiveToken = "creatorRevenue" | "taxSavings" | "creatorCount";
 
-const TOKEN_RE = /\{\{\s*creatorRevenue\s*\}\}/i;
+const TOKEN_RE = /\{\{\s*(creatorRevenue|taxSavings|creatorCount)\s*\}\}/i;
+
+/** Which live token a stat value carries, if any. */
+export function liveTokenOf(value: string): LiveToken | null {
+  const m = TOKEN_RE.exec(value);
+  if (!m) return null;
+  const k = m[1].toLowerCase();
+  return k === "creatorrevenue" ? "creatorRevenue" : k === "taxsavings" ? "taxSavings" : "creatorCount";
+}
 
 export function hasLiveToken(value: string): boolean {
   return TOKEN_RE.test(value);
 }
+
+/**
+ * A stat with its token resolved, remembering which one it was. The proof
+ * section makes the live cards the tabs over the graph and the strip; the
+ * rest sit above them as plain figures.
+ */
+export type LiveStat = StatContent & { live?: LiveToken };
 
 /**
  * Compact money, in the shape StatsGrid can animate.
@@ -77,6 +99,23 @@ export async function creatorLifetimeRevenueCents(): Promise<number | null> {
     return bucket.count > 0 && bucket.income > 0 ? bucket.income : null;
   } catch (e) {
     console.error("[public-stats] couldn't read creator revenue:", e);
+    return null;
+  }
+}
+
+/**
+ * How many creators are connected in Creator Finances — every company in the
+ * active environment whose connection hasn't been disabled, a broken one
+ * included (it's still a client; the firm fixes the connection). Null when
+ * nothing is readable, which drops the card.
+ */
+export async function connectedCreatorCount(): Promise<number | null> {
+  try {
+    const payload = await allTimeFinances();
+    const n = payload.rows.filter((r) => r.connection !== "disabled").length;
+    return n > 0 ? n : null;
+  } catch (e) {
+    console.error("[public-stats] couldn't count creators:", e);
     return null;
   }
 }
@@ -313,26 +352,58 @@ export async function creatorRevenueTimeline(): Promise<RevenueTimeline | null> 
 }
 
 /**
+ * Local preview of the flip: with LIVE_STATS_PREVIEW=1 in .env.local, a stat
+ * whose label reads like one of the live figures is treated as if its value
+ * were the token, so the proof section can be checked end to end before
+ * `npm run stats:activate-live-all` touches the shared Sanity content.
+ * Never set in production — there the tokens are the switch.
+ */
+const PREVIEW: [RegExp, string][] = [
+  [/lifetime (revenue|income)/i, "{{creatorRevenue}}"],
+  [/tax savings/i, "{{taxSavings}}"],
+  [/creators? (helped|on the books)/i, "{{creatorCount}}"],
+];
+function previewToken(stat: StatContent): StatContent {
+  if (process.env.LIVE_STATS_PREVIEW !== "1" || hasLiveToken(stat.value ?? "")) return stat;
+  const hit = PREVIEW.find(([re]) => re.test(stat.label ?? ""));
+  return hit ? { ...stat, value: hit[1] } : stat;
+}
+
+/**
  * Replace live tokens in a Sanity stats array.
  *
- * Only touches QuickBooks when a token is actually present, so pages whose
- * stats are all static cost nothing.
+ * Only reads what the tokens present actually need, so a page whose stats are
+ * all static costs nothing, and one with only the revenue token never touches
+ * the recaps. A token whose figure can't be read drops its card rather than
+ * showing $0 or the raw token.
  */
 export async function resolveLiveStats(
   stats: StatContent[] | undefined,
-): Promise<StatContent[]> {
-  const list = stats ?? [];
-  if (!list.some((s) => hasLiveToken(s.value ?? ""))) return list;
+): Promise<LiveStat[]> {
+  const list = (stats ?? []).map(previewToken);
+  const wanted = new Set(list.map((s) => liveTokenOf(s.value ?? "")));
+  wanted.delete(null);
+  if (!wanted.size) return list;
 
-  const cents = await creatorLifetimeRevenueCents();
-  const out: StatContent[] = [];
+  const [cents, savings, count] = await Promise.all([
+    wanted.has("creatorRevenue") ? creatorLifetimeRevenueCents() : Promise.resolve(null),
+    wanted.has("taxSavings") ? taxSavingsSummary() : Promise.resolve(null),
+    wanted.has("creatorCount") ? connectedCreatorCount() : Promise.resolve(null),
+  ]);
+  const out: LiveStat[] = [];
   for (const stat of list) {
-    if (!hasLiveToken(stat.value ?? "")) {
+    const live = liveTokenOf(stat.value ?? "");
+    if (!live) {
       out.push(stat);
       continue;
     }
-    if (cents == null) continue; // drop rather than show a wrong number
-    out.push({ ...stat, value: stat.value.replace(TOKEN_RE, compactUsd(cents)) });
+    const text =
+      live === "creatorRevenue" ? (cents == null ? null : compactUsd(cents))
+      : live === "taxSavings" ? (savings ? compactUsd(savings.totalSavings * 100) : null)
+      : count == null ? null : `${count}+`;
+    if (text == null) continue; // drop rather than show a wrong number
+    // a replacer function: the figure starts with "$", which a replacement STRING would read as a group reference ("$1")
+    out.push({ ...stat, value: stat.value.replace(TOKEN_RE, () => text), live });
   }
   return out;
 }

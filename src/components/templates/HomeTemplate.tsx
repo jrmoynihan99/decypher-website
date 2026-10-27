@@ -12,6 +12,7 @@ import TestimonialsSection from "@/components/home/TestimonialsSection";
 import VideoSection from "@/components/home/VideoSection";
 import type { Creator } from "@/lib/creators";
 import type { RevenueTimeline } from "@/lib/quickbooks/public-stats";
+import type { TaxSavingsSummary } from "@/lib/tax-recap/public-stats";
 import type {
   CmsService,
   CmsTestimonial,
@@ -26,6 +27,7 @@ export default function HomeTemplate({
   services,
   testimonials,
   revenue,
+  taxSavings = null,
 }: {
   page: HomePageDoc;
   settings: SiteSettings | null;
@@ -33,6 +35,8 @@ export default function HomeTemplate({
   services: CmsService[];
   testimonials: { rowA: CmsTestimonial[]; rowB: CmsTestimonial[] };
   revenue?: RevenueTimeline | null;
+  /** The tax recap aggregate — the savings strip under the stats. */
+  taxSavings?: TaxSavingsSummary | null;
 }) {
   // Roster carousel: the creators picked in Studio (Home → Roster), in the
   // order they're listed there. Nothing picked → the first 16 by sort position,
@@ -47,7 +51,11 @@ export default function HomeTemplate({
 
   return (
     <main id="top" className="relative">
-      <CipherRain />
+      {/* js-proof-rain / js-proof-mesh: the tax savings strip fades these while
+          it pins the proof section, so the backdrop holds still behind it */}
+      <div className="js-proof-rain">
+        <CipherRain />
+      </div>
       <ScrollHud />
       {/* one continuous neural mesh spanning Hero + Stats (no seam), fading in
           at the very top and bleeding down past Stats into the Estimator.
@@ -55,6 +63,7 @@ export default function HomeTemplate({
           mesh (at -z-10 inside here) still renders above it, not hidden behind. */}
       <div className="relative z-[1]">
         <NeuralWeb
+          className="js-proof-mesh"
           style={{
             bottom: "-360px",
             WebkitMaskImage:
@@ -69,6 +78,7 @@ export default function HomeTemplate({
           title={page.statsSection?.title}
           stats={settings?.stats ?? []}
           revenue={revenue}
+          taxSavings={taxSavings}
         />
       </div>
       <EstimatorSection content={page.estimatorSection ?? {}} />

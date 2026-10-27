@@ -112,13 +112,14 @@ export function readThinking(
 
 /**
  * Raw-byte cap on a PDF handed to the model. The builder only accepts
- * exports up to 20MB and sends a redacted, images-only copy of the kept
- * pages, which runs 2-4MB however big the original; anything over
+ * exports up to 48MB and sends a redacted, images-only copy of the kept
+ * pages, which runs 2-4MB however big the original (base64 adds a third,
+ * and the API takes 32MB a request); anything over
  * DIRECT_UPLOAD_MAX_BYTES reaches here through the chunked upload
  * (lib/tax-recap/uploads.ts) rather than one request body. Scans are turned
  * away in the browser, so nothing near this size arrives any more.
  */
-export const PDF_MAX_BYTES = 12 * 1024 * 1024;
+export const PDF_MAX_BYTES = 20 * 1024 * 1024;
 /** What one request may carry. Vercel rejects bodies over ~4.5MB. */
 export const DIRECT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -609,7 +610,7 @@ function anthropic(): Anthropic {
 function checkPdf(pdf: Buffer) {
   if (!pdf.length) throw new TaxRecapExtractError("Empty PDF");
   if (pdf.length > PDF_MAX_BYTES) {
-    throw new TaxRecapExtractError("PDF must be under 24MB");
+    throw new TaxRecapExtractError(`PDF must be under ${PDF_MAX_BYTES / 1024 / 1024}MB`);
   }
   if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") {
     throw new TaxRecapExtractError("That file isn't a PDF");

@@ -26,6 +26,7 @@
     "sales:webhook": "node scripts/calendly-webhook.mjs",
     "leaderboard:seed": "node scripts/seed-leaderboard.mjs",
     "stats:activate-live": "node scripts/activate-live-revenue-stat.mjs",
+    "stats:activate-live-all": "node scripts/activate-live-stats.mjs",
     "recap:check": "node --import ./scripts/lib/resolve-ts.mjs scripts/tax-recap-derive-check.mjs",
     "recap:replay": "node --import ./scripts/lib/resolve-ts.mjs scripts/tax-recap-replay.mjs",
     "recap:failures": "node scripts/tax-recap-failures-pull.mjs",

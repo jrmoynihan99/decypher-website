@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { gate } from "./_gate";
 import { RecapInputError, sanitizeRecapInput } from "@/lib/tax-recap/schema";
@@ -23,6 +24,8 @@ export async function POST(req: Request) {
   try {
     const input = sanitizeRecapInput(body);
     const recap = await createRecap(input, session.email);
+    // the home page totals every recap (lib/tax-recap/public-stats.ts)
+    revalidatePath("/");
     return NextResponse.json({ ok: true, recap });
   } catch (e) {
     if (e instanceof RecapInputError || e instanceof TaxRecapStoreError) {

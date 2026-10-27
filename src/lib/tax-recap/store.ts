@@ -307,3 +307,47 @@ export async function listRecaps(): Promise<RecapSummary[]> {
     };
   });
 }
+
+/**
+ * One recap's figures, for the aggregates: the marketing one
+ * (lib/tax-recap/public-stats.ts), which reads the key and the numbers and
+ * never emits a name, and the portal's savings board (lib/tax-recap/board.ts),
+ * which shows the latest recaps by name and the scoreboard by builder.
+ */
+export type RecapFact = {
+  clientKey: string;
+  clientName: string;
+  taxYear: number;
+  savings: number;
+  /** The before return's total tax — the bill the savings came off. */
+  totalBefore: number;
+  /** The recap's "<year> income" (`RecapComputed.currentYearIncome`). */
+  income: number;
+  revoked: boolean;
+  /** Who saved it — the staff email the session carried. */
+  createdBy: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+/** Every recap, as facts. Revoked ones included: the numbers stay real. */
+export async function listRecapFacts(): Promise<RecapFact[]> {
+  if (!isConfigured()) return [];
+  const snap = await adminDb().collection(COLLECTION).get();
+  return snap.docs.map((d) => {
+    const doc = toDoc(d.id, d.data());
+    const c = computeRecap(doc);
+    return {
+      clientKey: clientKey(doc.clientName),
+      clientName: doc.clientName,
+      taxYear: doc.taxYear,
+      savings: c.savings,
+      totalBefore: c.before.totalTaxes,
+      income: c.currentYearIncome,
+      revoked: doc.revoked,
+      createdBy: doc.createdBy,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    };
+  });
+}

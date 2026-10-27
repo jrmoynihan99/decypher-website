@@ -19,6 +19,7 @@ import {
   slugToPath,
 } from "@/sanity/queries";
 import { creatorRevenueTimeline, withLiveStats } from "@/lib/quickbooks/public-stats";
+import { taxSavingsSummary } from "@/lib/tax-recap/public-stats";
 import { urlFor } from "@/sanity/image";
 import type { PageDoc } from "@/sanity/types";
 
@@ -30,15 +31,16 @@ import type { PageDoc } from "@/sanity/types";
 export async function renderPage(page: PageDoc) {
   switch (page._type) {
     case "homePage": {
-      // The stat token and the revenue graph share one snapshot read — see the
-      // cache() wrapper in public-stats.ts.
-      const [settings, creators, services, testimonials, revenue] =
+      // The stat tokens, the revenue graph and the savings strip share their
+      // reads — see the cache() wrappers in the two public-stats modules.
+      const [settings, creators, services, testimonials, revenue, taxSavings] =
         await Promise.all([
           getSiteSettings().then(withLiveStats),
           getCreators(),
           getServices(),
           getTestimonials(),
           creatorRevenueTimeline(),
+          taxSavingsSummary(),
         ]);
       return (
         <HomeTemplate
@@ -48,6 +50,7 @@ export async function renderPage(page: PageDoc) {
           services={services}
           testimonials={testimonials}
           revenue={revenue}
+          taxSavings={taxSavings}
         />
       );
     }

@@ -274,7 +274,31 @@ the tab is the tax team.
 - **Store.** `taxRecaps` in Firestore via `src/lib/tax-recap/store.ts`: the
   reviewed numbers, strategies, next steps, and the raw extraction as an audit
   trail. **Never the PDFs** — they hold SSNs and bank details. `savings` is
-  denormalised for the list (and, later, the marketing aggregate).
+  denormalised for the list and the marketing aggregate.
+- **The home page (2026-10-27).** `src/lib/tax-recap/public-stats.ts` adds
+  every recap up for the proof section at `/`: the total (also the
+  `{{taxSavings}}` stat token), each client's first-year savings (median,
+  average), the median share of the before bill that went away, this year's
+  clients by savings band, and three anonymised examples from the middle of
+  the range. `listRecapFacts` (store.ts) hands it figures with the client
+  reduced to a key; nothing named leaves the server. The rules — revoked
+  and loss-year recaps count in the total, bands count clients not recaps,
+  "this year" needs ten recaps — are in that file's header. The strip under
+  the stats is `components/home/TaxSavingsStrip.tsx` (ProofStats owns the
+  tabs and the pin). Create, update and delete call `revalidatePath("/")`,
+  so the page moves the day a recap is saved. Fewer than five recaps and
+  the strip isn't rendered at all.
+- **Savings board** (`/portal/tax-recap/savings`, the "Savings board" button
+  in the Tax Recap header; same `receipts` gate). The team's own sheet, read
+  live from the recaps on every load: lifetime tax saved with the split by
+  tax year, the last twelve months by recap date (against the twelve before,
+  month by month), the median and average saved per client in that window,
+  the median cut in the bill, and, scoped by a tax-year filter, clients by
+  savings band and a scoreboard of who saved what, keyed by the builder's
+  email (`createdBy`) since recaps carry no pod. The five latest recaps close
+  it. `src/lib/tax-recap/board.ts` computes it from the same facts the home
+  page uses; `components/portal/tax-recap/SavingsBoard.tsx` draws it with the
+  portal chart kit, every figure through the shared CountUp.
 - **Client page.** `/recap/<token>` — outside the `(site)` group (no marketing
   nav), `force-dynamic`, `noindex`, `no-store` (next.config). Token is 144
   random bits; a revoked recap 404s identically to a bad token. Print → the

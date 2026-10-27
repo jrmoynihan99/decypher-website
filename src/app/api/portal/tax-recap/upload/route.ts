@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: "Bad piece count" }, { status: 400 });
   }
   if (!Number.isInteger(size) || size < 1 || size > UPLOAD_MAX_BYTES) {
-    return NextResponse.json({ ok: false, message: "PDF must be under 24MB" }, { status: 400 });
+    return NextResponse.json({ ok: false, message: "PDF must be under 48MB" }, { status: 400 });
   }
   const rawName = form.get("name");
   const name = typeof rawName === "string" ? rawName.slice(0, 200) : "";

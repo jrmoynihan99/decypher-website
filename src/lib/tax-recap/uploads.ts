@@ -24,8 +24,12 @@ const CHUNKS = "chunks";
 
 /** Per-chunk payload. Firestore's doc ceiling is 1MiB including overhead. */
 export const UPLOAD_CHUNK_BYTES = 750 * 1024;
-/** Matches PDF_MAX_BYTES in extract.ts — the model's own request ceiling. */
-export const UPLOAD_MAX_BYTES = 24 * 1024 * 1024;
+/**
+ * The largest file that may be staged: a redacted copy on its way to the
+ * reader, or an original kept with a refused return. Mirrors FILE_MAX in
+ * the builder and FAILURE_FILE_MAX_BYTES in failures-store.ts.
+ */
+export const UPLOAD_MAX_BYTES = 48 * 1024 * 1024;
 export const UPLOAD_MAX_CHUNKS = Math.ceil(UPLOAD_MAX_BYTES / UPLOAD_CHUNK_BYTES);
 
 const STALE_MS = 2 * 60 * 60 * 1000;

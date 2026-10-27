@@ -68,7 +68,7 @@ export type FailureFileKind = (typeof FAILURE_FILE_KINDS)[number];
 export const KEEP_DAYS = 14;
 /** Per-chunk payload — Firestore's document ceiling is 1MiB with overhead (same as uploads.ts). */
 export const FAILURE_CHUNK_BYTES = 750 * 1024;
-export const FAILURE_FILE_MAX_BYTES = 24 * 1024 * 1024;
+export const FAILURE_FILE_MAX_BYTES = 48 * 1024 * 1024;
 
 export class TaxRecapFailureError extends Error {
   constructor(message: string) {
@@ -433,7 +433,7 @@ export async function keepOriginalChunks(
 ): Promise<void> {
   if (!isConfigured()) throw new TaxRecapFailureError("Firebase is not configured");
   if (!Number.isInteger(index) || index < 0 || index >= MAX_ORIGINALS) throw new TaxRecapFailureError("Bad file index");
-  if (meta.size > FAILURE_FILE_MAX_BYTES) throw new TaxRecapFailureError("PDF must be under 24MB");
+  if (meta.size > FAILURE_FILE_MAX_BYTES) throw new TaxRecapFailureError("PDF must be under 48MB");
   const r = ref(id);
   const snap = await r.get();
   if (!snap.exists) throw new TaxRecapFailureError("Failure not found");
@@ -481,7 +481,7 @@ export async function keepFileChunks(
   actor: string,
 ): Promise<KeptFile> {
   if (!isConfigured()) throw new TaxRecapFailureError("Firebase is not configured");
-  if (meta.size > FAILURE_FILE_MAX_BYTES) throw new TaxRecapFailureError("PDF must be under 24MB");
+  if (meta.size > FAILURE_FILE_MAX_BYTES) throw new TaxRecapFailureError("PDF must be under 48MB");
   const r = ref(id);
   const snap = await r.get();
   if (!snap.exists) throw new TaxRecapFailureError("Failure not found");
