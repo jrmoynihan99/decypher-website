@@ -30,6 +30,12 @@ if (!file) {
 }
 
 const doc = JSON.parse(readFileSync(file, "utf8"));
+if (doc.stage === "blocked") {
+  // "Save PDFs" on a print refused before reading: nothing was read, so there are no numbers.
+  console.log("Blocked before reading — no numbers were recorded, so there's nothing to replay. Its files are on the Refused returns page.");
+  for (const r of doc.reasons ?? []) console.log(`  · ${r}`);
+  process.exit(0);
+}
 const after = { ...emptyNumbers() };
 for (const k of RETURN_FIELD_KEYS) if (doc.after && typeof doc.after[k] === "number") after[k] = doc.after[k];
 let entity = null;

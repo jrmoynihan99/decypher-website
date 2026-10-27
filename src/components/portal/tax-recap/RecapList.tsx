@@ -1,17 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Panel, TableCell, TableHead } from "@/components/portal/widgets/ui";
+import {
+  Field,
+  Mono,
+  Panel,
+  SearchSelect,
+  SelectInput,
+  TableCell,
+  TableHead,
+  type SearchOption,
+} from "@/components/portal/widgets/ui";
 import { money, shortDate } from "@/lib/widget-format";
+import { clientKey } from "@/lib/tax-recap/schema";
 import type { RecapSummary } from "@/lib/tax-recap/store";
 
 /**
- * Every recap built so far, newest first. Copy hands over the client link,
- * PDF downloads the attachment, Edit reopens the builder on the saved
- * numbers (no re-read — the extraction is stored), Delete removes the recap
- * for good, link and all, after a confirm.
+ * Every recap built so far, newest first, narrowed by client and by year.
+ * Copy hands over the client link, PDF downloads the attachment, Edit
+ * reopens the builder on the saved numbers (no re-read — the extraction is
+ * stored), Delete removes the recap for good, link and all, after a confirm.
  *
  * The rows come from the server on every render, so a save in the builder
  * shows up here as soon as its router.refresh() resolves.
@@ -29,6 +39,34 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
    */
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
   const recaps = fromServer.filter((r) => !deleted.has(r.id));
+
+  /** A client by `clientKey`, so "JANE M DOE" and "Jane Doe" are one choice; "" is every client. */
+  const [client, setClient] = useState("");
+  const [year, setYear] = useState("");
+  const clients = useMemo(() => {
+    // Newest first, so a client's label is the name on their latest recap.
+    const byKey = new Map<string, string>();
+    for (const r of fromServer) {
+      const key = clientKey(r.clientName);
+      if (key && !byKey.has(key)) byKey.set(key, r.clientName);
+    }
+    const named: SearchOption[] = [...byKey]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [{ value: "", label: "All clients" }, ...named];
+  }, [fromServer]);
+  const years = useMemo(
+    () => [...new Set(fromServer.map((r) => r.taxYear))].sort((a, b) => b - a),
+    [fromServer],
+  );
+  // A choice whose last recap was just deleted falls back to all, not to an empty table.
+  const activeClient = clients.some((o) => o.value === client) ? client : "";
+  const activeYear = years.includes(Number(year)) ? year : "";
+  const shown = recaps.filter(
+    (r) =>
+      (!activeClient || clientKey(r.clientName) === activeClient) &&
+      (!activeYear || r.taxYear === Number(activeYear)),
+  );
 
   const copy = async (r: RecapSummary) => {
     try {
@@ -78,6 +116,30 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
       bodyClassName="!px-0 !py-0"
       action={error ? <span className="text-[12px] text-danger">{error}</span> : null}
     >
+      <div className="flex flex-wrap items-end gap-3 px-4 py-3.5">
+        <SearchSelect
+          label="Client"
+          className="w-[280px]"
+          value={activeClient}
+          onChange={setClient}
+          options={clients}
+          placeholder="Search clients…"
+          emptyLabel="No client by that name."
+        />
+        <Field label="Year" className="w-[140px]">
+          <SelectInput value={activeYear} onChange={(e) => setYear(e.target.value)}>
+            <option value="">All years</option>
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
+        <Mono className="pb-3 text-dusk">
+          {shown.length} of {recaps.length}
+        </Mono>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -92,7 +154,14 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
             </tr>
           </thead>
           <tbody>
-            {recaps.map((r) => (
+            {shown.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-[13px] text-dusk">
+                  Nothing matches that filter.
+                </td>
+              </tr>
+            ) : null}
+            {shown.map((r) => (
               <tr key={r.id} className="even:bg-white/[0.02]">
                 <TableCell align="left">
                   <span className="font-body text-fog">{r.clientName}</span>

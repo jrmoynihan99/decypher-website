@@ -25,7 +25,16 @@ import {
   type DeriveMore,
   type Mismatch,
 } from "@/lib/tax-recap/derive";
-import { entityEins, entityFormFromFileName, entityW2Pages, type EntityW2Page, type ReturnKind } from "@/lib/tax-recap/pages";
+import {
+  clientFromFileName,
+  entityEins,
+  entityFormFromFileName,
+  entityW2Pages,
+  yearFromFileName,
+  type EntityW2Page,
+  type ReturnKind,
+} from "@/lib/tax-recap/pages";
+import type { RecapSummary } from "@/lib/tax-recap/store";
 import { US_STATES, type TableSet } from "@/lib/tax-recap/tables";
 import {
   ADJUSTMENTS_TOLERANCE,
@@ -40,6 +49,7 @@ import {
   RETURN_FIELD_KEYS,
   SCHEDULE_1_ADJUSTMENT_KEYS,
   asMoney,
+  clientKey,
   displayName,
   emptyEntityNumbers,
   emptyNumbers,
@@ -414,12 +424,19 @@ function KeepLine({
   );
 }
 
+/** Why a return isn't read: its client already has a recap for that year. */
+const duplicateMessage = (r: Pick<RecapSummary, "clientName" | "taxYear">) =>
+  `${r.clientName} already has a ${r.taxYear} recap. Open it from Saved recaps below to edit it, or delete it there to run this return again.`;
+
 export default function TaxRecapBuilder({
   initial,
+  existing,
   tables,
   fromFailure = null,
 }: {
   initial: RecapDoc | null;
+  /** Every saved recap: a client and year already among them isn't read again. */
+  existing: Pick<RecapSummary, "id" | "clientName" | "taxYear">[];
   /** The year cards the engine derives with — seeds plus anything saved on the Tax Tables page. */
   tables: TableSet;
   /** Opened from a refused return that kept its files (Refused returns → "Open in builder"): they load with one click. */
@@ -509,6 +526,13 @@ export default function TaxRecapBuilder({
     () => "",
   );
 
+  /** The saved recap this client and year would duplicate, if any — the one open here aside. */
+  const duplicateOf = (name: string | null | undefined, year: number | null | undefined) => {
+    const key = clientKey(name ?? "");
+    if (!key || !year) return null;
+    return existing.find((r) => r.id !== saved?.id && r.taxYear === year && clientKey(r.clientName) === key) ?? null;
+  };
+
   const reading =
     sides.before.status === "reading" ||
     sides.after.status === "reading" ||
@@ -527,6 +551,12 @@ export default function TaxRecapBuilder({
     id: string;
     kept: Partial<Record<Kind, "keeping" | "kept" | "failed">>;
     originals?: { count: number; state: "saving" | "saved" | "failed" };
+  } | null>(null);
+  /** "Save PDFs" for prints refused before reading: the record they went to, and any file too big to go. */
+  const [blockedSave, setBlockedSave] = useState<{
+    state: "saving" | "saved" | "failed";
+    id?: string;
+    skipped?: string[];
   } | null>(null);
   const preparedRef = useRef<Partial<Record<Kind, { data: Blob; name: string; pages: number }>>>({});
   const readInfoRef = useRef<Partial<Record<Kind, { warnings: string[]; total: number; sent: number }>>>({});
@@ -593,7 +623,13 @@ export default function TaxRecapBuilder({
     const mark = (state: "saving" | "saved" | "failed") =>
       setFailure((f) => (f && f.id === id ? { ...f, originals: { count: sendable.length, state } } : f));
     mark("saving");
-    let ok = sendable.length === files.length;
+    const ok = (await sendOriginals(id, sendable)) && sendable.length === files.length;
+    mark(ok ? "saved" : "failed");
+  };
+
+  /** The files sent to a recorded refusal in pieces, three tries a batch. True when every one went. */
+  const sendOriginals = async (id: string, sendable: File[]): Promise<boolean> => {
+    let ok = true;
     for (const [index, file] of sendable.entries()) {
       try {
         const total = Math.ceil(file.size / CHUNK);
@@ -617,7 +653,53 @@ export default function TaxRecapBuilder({
         ok = false;
       }
     }
-    mark(ok ? "saved" : "failed");
+    return ok;
+  };
+
+  /**
+   * "Save PDFs": the prints refused before reading (`redactionBlock` — a
+   * scan, a copy re-saved through another program) recorded on the Refused
+   * returns page with every file dropped, as dropped, so the formats the
+   * builder can't take yet can be collected and looked at. Nothing is read
+   * and the engine isn't involved. A retry after a failed upload resends to
+   * the same record rather than opening another.
+   */
+  const saveBlocked = async () => {
+    const blocked = picked.filter((p) => p.analysis && redactionBlock(p.analysis));
+    if (!blocked.length) return;
+    const files = picked.map((p) => p.file);
+    const sendable = files.filter((f) => f.size > 0 && f.size <= ORIGINAL_MAX_BYTES).slice(0, MAX_ORIGINALS);
+    const lead = blocked.find((p) => p.analysis?.kind === "individual") ?? blocked[0];
+    setBlockedSave((s) => ({ state: "saving", id: s?.id }));
+    try {
+      let id = blockedSave?.id;
+      if (!id) {
+        const res = await fetch("/api/portal/tax-recap/failures", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stage: "blocked",
+            clientName: displayName(
+              picked.find((p) => p.analysis?.kind === "individual")?.analysis?.name ?? clientFromFileName(lead.file.name),
+            ),
+            meta: { taxYear: yearFromFileName(lead.file.name) },
+            reasons: blocked.map((p) => `${p.file.name}: ${redactionBlock(p.analysis!)}`),
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string };
+        if (!res.ok || !data.ok || !data.id) throw new Error("record failed");
+        id = data.id;
+      }
+      const ok = await sendOriginals(id, sendable);
+      setBlockedSave({
+        state: ok ? "saved" : "failed",
+        id,
+        skipped: files.filter((f) => !sendable.includes(f)).map((f) => f.name),
+      });
+      if (ok) router.refresh();
+    } catch {
+      setBlockedSave((s) => ({ state: "failed", id: s?.id }));
+    }
   };
 
   /** Keep the redacted copies that went to the reader with the recorded failure. */
@@ -692,6 +774,7 @@ export default function TaxRecapBuilder({
     );
     if (!list.length) return;
     setPickError(null);
+    setBlockedSave(null);
     const fresh: Picked[] = list.map((file) => ({
       id: crypto.randomUUID(),
       file,
@@ -737,6 +820,7 @@ export default function TaxRecapBuilder({
   const removePicked = (id: string) => {
     setPicked((p) => p.filter((x) => x.id !== id));
     setPickError(null);
+    setBlockedSave(null);
     setSides((s) => ({ ...s, after: idleSide(), entity: idleSide(), city: idleSide() }));
     setMoreEntities([]);
   };
@@ -1323,6 +1407,13 @@ export default function TaxRecapBuilder({
     if (sorted.entity && !ent) return;
     if (sorted.city && !city) return;
     if (extras.some((x) => !x)) return;
+    // A 1040 whose file name didn't carry the year gets past the check at
+    // drop; the year the reader found catches it here, before review.
+    const dup = duplicateOf(displayName(a.taxpayerName || b?.taxpayerName || ""), a.taxYear ?? b?.taxYear);
+    if (dup) {
+      fail("after", new Error(duplicateMessage(dup)));
+      return;
+    }
 
     // Everything else on the 1040: each other entity return with its own
     // form and state, and each other state return the reader found.
@@ -1783,11 +1874,20 @@ export default function TaxRecapBuilder({
     (!!sides.before.file && sides.before.file.size > FILE_MAX);
   // A print that can't be redacted is never read (pdf-prepare `redactionBlock`).
   const anyUnsendable = picked.some((p) => p.analysis && redactionBlock(p.analysis));
+  // Nor a 1040 already recapped: the name read off it here and the year in
+  // its file name, matched against the saved recaps before anything is sent.
+  const duplicates: Record<string, string> = {};
+  for (const p of picked) {
+    if (p.analysis?.kind !== "individual") continue;
+    const dup = duplicateOf(p.analysis.name, yearFromFileName(p.file.name));
+    if (dup) duplicates[p.id] = duplicateMessage(dup);
+  }
   const canRead =
     picked.length > 0 &&
     picked.every((p) => p.status !== "checking") &&
     !anyTooBig &&
     !anyUnsendable &&
+    !Object.keys(duplicates).length &&
     !reading;
   const deriving = !sides.before.file;
   const refusal =
@@ -1964,6 +2064,7 @@ export default function TaxRecapBuilder({
                 reading={reading}
                 disabled={reading}
                 error={pickError}
+                duplicates={duplicates}
                 onAdd={addFiles}
                 onRemove={removePicked}
                 onKind={setPickedKind}
@@ -1984,6 +2085,42 @@ export default function TaxRecapBuilder({
                         ? "The return is read by Claude — the 1120-S or 1065 too, for an S corporation or a partnership — the before column is computed from it with every write-off at zero, the savings are split by strategy, and you check every number before anything is saved."
                         : "The before print is read by Claude instead of computing the before column. Nothing is stored until you save."}
                     </span>
+                    {anyUnsendable ? (
+                      <span className="flex max-w-md flex-col items-center gap-2 text-[12px] leading-snug text-dusk">
+                        <button
+                          type="button"
+                          onClick={saveBlocked}
+                          disabled={blockedSave?.state === "saving" || blockedSave?.state === "saved"}
+                          className={btnGhost}
+                        >
+                          {blockedSave?.state === "saving"
+                            ? "Saving…"
+                            : blockedSave?.state === "saved"
+                              ? "PDFs saved ✓"
+                              : "Save PDFs"}
+                        </button>
+                        {blockedSave?.state === "saved" ? (
+                          <span>
+                            Kept on{" "}
+                            <Link href="/portal/tax-recap/failures" className="text-fog">
+                              Refused returns
+                            </Link>{" "}
+                            for a developer to look at
+                            {blockedSave.skipped?.length
+                              ? ` — except ${blockedSave.skipped.join(", ")}, over the 24MB limit`
+                              : ""}
+                            .
+                          </span>
+                        ) : blockedSave?.state === "failed" ? (
+                          <span className="text-danger">Couldn&rsquo;t save them — try again.</span>
+                        ) : (
+                          <span>
+                            Keeps these files as uploaded on Refused returns, so a developer can see
+                            why they&rsquo;re refused.
+                          </span>
+                        )}
+                      </span>
+                    ) : null}
                   </>
                 }
               />
@@ -3057,6 +3194,7 @@ function HeroDrop({
   reading,
   disabled,
   error,
+  duplicates,
   onAdd,
   onRemove,
   onKind,
@@ -3069,6 +3207,8 @@ function HeroDrop({
   reading: boolean;
   disabled: boolean;
   error: string | null;
+  /** By picked file id: why that 1040 won't be read — its client and year are already recapped. */
+  duplicates: Record<string, string>;
   onAdd: (files: FileList | File[]) => void;
   onRemove: (id: string) => void;
   /** Staff saying what an unrecognised file is. */
@@ -3083,7 +3223,8 @@ function HeroDrop({
     sides.entity.status === "error" ||
     sides.city.status === "error" ||
     more.some((s) => s.status === "error") ||
-    !!error;
+    !!error ||
+    Object.keys(duplicates).length > 0;
   const allDone = picked.length > 0 && sides.after.status === "done";
   const tone = anyError
     ? "border-danger/60"
@@ -3266,6 +3407,11 @@ function HeroDrop({
                     {errored ? (
                       <div className="mt-1 text-[12.5px] text-danger">
                         {side.message}
+                      </div>
+                    ) : null}
+                    {duplicates[p.id] ? (
+                      <div className="mt-1 text-[12.5px] leading-snug text-danger">
+                        {duplicates[p.id]}
                       </div>
                     ) : null}
                     {p.status !== "checking" && p.analysis && redactionBlock(p.analysis) ? (

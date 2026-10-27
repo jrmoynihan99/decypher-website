@@ -5,7 +5,8 @@ import { TaxRecapFailureError, recordFailure, sanitizeFailureInput } from "@/lib
 /**
  * Record a refused derivation: everything the engine was handed and what it
  * said (lib/tax-recap/failures-store). The builder posts it the moment the
- * engine refuses; no PDF comes with it.
+ * engine refuses, or with stage `blocked` when staff save prints refused
+ * before reading; no PDF comes with it (the originals follow, ./[id]/originals).
  */
 export async function POST(req: Request) {
   const session = await gate();

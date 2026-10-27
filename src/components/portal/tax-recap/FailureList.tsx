@@ -64,6 +64,8 @@ export default function FailureList({ failures: fromServer, tables }: { failures
     .filter((f) => filter === "all" || f.status === filter);
   const counts = { open: 0, fixed: 0, dismissed: 0 };
   for (const f of fromServer) if (!deleted.has(f.id)) counts[statuses[f.id] ?? f.status]++;
+  /** The ones the engine refused. A print blocked before reading has no numbers to run again. */
+  const retryable = failures.filter((f) => f.stage !== "blocked");
 
   const setStatus = async (f: FailureSummary, status: FailureStatus) => {
     setBusy(f.id);
@@ -110,7 +112,7 @@ export default function FailureList({ failures: fromServer, tables }: { failures
    * and nothing is saved: it says which would go through today.
    */
   const retryAll = async () => {
-    const list = failures;
+    const list = retryable;
     if (!list.length) return;
     setError(null);
     setRetried({});
@@ -198,7 +200,7 @@ export default function FailureList({ failures: fromServer, tables }: { failures
         </div>
       }
     >
-      {failures.length ? (
+      {retryable.length ? (
         <div className="border-b border-white/[0.06] px-5 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -209,7 +211,7 @@ export default function FailureList({ failures: fromServer, tables }: { failures
             >
               {progress && progress.done < progress.total
                 ? `Retrying… ${progress.done} of ${progress.total}`
-                : `Retry ${filter === "all" ? "all" : `the ${failures.length} ${filter}`} with the current engine (v${DERIVE_VERSION})`}
+                : `Retry ${filter === "all" && retryable.length === failures.length ? "all" : `the ${retryable.length}${filter === "all" ? "" : ` ${filter}`}`} with the current engine (v${DERIVE_VERSION})`}
             </button>
             {progress ? (
               <span className="font-body text-[12.5px] text-mist">
@@ -258,9 +260,16 @@ export default function FailureList({ failures: fromServer, tables }: { failures
                 >
                   <span className="font-body text-[14px] text-fog">{f.clientName || "Unnamed"}</span>
                   <span className="font-mono text-[11px] uppercase tracking-[1px] text-muted">
-                    {f.taxYear ?? "year ?"} · {f.filingStatus ?? "status ?"} · {f.stateCode ?? "no state"}
-                    {f.entityForm ? ` · ${f.entityForm}` : ""} · engine v{f.engineVersion || "?"}
-                    {f.stage === "rederive" ? " · on recompute" : ""}
+                    {f.stage === "blocked" ? (
+                      // Never read: there's no status, state or engine to show.
+                      <>{f.taxYear ?? "year ?"} · blocked before reading</>
+                    ) : (
+                      <>
+                        {f.taxYear ?? "year ?"} · {f.filingStatus ?? "status ?"} · {f.stateCode ?? "no state"}
+                        {f.entityForm ? ` · ${f.entityForm}` : ""} · engine v{f.engineVersion || "?"}
+                        {f.stage === "rederive" ? " · on recompute" : ""}
+                      </>
+                    )}
                     {originals.length ? ` · ${originals.length} file${originals.length === 1 ? "" : "s"}` : ""}
                   </span>
                   <Chip tone={f.status === "open" ? "warn" : f.status === "fixed" ? "pos" : "mute"}>{f.status}</Chip>
@@ -351,19 +360,23 @@ export default function FailureList({ failures: fromServer, tables }: { failures
                       </Section>
                     ) : null}
                     <div className="flex flex-wrap items-center gap-2">
-                      <a href={`/api/portal/tax-recap/failures/${f.id}?download=1`} className={action}>
-                        JSON for replay
-                      </a>
-                      <button type="button" disabled={busy === f.id} onClick={() => copyFixture(f)} className={action}>
-                        {copied === f.id ? "Copied" : "Copy fixture"}
-                      </button>
+                      {f.stage !== "blocked" ? (
+                        <>
+                          <a href={`/api/portal/tax-recap/failures/${f.id}?download=1`} className={action}>
+                            JSON for replay
+                          </a>
+                          <button type="button" disabled={busy === f.id} onClick={() => copyFixture(f)} className={action}>
+                            {copied === f.id ? "Copied" : "Copy fixture"}
+                          </button>
+                        </>
+                      ) : null}
                       {kept.map(([kind, v]) => (
                         <a key={kind} href={`/api/portal/tax-recap/failures/${f.id}/file?kind=${kind}`} className={action}>
                           redacted {kind === "entity" ? (f.entityForm ?? "entity") : kind} PDF · until {shortDate(new Date(v.expiresAt))}
                         </a>
                       ))}
                       {!kept.length && !originals.length ? <span className="font-body text-[11.5px] text-dusk">No PDF kept</span> : null}
-                      <span className="mx-1 text-dusk">|</span>
+                      {f.stage !== "blocked" ? <span className="mx-1 text-dusk">|</span> : null}
                       {f.status !== "fixed" ? (
                         <button type="button" disabled={busy === f.id} onClick={() => setStatus(f, "fixed")} className={`${action} hover:border-teal hover:text-teal`}>
                           Mark fixed

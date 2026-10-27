@@ -392,6 +392,19 @@ export function kindFromFileName(name: string): ReturnKind | null {
   return null;
 }
 
+/** The tax year a print's name carries ("<client> - 2025 1040 …"); null when it carries none. */
+export function yearFromFileName(name: string): number | null {
+  const m = name.match(/(?:^|\D)(20[1-4]\d)(?!\d)/);
+  const year = m ? Number(m[1]) : NaN;
+  return year >= 2015 && year <= 2040 ? year : null;
+}
+
+/** The client a print's name carries — the words before " - " in the firm's exports; "" when it doesn't follow them. */
+export function clientFromFileName(name: string): string {
+  const i = name.indexOf(" - ");
+  return i > 0 ? name.slice(0, i).trim() : "";
+}
+
 /** Which federal form an entity print's name says it is; null when it doesn't say. */
 export function entityFormFromFileName(name: string): "1120-S" | "1065" | null {
   const t = name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").toUpperCase();

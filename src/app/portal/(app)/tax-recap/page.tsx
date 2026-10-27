@@ -75,6 +75,7 @@ export default async function TaxRecapPage({
         <TaxRecapBuilder
           key={editing?.id ?? (fromFailure ? `failure-${fromFailure.id}` : "new")}
           initial={editing}
+          existing={recaps}
           tables={tables}
           fromFailure={fromFailure}
         />

@@ -1176,6 +1176,20 @@ export function displayName(name: string): string {
     .replace(/(^|[\s\-'])([a-z])/g, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
+/**
+ * A client's name as compared for duplicates — one recap per client per
+ * year. Case, spacing, punctuation and middle initials aside: "JANE M. DOE",
+ * "Jane M Doe" and "Jane Doe" are one person.
+ */
+export function clientKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['’.]/g, "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 1)
+    .join(" ");
+}
+
 /* ─────────────────────────────── sanitisers ─────────────────────────────── */
 
 const MAX_MONEY = 1_000_000_000;

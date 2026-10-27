@@ -38,7 +38,9 @@ export default async function TaxRecapFailuresPage() {
         it into a test. The files dropped for a refusal are kept with it as they were uploaded
         (from 2026-10-22 on) until the refusal is deleted; the redacted copies the reader saw,
         when someone pressed &ldquo;keep&rdquo;, for {`${KEEP_DAYS} days`}. &ldquo;Retry&rdquo; runs
-        every refusal again with the engine as it is now.
+        every refusal again with the engine as it is now. Prints blocked before reading (a scan, a
+        copy re-saved through another program) are here too when someone pressed &ldquo;Save
+        PDFs&rdquo;: just the reasons and the files, nothing to replay.
       </p>
 
       <div className="mt-9">

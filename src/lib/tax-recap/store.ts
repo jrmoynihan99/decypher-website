@@ -2,6 +2,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import {
+  clientKey,
   sanitizeAnalysis,
   sanitizeDerivedBefore,
   sanitizeEntityExtract,
@@ -97,8 +98,31 @@ function ref(id: string) {
   return adminDb().collection(COLLECTION).doc(id);
 }
 
+/**
+ * One recap per client per year (names compared by `clientKey`). The same
+ * return run twice would hand out two links with two sets of numbers, so the
+ * second save is refused and the first is the one to edit. The builder
+ * refuses before reading; this is the backstop. `exceptId` is the recap
+ * being edited, which doesn't clash with itself.
+ */
+async function assertNoDuplicate(clientName: string, taxYear: number, exceptId?: string): Promise<void> {
+  const key = clientKey(clientName);
+  const snap = await adminDb()
+    .collection(COLLECTION)
+    .where("taxYear", "==", taxYear)
+    .select("clientName")
+    .get();
+  const clash = snap.docs.find((d) => d.id !== exceptId && clientKey(String(d.get("clientName") ?? "")) === key);
+  if (clash) {
+    throw new TaxRecapStoreError(
+      `${clash.get("clientName")} already has a ${taxYear} recap. Edit that one from Saved recaps, or delete it first.`,
+    );
+  }
+}
+
 export async function createRecap(input: RecapInput, actor: string): Promise<RecapDoc> {
   if (!isConfigured()) throw new TaxRecapStoreError("Firebase is not configured");
+  await assertNoDuplicate(input.clientName, input.taxYear);
   const now = new Date();
   const doc = {
     ...input,
@@ -148,6 +172,10 @@ export async function updateRecap(
       edits.derivedBefore !== undefined ? edits.derivedBefore : current.derivedBefore,
     analysis: edits.analysis !== undefined ? edits.analysis : current.analysis,
   };
+  // only a rename or a change of year can make a new clash
+  if (clientKey(merged.clientName) !== clientKey(current.clientName) || merged.taxYear !== current.taxYear) {
+    await assertNoDuplicate(merged.clientName, merged.taxYear, id);
+  }
   await r.update({
     ...merged,
     revoked: edits.revoked !== undefined ? edits.revoked : current.revoked,
@@ -257,13 +285,10 @@ export type RecapSummary = {
   updatedAt: string | null;
 };
 
-export async function listRecaps(limit = 100): Promise<RecapSummary[]> {
+/** Every recap, newest first — no cap, so the earliest ones stay reachable from the list. */
+export async function listRecaps(): Promise<RecapSummary[]> {
   if (!isConfigured()) return [];
-  const snap = await adminDb()
-    .collection(COLLECTION)
-    .orderBy("createdAt", "desc")
-    .limit(limit)
-    .get();
+  const snap = await adminDb().collection(COLLECTION).orderBy("createdAt", "desc").get();
   return snap.docs.map((d) => {
     const doc = toDoc(d.id, d.data());
     const c = computeRecap(doc);

@@ -45,6 +45,12 @@ import {
  *  - The redacted copies that went to the reader (`files`), when staff press
  *    "keep" — trimmed to the pages read, identities painted over: what the
  *    model saw, which is what a reader bug needs. Swept after KEEP_DAYS.
+ *
+ * A third kind of record, stage `blocked`, is a print refused before it was
+ * read at all (pdf-prepare `redactionBlock`: a scan, a copy re-saved through
+ * another program) that staff chose to "Save PDFs" for. No numbers, no
+ * extraction, no engine: the reasons and the originals, so the formats the
+ * builder can't take yet can be collected and looked at.
  */
 
 const COLLECTION = "taxRecapFailures";
@@ -89,8 +95,12 @@ export type KeptOriginal = { index: number; name: string; size: number };
 
 /** What the builder sends when the engine refuses. */
 export type FailureInput = {
-  /** Where it was refused: the first derivation, or a recompute from the edited grid. */
-  stage: "derive" | "rederive";
+  /**
+   * Where it was refused: the first derivation, a recompute from the edited
+   * grid, or before anything was read (a print that can't be redacted; see
+   * the header).
+   */
+  stage: "derive" | "rederive" | "blocked";
   clientName: string;
   engineVersion: string;
   meta: DeriveMeta;
@@ -226,7 +236,7 @@ export function sanitizeFailureInput(raw: unknown): FailureInput {
   const reasons = strings(r.reasons, 20, 800);
   if (!reasons.length) throw new TaxRecapFailureError("A failure needs at least one reason");
   return {
-    stage: r.stage === "rederive" ? "rederive" : "derive",
+    stage: r.stage === "rederive" || r.stage === "blocked" ? r.stage : "derive",
     clientName: text(r.clientName, 80),
     engineVersion: text(r.engineVersion, 20),
     meta: sanitizeMeta(r.meta),
