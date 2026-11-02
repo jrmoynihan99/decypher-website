@@ -9,6 +9,7 @@ import {
   testimonial,
   videoTestimonial,
 } from "./collections";
+import { faqCategory, faqPage, faqQuestion } from "./faq";
 import { legalPage } from "./legal";
 import {
   ctaBlock,
@@ -62,6 +63,10 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   teamMember,
   service,
   jobOpening,
+  // the Creator Tax FAQ (/faq)
+  faqPage,
+  faqCategory,
+  faqQuestion,
   // portal resources (the staff Tools Hub's PDFs)
   resourceCategory,
   resource,

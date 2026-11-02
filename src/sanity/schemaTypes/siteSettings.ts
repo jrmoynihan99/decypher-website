@@ -146,13 +146,24 @@ export const siteSettings = defineType({
         "The base snippet from your ads or analytics platform — the Meta pixel, a Google tag, GTM — pasted whole, script tags and all. It runs on every page of the site, which is what lets those platforms count a visit to a thank-you page as a conversion. Per-campaign conversion snippets go on the individual page instead (Thank You Pages → Conversion tracking code). Give it a minute or two after publishing before checking the live site. Anything pasted here runs in your visitors' browsers on every page, so only paste code you got from the platform itself.",
     }),
     defineField({
+      name: "featuredFaqs",
+      title: "Questions on Home",
+      type: "array",
+      group: "faq",
+      of: [{ type: "reference", to: [{ type: "faqQuestion" }] }],
+      validation: (r) => r.unique().max(10),
+      description:
+        "Picked from the Creator Tax FAQ (sidebar → Creator Tax FAQ), in this order. Shown on Home and on every affiliate page, each opening to its short answer and a link to the full page. Six reads well.",
+    }),
+    // The pre-FAQ inline list. Hidden rather than removed so the old copy
+    // stays in the dataset; nothing renders it since featuredFaqs replaced it.
+    defineField({
       name: "faqs",
-      title: "Questions",
+      title: "Questions (old)",
       type: "array",
       group: "faq",
       of: [{ type: "faqItem" }],
-      description:
-        "Asked and answered once, shown on Home and on every affiliate page. Editing one here updates all of them.",
+      hidden: true,
     }),
   ],
   preview: { prepare: () => ({ title: "Site Settings" }) },

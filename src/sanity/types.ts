@@ -126,8 +126,12 @@ export interface SiteSettings {
   };
   stats?: StatContent[];
   statsDisclaimer?: string;
-  /** Shared across Home and every affiliate page — edited in one place. */
+  /** The pre-FAQ inline list — hidden in Studio, rendered nowhere. */
   faqs?: FaqContent[];
+  /** Creator Tax FAQ picks for Home and every affiliate page, in order. */
+  featuredFaqs?: FaqTeaser[];
+  /** How many questions the full FAQ has, for the "see all" link. */
+  faqCount?: number;
   /** Envelope for the estimator's lead email; env vars are the fallback. */
   leadEmail?: LeadEmailSettings;
   /** Base analytics/pixel snippet, injected on every page. Empty = none. */
@@ -413,4 +417,59 @@ export interface CmsLegalPage {
   effectiveDate?: string;
   body: PortableTextBlock[];
   seo?: SeoContent;
+}
+
+// ── Creator Tax FAQ ─────────────────────────────────────────────────
+
+/** The slice of a question a list or the home page accordion needs. */
+export interface FaqTeaser {
+  slug: string;
+  question: string;
+  shortAnswer: string;
+}
+
+export type FaqNextStep = "booking" | "masterClass" | "estimator";
+
+export interface FaqCtaCopy {
+  prompt?: string;
+  button?: string;
+}
+
+/** The faqPage singleton: everything on the FAQ that isn't a question. */
+export interface CmsFaqPage {
+  eyebrow?: string;
+  title?: string;
+  intro?: string[];
+  author?: { name?: string; jobTitle?: string };
+  generalNote?: string;
+  whereAreYou?: { situation?: string; question?: { slug: string; question: string } | null }[];
+  cta?: {
+    booking?: FaqCtaCopy;
+    masterClass?: FaqCtaCopy & { url?: string };
+    estimator?: FaqCtaCopy;
+  };
+  disclaimer?: string;
+  footerLine?: string;
+  seo?: SeoContent;
+}
+
+export interface CmsFaqCategory {
+  id: string;
+  title: string;
+  questions: FaqTeaser[];
+}
+
+export interface CmsFaqHub {
+  page: CmsFaqPage | null;
+  categories: CmsFaqCategory[];
+  /** Newest _updatedAt across the questions and the page — the hub's "Updated". */
+  updatedAt: string | null;
+}
+
+export interface CmsFaqQuestion extends FaqTeaser {
+  category: string;
+  body: PortableTextBlock[];
+  related: { slug: string; question: string }[];
+  nextStep: FaqNextStep;
+  updatedAt: string;
 }

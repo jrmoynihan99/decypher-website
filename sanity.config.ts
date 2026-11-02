@@ -1,5 +1,6 @@
 import { defineConfig } from "sanity";
 import { structureTool } from "sanity/structure";
+import { table } from "@sanity/table";
 import { visionTool } from "@sanity/vision";
 import { dataset, projectId } from "@/sanity/env";
 import { schemaTypes } from "@/sanity/schemaTypes";
@@ -12,6 +13,7 @@ const SINGLETONS = new Set([
   "creatorsPage",
   "teamPage",
   "schedulePage",
+  "faqPage",
   "siteSettings",
 ]);
 
@@ -21,11 +23,24 @@ export default defineConfig({
   basePath: "/studio",
   projectId,
   dataset,
-  plugins: [structureTool({ structure }), visionTool()],
+  // table(): the `table` block type, for tables inside FAQ answers
+  plugins: [structureTool({ structure }), visionTool(), table()],
   schema: {
     types: schemaTypes,
-    templates: (templates) =>
-      templates.filter((t) => !SINGLETONS.has(t.schemaType)),
+    templates: (templates) => [
+      ...templates.filter((t) => !SINGLETONS.has(t.schemaType)),
+      // "Questions by category" → new: the question arrives already filed
+      {
+        id: "faqQuestion-in-category",
+        title: "FAQ question in this category",
+        schemaType: "faqQuestion",
+        parameters: [{ name: "categoryId", type: "string" }],
+        value: ({ categoryId }: { categoryId: string }) => ({
+          category: { _type: "reference", _ref: categoryId },
+          nextStep: "booking",
+        }),
+      },
+    ],
   },
   document: {
     // singletons can't be duplicated or deleted from the UI

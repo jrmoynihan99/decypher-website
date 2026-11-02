@@ -2,6 +2,9 @@ import type { Creator } from "@/lib/creators";
 import { client, freshClient } from "./client";
 import { urlFor } from "./image";
 import type {
+  CmsFaqHub,
+  CmsFaqPage,
+  CmsFaqQuestion,
   CmsJob,
   CmsLeaderboardPage,
   CmsLegalPage,
@@ -241,6 +244,76 @@ export async function getAllLegalPageSlugs(): Promise<string[]> {
   );
 }
 
+// ── Creator Tax FAQ ─────────────────────────────────────────────────
+
+/**
+ * All four read through freshClient, like the thank-you queries: they run at
+ * build and revalidate time only (the FAQ pages are static), and a stale CDN
+ * read of a just-published question would freeze a 404 or a missing hub entry
+ * into the ISR cache until tomorrow. See client.ts.
+ */
+
+const FAQ_PAGE_PROJECTION = `{
+  eyebrow, title, intro, author, generalNote,
+  whereAreYou[]{ situation, "question": question->{ "slug": slug.current, question } },
+  cta, disclaimer, footerLine, seo
+}`;
+
+export async function getFaqHub(): Promise<CmsFaqHub> {
+  const hub: CmsFaqHub | null = await freshClient.fetch(
+    `{
+      "page": *[_type == "faqPage"][0]${FAQ_PAGE_PROJECTION},
+      "categories": *[_type == "faqCategory"] | order(order asc, title asc) {
+        "id": _id, title,
+        "questions": *[_type == "faqQuestion" && category._ref == ^._id && defined(slug.current)]
+          | order(coalesce(order, 9999) asc, question asc)
+          { "slug": slug.current, question, shortAnswer }
+      }[count(questions) > 0],
+      "updatedAt": *[_type in ["faqQuestion", "faqPage"]] | order(_updatedAt desc)[0]._updatedAt
+    }`,
+  );
+  return {
+    page: hub?.page ?? null,
+    categories: hub?.categories ?? [],
+    updatedAt: hub?.updatedAt ?? null,
+  };
+}
+
+/** A question plus the FAQ page copy its page needs (byline, CTAs, footer). */
+export async function getFaqQuestionBySlug(
+  slug: string,
+): Promise<{ question: CmsFaqQuestion | null; page: CmsFaqPage | null }> {
+  const res = await freshClient.fetch(
+    `{
+      "question": *[_type == "faqQuestion" && slug.current == $slug][0]{
+        "slug": slug.current, question, shortAnswer, body,
+        "nextStep": coalesce(nextStep, "booking"),
+        "updatedAt": _updatedAt,
+        "category": category->title,
+        // parenthesised: after []-> a trailing filter maps over each item
+        // instead of filtering the list, and leaves nulls behind
+        "related": (related[]->{ "slug": slug.current, question })[defined(slug)]
+      },
+      "page": *[_type == "faqPage"][0]${FAQ_PAGE_PROJECTION}
+    }`,
+    { slug },
+  );
+  return { question: res?.question ?? null, page: res?.page ?? null };
+}
+
+export async function getAllFaqSlugs(): Promise<string[]> {
+  return freshClient.fetch(
+    `*[_type == "faqQuestion" && defined(slug.current)].slug.current`,
+  );
+}
+
+/** For the sitemap: every question with its own last-modified date. */
+export async function getFaqSitemapRows(): Promise<{ slug: string; updatedAt: string }[]> {
+  return freshClient.fetch(
+    `*[_type == "faqQuestion" && defined(slug.current)]{ "slug": slug.current, "updatedAt": _updatedAt }`,
+  );
+}
+
 // ── site settings ───────────────────────────────────────────────────
 
 export async function getSiteSettings(): Promise<SiteSettings | null> {
@@ -251,7 +324,13 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
         url,
         "width": metadata.dimensions.width,
         "height": metadata.dimensions.height
-      }
+      },
+      // parenthesised: after []-> a trailing filter maps over each item
+      // instead of filtering the list, and leaves nulls behind
+      "featuredFaqs": (featuredFaqs[]->{
+        "slug": slug.current, question, shortAnswer
+      })[defined(slug) && defined(question)],
+      "faqCount": count(*[_type == "faqQuestion" && defined(slug.current)])
     }`,
   );
 }

@@ -1,9 +1,11 @@
 import type { MetadataRoute } from "next";
+import { FAQ_PATH, ESTIMATOR_PATH, questionPath } from "@/lib/faq";
 import { absoluteUrl } from "@/lib/site-url";
 import {
   getAllJobSlugs,
   getAllLegalPageSlugs,
   getAllPageSlugs,
+  getFaqSitemapRows,
   slugToPath,
 } from "@/sanity/queries";
 
@@ -23,10 +25,11 @@ export const revalidate = 86400;
 const AFFILIATE_TYPE = "affiliatePage";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [pageSlugs, legalSlugs, jobSlugs] = await Promise.all([
+  const [pageSlugs, legalSlugs, jobSlugs, faqRows] = await Promise.all([
     getAllPageSlugs({ excludeTypes: [AFFILIATE_TYPE] }),
     getAllLegalPageSlugs(),
     getAllJobSlugs(),
+    getFaqSitemapRows(),
   ]);
 
   const pages = pageSlugs.map((slug) => {
@@ -52,5 +55,32 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.3,
   }));
 
-  return [...pages, ...jobs, ...legal];
+  // Code routes, not Sanity pages, so getAllPageSlugs can't see them.
+  const estimator = {
+    url: absoluteUrl(ESTIMATOR_PATH),
+    changeFrequency: "monthly" as const,
+    priority: 0.8,
+  };
+
+  // The hub changes whenever any question does.
+  const newest = faqRows.reduce<string | null>(
+    (max, r) => (!max || r.updatedAt > max ? r.updatedAt : max),
+    null,
+  );
+  const faq = [
+    {
+      url: absoluteUrl(FAQ_PATH),
+      ...(newest && { lastModified: new Date(newest) }),
+      changeFrequency: "weekly" as const,
+      priority: 0.8,
+    },
+    ...faqRows.map((r) => ({
+      url: absoluteUrl(questionPath(r.slug)),
+      lastModified: new Date(r.updatedAt),
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    })),
+  ];
+
+  return [...pages, estimator, ...faq, ...jobs, ...legal];
 }

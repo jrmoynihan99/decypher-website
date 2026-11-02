@@ -1,0 +1,639 @@
+{
+  "categories": [
+    "Qualifying & fit",
+    "Pricing & plans",
+    "Savings & results",
+    "S-Corp & entity",
+    "Quarterly taxes & IRS",
+    "Write-offs & bookkeeping",
+    "Switching from your current CPA",
+    "Multi-state & abroad",
+    "Working with us",
+    "Security & onboarding"
+  ],
+  "questions": [
+    {
+      "id": "F01",
+      "slug": "who-does-decypher-financials-work-with",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 1
+    },
+    {
+      "id": "F33",
+      "slug": "am-i-making-enough-to-need-a-creator-accountant",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 2
+    },
+    {
+      "id": "F32",
+      "slug": "do-i-need-an-llc-before-hiring-a-creator-accountant",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 3
+    },
+    {
+      "id": "F34",
+      "slug": "do-you-just-file-taxes-or-run-my-finances",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 4
+    },
+    {
+      "id": "F02",
+      "slug": "what-size-creators-do-you-work-with",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 5
+    },
+    {
+      "id": "F03",
+      "slug": "is-it-too-late-to-start-with-a-tax-accountant-this-year",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 6
+    },
+    {
+      "id": "F66",
+      "slug": "w2-job-and-creator-income-how-am-i-taxed",
+      "category": "Qualifying & fit",
+      "priority": "High",
+      "order": 7
+    },
+    {
+      "id": "F73",
+      "slug": "best-business-bank-account-and-card-for-creators",
+      "category": "Qualifying & fit",
+      "priority": "Medium",
+      "order": 8
+    },
+    {
+      "id": "F35",
+      "slug": "can-you-work-with-a-creator-under-18",
+      "category": "Qualifying & fit",
+      "priority": "Medium",
+      "order": 9
+    },
+    {
+      "id": "F89",
+      "slug": "visa-or-green-card-and-creator-business",
+      "category": "Qualifying & fit",
+      "priority": "Medium",
+      "order": 10
+    },
+    {
+      "id": "F04",
+      "slug": "how-much-does-a-content-creator-accountant-cost",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 11
+    },
+    {
+      "id": "F05",
+      "slug": "core-vs-creator-vs-c-suite-plans",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 12
+    },
+    {
+      "id": "F36",
+      "slug": "can-i-hire-you-just-to-file-my-taxes",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 13
+    },
+    {
+      "id": "F37",
+      "slug": "can-i-pay-monthly-quarterly-or-upfront",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 14
+    },
+    {
+      "id": "F06",
+      "slug": "can-i-cancel-my-creator-accounting-plan",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 15
+    },
+    {
+      "id": "F08",
+      "slug": "what-do-i-get-free-when-i-sign-up",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 16
+    },
+    {
+      "id": "F39",
+      "slug": "is-my-accounting-fee-a-tax-write-off",
+      "category": "Pricing & plans",
+      "priority": "Medium",
+      "order": 17
+    },
+    {
+      "id": "F38",
+      "slug": "can-i-upgrade-from-core-to-creator",
+      "category": "Pricing & plans",
+      "priority": "Medium",
+      "order": 18
+    },
+    {
+      "id": "F40",
+      "slug": "are-there-other-fees-after-the-first-year",
+      "category": "Pricing & plans",
+      "priority": "Medium",
+      "order": 19
+    },
+    {
+      "id": "F07",
+      "slug": "is-a-creator-accountant-worth-the-cost",
+      "category": "Pricing & plans",
+      "priority": "High",
+      "order": 20
+    },
+    {
+      "id": "F41",
+      "slug": "how-does-the-decypher-referral-reward-work",
+      "category": "Pricing & plans",
+      "priority": "Medium",
+      "order": 21
+    },
+    {
+      "id": "F10",
+      "slug": "how-do-i-know-if-i-am-overpaying-in-taxes",
+      "category": "Savings & results",
+      "priority": "High",
+      "order": 22
+    },
+    {
+      "id": "F42",
+      "slug": "what-happens-on-the-free-tax-return-review",
+      "category": "Savings & results",
+      "priority": "High",
+      "order": 23
+    },
+    {
+      "id": "F09",
+      "slug": "how-much-can-a-tax-strategist-save-a-creator",
+      "category": "Savings & results",
+      "priority": "High",
+      "order": 24
+    },
+    {
+      "id": "F11",
+      "slug": "what-does-the-money-back-guarantee-cover",
+      "category": "Savings & results",
+      "priority": "High",
+      "order": 25
+    },
+    {
+      "id": "F86",
+      "slug": "what-is-the-qbi-deduction-for-creators",
+      "category": "Savings & results",
+      "priority": "Medium",
+      "order": 26
+    },
+    {
+      "id": "F14",
+      "slug": "does-mixing-money-break-my-llc-protection",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 27
+    },
+    {
+      "id": "F46",
+      "slug": "ssn-or-ein-on-my-w9",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 28
+    },
+    {
+      "id": "F45",
+      "slug": "can-a-dissolved-or-wrong-state-llc-be-fixed",
+      "category": "S-Corp & entity",
+      "priority": "Medium",
+      "order": 29
+    },
+    {
+      "id": "F84",
+      "slug": "should-i-have-more-than-one-llc",
+      "category": "S-Corp & entity",
+      "priority": "Medium",
+      "order": 30
+    },
+    {
+      "id": "F65",
+      "slug": "how-do-i-pay-myself-from-my-llc",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 31
+    },
+    {
+      "id": "F12",
+      "slug": "should-a-content-creator-be-an-s-corp",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 32
+    },
+    {
+      "id": "F44",
+      "slug": "is-it-too-late-to-elect-s-corp-this-year",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 33
+    },
+    {
+      "id": "F43",
+      "slug": "s-corp-reasonable-salary-and-distributions",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 34
+    },
+    {
+      "id": "F75",
+      "slug": "what-is-an-accountable-plan-for-s-corps",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 35
+    },
+    {
+      "id": "F13",
+      "slug": "was-my-s-corp-set-up-right-do-i-need-payroll",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 36
+    },
+    {
+      "id": "F85",
+      "slug": "s-corp-slow-year-do-i-still-pay-salary",
+      "category": "S-Corp & entity",
+      "priority": "Medium",
+      "order": 37
+    },
+    {
+      "id": "F83",
+      "slug": "how-are-creator-partnerships-taxed",
+      "category": "S-Corp & entity",
+      "priority": "Medium",
+      "order": 38
+    },
+    {
+      "id": "F60",
+      "slug": "solo-401k-vs-sep-ira-roth-or-traditional",
+      "category": "S-Corp & entity",
+      "priority": "High",
+      "order": 39
+    },
+    {
+      "id": "F87",
+      "slug": "can-i-roll-my-401k-into-a-solo-401k",
+      "category": "S-Corp & entity",
+      "priority": "Medium",
+      "order": 40
+    },
+    {
+      "id": "F15",
+      "slug": "do-creators-need-to-pay-quarterly-taxes",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 41
+    },
+    {
+      "id": "F16",
+      "slug": "how-much-to-set-aside-for-taxes-per-brand-deal",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 42
+    },
+    {
+      "id": "F17",
+      "slug": "what-happens-if-i-missed-quarterly-tax-payments",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 43
+    },
+    {
+      "id": "F81",
+      "slug": "my-income-dropped-how-much-quarterly-tax",
+      "category": "Quarterly taxes & IRS",
+      "priority": "Medium",
+      "order": 44
+    },
+    {
+      "id": "F64",
+      "slug": "how-to-lower-taxes-before-december-31",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 45
+    },
+    {
+      "id": "F67",
+      "slug": "should-creators-file-jointly-or-separately",
+      "category": "Quarterly taxes & IRS",
+      "priority": "Medium",
+      "order": 46
+    },
+    {
+      "id": "F49",
+      "slug": "why-doesnt-my-1099-match-what-i-was-paid",
+      "category": "Quarterly taxes & IRS",
+      "priority": "Medium",
+      "order": 47
+    },
+    {
+      "id": "F70",
+      "slug": "is-my-creator-business-a-hobby-to-the-irs",
+      "category": "Quarterly taxes & IRS",
+      "priority": "Medium",
+      "order": 48
+    },
+    {
+      "id": "F79",
+      "slug": "will-i-repay-my-health-insurance-subsidy",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 49
+    },
+    {
+      "id": "F18",
+      "slug": "i-owe-the-irs-can-you-help-with-a-payment-plan",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 50
+    },
+    {
+      "id": "F78",
+      "slug": "can-irs-penalties-be-removed",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 51
+    },
+    {
+      "id": "F47",
+      "slug": "i-have-unfiled-tax-returns-what-do-i-do",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 52
+    },
+    {
+      "id": "F48",
+      "slug": "will-i-get-audited-and-will-you-represent-me",
+      "category": "Quarterly taxes & IRS",
+      "priority": "High",
+      "order": 53
+    },
+    {
+      "id": "F19",
+      "slug": "what-can-i-write-off-as-a-content-creator",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 54
+    },
+    {
+      "id": "F21",
+      "slug": "do-i-need-bookkeeping-or-just-a-tax-preparer",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 55
+    },
+    {
+      "id": "F54",
+      "slug": "do-i-need-to-keep-every-receipt",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 56
+    },
+    {
+      "id": "F51",
+      "slug": "home-office-simplified-vs-actual-method",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 57
+    },
+    {
+      "id": "F50",
+      "slug": "can-creators-write-off-meals-clothes-and-makeup",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 58
+    },
+    {
+      "id": "F20",
+      "slug": "can-i-write-off-a-trip-if-i-film-content",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 59
+    },
+    {
+      "id": "F52",
+      "slug": "can-i-write-off-my-car-as-a-creator",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 60
+    },
+    {
+      "id": "F77",
+      "slug": "can-i-buy-a-car-through-my-business",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 61
+    },
+    {
+      "id": "F63",
+      "slug": "can-creators-write-off-health-insurance-and-hsa",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 62
+    },
+    {
+      "id": "F69",
+      "slug": "can-i-deduct-business-credit-card-interest",
+      "category": "Write-offs & bookkeeping",
+      "priority": "Medium",
+      "order": 63
+    },
+    {
+      "id": "F68",
+      "slug": "how-to-report-manager-or-agency-fees",
+      "category": "Write-offs & bookkeeping",
+      "priority": "Medium",
+      "order": 64
+    },
+    {
+      "id": "F53",
+      "slug": "is-a-prize-or-gifted-product-taxable",
+      "category": "Write-offs & bookkeeping",
+      "priority": "Medium",
+      "order": 65
+    },
+    {
+      "id": "F22",
+      "slug": "do-i-need-to-send-1099s-to-my-editors",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 66
+    },
+    {
+      "id": "F61",
+      "slug": "can-creators-hire-their-kids",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 67
+    },
+    {
+      "id": "F62",
+      "slug": "augusta-rule-for-creators",
+      "category": "Write-offs & bookkeeping",
+      "priority": "High",
+      "order": 68
+    },
+    {
+      "id": "F25",
+      "slug": "can-i-do-my-own-taxes-as-a-creator",
+      "category": "Switching from your current CPA",
+      "priority": "High",
+      "order": 69
+    },
+    {
+      "id": "F72",
+      "slug": "cpa-vs-enrolled-agent-vs-tax-preparer",
+      "category": "Switching from your current CPA",
+      "priority": "Medium",
+      "order": 70
+    },
+    {
+      "id": "F23",
+      "slug": "can-a-new-accountant-take-over-mid-year",
+      "category": "Switching from your current CPA",
+      "priority": "High",
+      "order": 71
+    },
+    {
+      "id": "F80",
+      "slug": "another-preparer-says-bigger-refund-whos-right",
+      "category": "Switching from your current CPA",
+      "priority": "High",
+      "order": 72
+    },
+    {
+      "id": "F55",
+      "slug": "how-to-tell-my-tax-preparer-im-switching",
+      "category": "Switching from your current CPA",
+      "priority": "Medium",
+      "order": 73
+    },
+    {
+      "id": "F24",
+      "slug": "can-you-amend-my-past-tax-returns",
+      "category": "Switching from your current CPA",
+      "priority": "High",
+      "order": 74
+    },
+    {
+      "id": "F26",
+      "slug": "i-moved-states-do-i-owe-tax-in-two-states",
+      "category": "Multi-state & abroad",
+      "priority": "High",
+      "order": 75
+    },
+    {
+      "id": "F82",
+      "slug": "how-to-prove-i-left-california-for-taxes",
+      "category": "Multi-state & abroad",
+      "priority": "Medium",
+      "order": 76
+    },
+    {
+      "id": "F76",
+      "slug": "is-an-s-corp-worth-it-in-new-york-city",
+      "category": "Multi-state & abroad",
+      "priority": "High",
+      "order": 77
+    },
+    {
+      "id": "F88",
+      "slug": "what-is-ptet-and-should-my-s-corp-elect-it",
+      "category": "Multi-state & abroad",
+      "priority": "Medium",
+      "order": 78
+    },
+    {
+      "id": "F27",
+      "slug": "do-i-report-foreign-brand-deal-income",
+      "category": "Multi-state & abroad",
+      "priority": "Medium",
+      "order": 79
+    },
+    {
+      "id": "F56",
+      "slug": "do-creators-need-to-charge-sales-tax",
+      "category": "Multi-state & abroad",
+      "priority": "High",
+      "order": 80
+    },
+    {
+      "id": "F28",
+      "slug": "how-responsive-is-decypher",
+      "category": "Working with us",
+      "priority": "High",
+      "order": 81
+    },
+    {
+      "id": "F29",
+      "slug": "how-often-do-i-meet-with-my-accounting-team",
+      "category": "Working with us",
+      "priority": "Medium",
+      "order": 82
+    },
+    {
+      "id": "F57",
+      "slug": "how-much-time-does-working-with-decypher-take",
+      "category": "Working with us",
+      "priority": "Medium",
+      "order": 83
+    },
+    {
+      "id": "F30",
+      "slug": "talk-to-my-spouse-first-what-should-we-review",
+      "category": "Working with us",
+      "priority": "High",
+      "order": 84
+    },
+    {
+      "id": "F71",
+      "slug": "how-to-prove-creator-income-for-a-mortgage",
+      "category": "Working with us",
+      "priority": "High",
+      "order": 85
+    },
+    {
+      "id": "F74",
+      "slug": "do-you-help-with-investing-or-financial-advisors",
+      "category": "Working with us",
+      "priority": "Medium",
+      "order": 86
+    },
+    {
+      "id": "F31",
+      "slug": "do-i-need-to-share-my-tax-return-is-it-secure",
+      "category": "Security & onboarding",
+      "priority": "High",
+      "order": 87
+    },
+    {
+      "id": "F58",
+      "slug": "what-happens-after-i-sign-up-with-decypher",
+      "category": "Security & onboarding",
+      "priority": "High",
+      "order": 88
+    },
+    {
+      "id": "F59",
+      "slug": "who-owns-my-quickbooks-if-i-leave",
+      "category": "Security & onboarding",
+      "priority": "Medium",
+      "order": 89
+    }
+  ]
+}

@@ -1,68 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useId, useState } from "react";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
-import type { FaqContent, SectionHeadingContent } from "@/sanity/types";
-import {
-  cancelDecrypt,
-  decryptTo,
-  encrypt,
-  prefersReducedMotion,
-} from "@/lib/decrypt";
+import type { FaqTeaser, SectionHeadingContent } from "@/sanity/types";
 
 /**
- * FAQ accordion. Answers ship "encrypted" (scrambled + blurred) and decrypt
- * the first time their item is opened.
+ * FAQ accordion: a handful of Creator Tax FAQ questions (Site Settings → FAQ →
+ * Questions on Home), each opening to its short answer and a link to the full
+ * page.
+ *
+ * The answers used to ship scrambled and decrypt on open; they're plain text
+ * now, in the DOM from the first render, because Acquisition.com's FAQ launch
+ * checklist wants them readable by crawlers and AI assistants. Keep it that
+ * way: no decrypt effects on answer text here.
  */
-function FaqItem({ faq }: { faq: FaqContent }) {
+function FaqItem({ faq }: { faq: FaqTeaser }) {
   const [open, setOpen] = useState(false);
-  const openRef = useRef(false);
-  const decrypted = useRef(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const txtRef = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    const txt = txtRef.current;
-    if (!txt || prefersReducedMotion()) return;
-    if (!decrypted.current) {
-      encrypt(txt, faq.answer);
-    }
-    return () => {
-      cancelDecrypt(txt);
-      txt.textContent = faq.answer;
-      txt.style.filter = "";
-    };
-  }, [faq.answer]);
-
-  const toggle = () => {
-    const wrap = wrapRef.current;
-    const txt = txtRef.current;
-    if (!wrap || !txt) return;
-    const next = !openRef.current;
-    openRef.current = next;
-    setOpen(next);
-    if (next) {
-      wrap.style.maxHeight = `${txt.scrollHeight + 60}px`;
-      if (!decrypted.current) {
-        decrypted.current = true;
-        decryptTo(txt, faq.answer, undefined, () => {
-          // re-measure: decrypted text is usually shorter than the scramble
-          if (openRef.current) wrap.style.maxHeight = `${txt.scrollHeight + 34}px`;
-        });
-      } else {
-        wrap.style.maxHeight = `${txt.scrollHeight + 34}px`;
-      }
-    } else {
-      wrap.style.maxHeight = "0px";
-    }
-  };
+  const panelId = useId();
 
   return (
     <div className="border-b border-edge">
       <button
-        onClick={toggle}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={panelId}
         className="flex w-full cursor-pointer items-center justify-between gap-[18px] border-none bg-transparent px-1 py-6 text-left"
       >
         <span className="font-display text-[clamp(17px,2vw,20px)] font-semibold text-fog">
@@ -72,16 +37,27 @@ function FaqItem({ faq }: { faq: FaqContent }) {
           {open ? "[–]" : "[+]"}
         </span>
       </button>
+      {/* 0fr → 1fr animates to the content's own height without measuring it */}
       <div
-        ref={wrapRef}
-        className="max-h-0 overflow-hidden transition-[max-height] duration-500 ease-[cubic-bezier(.2,.7,.2,1)]"
+        id={panelId}
+        inert={!open}
+        className={`grid transition-[grid-template-rows] duration-500 ease-[cubic-bezier(.2,.7,.2,1)] ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
       >
-        <p
-          ref={txtRef}
-          className="m-0 max-w-[64ch] px-1 pb-[26px] text-[15.5px] leading-[1.68] text-mist"
-        >
-          {faq.answer}
-        </p>
+        <div className="overflow-hidden">
+          <div className="px-1 pb-[26px]">
+            <p className="m-0 max-w-[64ch] text-[15.5px] leading-[1.68] text-mist">
+              {faq.shortAnswer}
+            </p>
+            <Link
+              href={`/faq/${faq.slug}`}
+              className="mt-3 inline-block font-mono text-[12px] tracking-[0.08em] text-magenta no-underline transition-colors hover:text-fog"
+            >
+              Read the full answer →
+            </Link>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -90,10 +66,15 @@ function FaqItem({ faq }: { faq: FaqContent }) {
 export default function FaqSection({
   content,
   faqs,
+  total,
 }: {
   content: SectionHeadingContent;
-  faqs: FaqContent[];
+  faqs: FaqTeaser[];
+  /** How many questions the full FAQ has, for the "see all" link. */
+  total: number;
 }) {
+  // nothing picked in Site Settings → no section, rather than a heading over nothing
+  if (!faqs.length) return null;
   return (
     <section id="faq" className="relative z-[1] px-4 pb-16 pt-10 md:px-6 md:pb-[130px]">
       <SectionHeading
@@ -109,10 +90,18 @@ export default function FaqSection({
         className="mx-auto mt-8 max-w-[840px] border-t border-edge md:mt-12"
       >
         {faqs.map((faq, i) => (
-          <Reveal key={faq.question} delay={0.1 + i * 0.07}>
+          <Reveal key={faq.slug} delay={0.1 + i * 0.07}>
             <FaqItem faq={faq} />
           </Reveal>
         ))}
+        <Reveal delay={0.1 + faqs.length * 0.07} className="pt-8 text-center">
+          <Link
+            href="/faq"
+            className="font-mono text-[12.5px] tracking-[0.1em] text-mist no-underline transition-colors hover:text-magenta"
+          >
+            {`See all ${total} questions in the Creator Tax FAQ →`}
+          </Link>
+        </Reveal>
       </SectionReveal>
     </section>
   );

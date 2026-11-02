@@ -2,8 +2,8 @@ import { PortableText, type PortableTextComponents } from "next-sanity";
 import type { PortableTextBlock } from "next-sanity";
 
 /**
- * Renders Sanity portable text in the site voice — used by job postings and
- * the legal pages. Shared deliberately: two renderers would drift, and a legal
+ * Renders Sanity portable text in the site voice — used by job postings, the
+ * legal pages and FAQ answers. Shared deliberately: two renderers would drift, and a legal
  * document reading in a different typographic voice from the rest of the site
  * looks like it came from somewhere else.
  *
@@ -17,7 +17,45 @@ import type { PortableTextBlock } from "next-sanity";
 const headingBase = "font-display font-semibold tracking-[-0.02em] text-fog";
 const monoLabel = "font-mono font-bold uppercase text-magenta";
 
+/** @sanity/table rows (FAQ answers). The first row is the header row. */
+type TableValue = { rows?: { _key: string; cells?: string[] }[] };
+
 const components: PortableTextComponents = {
+  types: {
+    table: ({ value }: { value: TableValue }) => {
+      const [head, ...rows] = value.rows ?? [];
+      if (!head) return null;
+      return (
+        <div className="mt-6 overflow-x-auto rounded-[14px] border border-edge first:mt-0">
+          <table className="w-full border-collapse text-left text-[14.5px]">
+            <thead>
+              <tr>
+                {(head.cells ?? []).map((cell, i) => (
+                  <th
+                    key={i}
+                    className="border-b border-edge bg-panel px-4 py-3 align-bottom font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] text-dusk"
+                  >
+                    {cell}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row._key} className="border-b border-edge last:border-b-0">
+                  {(row.cells ?? []).map((cell, i) => (
+                    <td key={i} className="px-4 py-3 align-top leading-relaxed text-mist">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    },
+  },
   block: {
     normal: ({ children }) => (
       <p className="m-0 mt-4 text-[15.5px] leading-relaxed text-mist first:mt-0">

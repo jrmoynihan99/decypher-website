@@ -14,6 +14,8 @@ import type { StructureResolver } from "sanity/structure";
  *   Team           → personnel files, in site order
  *   Services       → the five service nodes
  *   Job Openings   → careers-page roles, in site order
+ *   Creator Tax FAQ→ /faq: the page's copy, the questions (by category, in
+ *                    hub order), and the categories themselves
  *   Portal Resources → the PDFs the staff Tools Hub hands out, and their
  *                    categories — not on the public site at all
  *   Site Settings  → nav, footer, stats, default SEO
@@ -44,6 +46,9 @@ const HANDLED = [
   "teamMember",
   "service",
   "jobOpening",
+  "faqPage",
+  "faqQuestion",
+  "faqCategory",
   "resource",
   "resourceCategory",
   "siteSettings",
@@ -140,6 +145,59 @@ export const structure: StructureResolver = (S) =>
           S.documentTypeList("jobOpening")
             .title("Job Openings")
             .defaultOrdering([{ field: "order", direction: "asc" }]),
+        ),
+      S.listItem()
+        .id("creatorTaxFaq")
+        .title("Creator Tax FAQ")
+        .child(
+          S.list()
+            .title("Creator Tax FAQ")
+            .items([
+              S.listItem()
+                .id("faqPage")
+                .title("FAQ Page")
+                .child(S.document().schemaType("faqPage").documentId("faqPage")),
+              S.listItem()
+                .id("faqAllQuestions")
+                .title("All questions")
+                .child(
+                  S.documentTypeList("faqQuestion")
+                    .title("All questions")
+                    .defaultOrdering([
+                      { field: "category.order", direction: "asc" },
+                      { field: "order", direction: "asc" },
+                    ]),
+                ),
+              // 89 questions is a long flat list; per category is how they're
+              // found, and creating from here pre-files the new one.
+              S.listItem()
+                .id("faqByCategory")
+                .title("Questions by category")
+                .child(
+                  S.documentTypeList("faqCategory")
+                    .title("Categories")
+                    .defaultOrdering([{ field: "order", direction: "asc" }])
+                    .child((categoryId) =>
+                      S.documentList()
+                        .title("Questions")
+                        .schemaType("faqQuestion")
+                        .filter('_type == "faqQuestion" && category._ref == $categoryId')
+                        .params({ categoryId })
+                        .defaultOrdering([{ field: "order", direction: "asc" }])
+                        .initialValueTemplates([
+                          S.initialValueTemplateItem("faqQuestion-in-category", { categoryId }),
+                        ]),
+                    ),
+                ),
+              S.listItem()
+                .id("faqCategories")
+                .title("Categories")
+                .child(
+                  S.documentTypeList("faqCategory")
+                    .title("Categories")
+                    .defaultOrdering([{ field: "order", direction: "asc" }]),
+                ),
+            ]),
         ),
       S.divider(),
       // The staff portal's Tools Hub reads these; nothing on the public site

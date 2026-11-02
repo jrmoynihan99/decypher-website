@@ -19,8 +19,9 @@ import type {
  *
  * The only content this template reads from its own document is
  * partner-specific — hero, value stack, the partner's quotes. Everything else
- * is shared and resolved here: stats and FAQ from Site Settings, the review
- * carousel from the Testimonials collection, the call steps from code. That
+ * is shared and resolved here: stats and the FAQ picks from Site Settings, the
+ * review carousel from the Testimonials collection, the call steps from code.
+ * That
  * split is the whole design. Adding a partner should mean filling in a short
  * form, and a stat corrected once should be corrected everywhere — not six
  * times, badly, across six pages that quietly drift apart.
@@ -42,7 +43,6 @@ export default function AffiliateTemplate({
   heroImageUrl?: string;
 }) {
   const stats = settings?.stats ?? [];
-  const faqs = settings?.faqs ?? [];
 
   return (
     <main className="relative">
@@ -102,10 +102,11 @@ export default function AffiliateTemplate({
         <FaqSection
           content={{
             eyebrow: "[ 07 // faq ]",
-            title: "Questions, decrypted on demand.",
-            sub: "// answers ship encrypted — open one to decrypt",
+            title: "Questions, DeCyphered.",
+            sub: "// straight answers — every one has its own page",
           }}
-          faqs={faqs}
+          faqs={settings?.featuredFaqs ?? []}
+          total={settings?.faqCount ?? 0}
         />
       </div>
 

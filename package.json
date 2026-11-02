@@ -18,6 +18,7 @@
     "portal:grant": "node scripts/grant-permission.mjs",
     "legal:seed": "node scripts/seed-legal.mjs",
     "resources:add": "node scripts/add-resource.mjs",
+    "faq:import": "node scripts/import-faq.mjs",
     "thankyou:seed": "node scripts/seed-thank-you.mjs",
     "qb:check": "node scripts/quickbooks-parse-check.mjs",
     "qb:introspect": "node scripts/quickbooks-introspect.mjs",
@@ -36,6 +37,7 @@
     "@anthropic-ai/sdk": "^0.125.0",
     "@number-flow/react": "^0.6.1",
     "@sanity/image-url": "^2.1.1",
+    "@sanity/table": "^3.1.20",
     "@sanity/vision": "^6.4.0",
     "firebase": "^12.16.0",
     "firebase-admin": "^14.1.0",
@@ -55,6 +57,7 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@portabletext/markdown": "^1.5.0",
     "@sanity/client": "^7.23.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",

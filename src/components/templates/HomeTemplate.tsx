@@ -114,7 +114,8 @@ export default function HomeTemplate({
         />
         <FaqSection
           content={page.faqSection ?? {}}
-          faqs={settings?.faqs ?? []}
+          faqs={settings?.featuredFaqs ?? []}
+          total={settings?.faqCount ?? 0}
         />
         <CtaSection content={page.cta ?? {}} />
       </ServicesShowcase>

@@ -17,6 +17,9 @@ import SmoothScroll from "@/components/layout/SmoothScroll";
  * with the view transition animation.
  */
 let pendingScroll: number | null = null;
+// The #fragment of a link into another page (/faq#s-corp-and-entity). The
+// router is told scroll: false, so landing on the anchor is ours to do.
+let pendingHash: string | null = null;
 let currentPath = "";
 const scrollPositions = new Map<string, number>();
 
@@ -36,11 +39,16 @@ function TransitionInterceptor() {
     }
     if (pendingScroll !== null) {
       const scroll = pendingScroll;
+      const hash = pendingHash;
       pendingScroll = null;
+      pendingHash = null;
       // Defer scroll by one frame so Safari's view-transition pseudo-elements
       // are fully composited before we move the real DOM underneath.
       requestAnimationFrame(() => {
-        window.scrollTo(0, scroll);
+        const anchor = hash ? document.getElementById(hash) : null;
+        // scrollIntoView honours the target's scroll-margin (clears the nav)
+        if (anchor) anchor.scrollIntoView();
+        else window.scrollTo(0, scroll);
         // Remove the overflow clip after the pseudo-elements are composited
         document.documentElement.classList.remove("vt-transitioning");
       });
@@ -100,6 +108,8 @@ function TransitionInterceptor() {
       scrollPositions.set(currentPath, window.scrollY);
       currentPath = href.split("?")[0].split("#")[0];
       pendingScroll = 0; // New page starts at top
+      pendingHash =
+        hashIndex !== -1 ? decodeURIComponent(href.slice(hashIndex + 1)) || null : null;
 
       // Clip overflow during transition to prevent Safari's single-frame
       // scroll-to-top flash (its compositor doesn't overlay the transition
@@ -125,6 +135,7 @@ function TransitionInterceptor() {
       scrollPositions.set(currentPath, window.scrollY);
       currentPath = window.location.pathname;
       pendingScroll = scrollPositions.get(currentPath) ?? 0;
+      pendingHash = null; // back/forward restores where you were, not the anchor
 
       document.documentElement.classList.add("vt-transitioning");
       freezeCanvasLayers();
