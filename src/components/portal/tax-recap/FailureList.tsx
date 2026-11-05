@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { readRereadQueue, rereadHref, writeRereadQueue, type RereadQueue } from "./reread-queue";
+import { REREAD_LANES, nextInLane, readRun, rereadHref, runResults, writeRun, type RereadResult, type RereadRun } from "./reread-queue";
 import { Chip, Panel } from "@/components/portal/widgets/ui";
 import { shortDate } from "@/lib/widget-format";
 import type { FailureDoc, FailureFileKind, FailureStatus, FailureSummary } from "@/lib/tax-recap/failures-store";
-import { ENTITY_FIELD_KEYS, RETURN_FIELD_KEYS } from "@/lib/tax-recap/schema";
+import { ENTITY_FIELD_KEYS, RETURN_FIELD_KEYS, clientKey } from "@/lib/tax-recap/schema";
 import { DERIVE_VERSION, deriveBefore } from "@/lib/tax-recap/derive";
 import type { TableSet } from "@/lib/tax-recap/tables";
 
@@ -44,7 +44,16 @@ function replay(doc: FailureDoc, tables: TableSet): Retried {
  * together as one zip or one at a time, for as long as the record is kept;
  * the redacted copies staff chose to keep, until they expire.
  */
-export default function FailureList({ failures: fromServer, tables }: { failures: FailureSummary[]; tables: TableSet }) {
+export default function FailureList({
+  failures: fromServer,
+  tables,
+  recapKeys = [],
+}: {
+  failures: FailureSummary[];
+  tables: TableSet;
+  /** Every saved recap as client + year (clientKey): a return that already has one isn't read again to make it. */
+  recapKeys?: string[];
+}) {
   const router = useRouter();
   /** Each refusal's result when run again with today's engine. */
   const [retried, setRetried] = useState<Record<string, Retried>>({});
@@ -165,32 +174,86 @@ export default function FailureList({ failures: fromServer, tables }: { failures
   const stillRefused = failures.filter(
     (f) => f.status === "open" && f.stage !== "blocked" && f.originals.length > 0 && (retried[f.id]?.state === "refused" || retried[f.id]?.state === "error"),
   );
-  const startReread = () => {
-    if (!stillRefused.length) return;
+  /**
+   * Refusals marked fixed (by a retry, or a re-read before the run saved
+   * recaps) that have their files and no recap saved from them yet: the same
+   * run makes each recap, video and all.
+   */
+  const fixedNoRecap = fromServer
+    .filter((f) => !deleted.has(f.id))
+    .map((f) => ({ ...f, status: statuses[f.id] ?? f.status }))
+    .filter((f) => f.status === "fixed" && f.stage !== "blocked" && f.originals.length > 0 && !/recap saved/.test(f.note))
+    .filter((f) => !recapKeys.includes(`${clientKey(f.clientName)}|${f.taxYear}`));
+  /** The run on screen (this page's, or one left from before a reload), its results so far, and the lanes' frames while it runs. */
+  const [rereadRun, setRereadRun] = useState<RereadRun | null>(null);
+  const [rereadResults, setRereadResults] = useState<Record<string, RereadResult>>({});
+  const [frames, setFrames] = useState<string[] | null>(null);
+  const rereadLeft = rereadRun ? rereadRun.ids.filter((id) => !rereadResults[id]).length : 0;
+
+  /** Open a frame for every lane with work left, each at its next refusal. */
+  const runLanes = (run: RereadRun) => {
+    const srcs = run.lanes.map((_, lane) => nextInLane(run, lane)).flatMap((id, lane) => (id ? [rereadHref(id, lane)] : []));
+    setFrames(srcs.length ? srcs : null);
+  };
+  const startReread = (list: FailureSummary[], what: string) => {
+    // One record per return: the same client and year, or the same files, is
+    // one recap — two lanes reading copies of it would save it twice.
+    const seen = new Set<string>();
+    const unique = list.filter((f) => {
+      const keys = [
+        `n:${f.clientName.trim().toLowerCase()}|${f.taxYear ?? ""}`,
+        `f:${f.originals.map((o) => `${o.name}:${o.size}`).sort().join("|")}`,
+      ];
+      if (keys.some((k) => seen.has(k))) return false;
+      keys.forEach((k) => seen.add(k));
+      return true;
+    });
+    if (!unique.length) return;
+    const lanes = Math.min(REREAD_LANES, unique.length);
     if (
       !window.confirm(
-        `Read the ${stillRefused.length} still refused again from their kept PDFs? Each is a new read (about the cost of building a recap), one after another in the builder — leave this tab open until it comes back here.`,
+        `${what} ${unique.length < list.length ? `(${list.length - unique.length} duplicate records of the same returns are skipped.) ` : ""}Each is a new read of its kept PDFs (about the cost of building a recap); the ones that go through are saved as recaps with their videos. ${lanes} run at once in frames on this page — keep this tab open and in front until they finish.`,
       )
     )
       return;
-    const q: RereadQueue = {
-      ids: stillRefused.map((f) => f.id),
-      labels: Object.fromEntries(stillRefused.map((f) => [f.id, `${f.clientName || "Unnamed"} ${f.taxYear ?? ""}`.trim()])),
-      results: {},
+    const run: RereadRun = {
+      ids: unique.map((f) => f.id),
+      labels: Object.fromEntries(unique.map((f) => [f.id, `${f.clientName || "Unnamed"} ${f.taxYear ?? ""}`.trim()])),
+      lanes: Array.from({ length: lanes }, (_, i) => unique.filter((_, j) => j % lanes === i).map((f) => f.id)),
+      startedAt: new Date().toISOString(),
     };
-    writeRereadQueue(q);
-    window.location.assign(rereadHref(q.ids[0]));
+    writeRun(run);
+    setRereadRun(run);
+    setRereadResults({});
+    runLanes(run);
   };
-  /** The last "Re-read all", when it has come back here. */
-  const [rereadRun, setRereadRun] = useState<RereadQueue | null>(null);
   useEffect(() => {
-    const q = readRereadQueue();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage only exists in the browser
-    if (q && Object.keys(q.results).length) setRereadRun(q);
+    const run = readRun();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage only exists in the browser
+    if (run) setRereadRun(run);
   }, []);
+  // While it runs: the lanes' results as they land; when the last is in, the frames go and the list refreshes.
+  useEffect(() => {
+    if (!rereadRun) return;
+    const tick = () => {
+      const res = runResults(rereadRun);
+      setRereadResults(res);
+      if (frames && rereadRun.ids.every((id) => res[id])) {
+        setFrames(null);
+        router.refresh();
+      }
+    };
+    tick();
+    if (!frames) return;
+    const t = setInterval(tick, 2000);
+    return () => clearInterval(t);
+  }, [rereadRun, frames, router]);
   const clearReread = () => {
-    writeRereadQueue(null);
+    writeRun(null);
+    setFrames(null);
     setRereadRun(null);
+    setRereadResults({});
+    router.refresh();
   };
 
   const retryCounts = Object.values(retried).reduce(
@@ -240,11 +303,12 @@ export default function FailureList({ failures: fromServer, tables }: { failures
         </div>
       }
     >
-      {retryable.length ? (
+      {retryable.length || fixedNoRecap.length || rereadRun ? (
         <div className="border-b border-white/[0.06] px-5 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
+              hidden={!retryable.length}
               disabled={!!progress && progress.done < progress.total}
               onClick={retryAll}
               className="cursor-pointer rounded-full bg-teal px-5 py-2.5 font-display text-[14px] font-semibold text-night transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
@@ -266,8 +330,21 @@ export default function FailureList({ failures: fromServer, tables }: { failures
               </button>
             ) : null}
             {progress && progress.done === progress.total && stillRefused.length ? (
-              <button type="button" onClick={startReread} className={`${action} hover:border-teal hover:text-teal`}>
-                Re-read the {stillRefused.length} still refused from their kept PDFs
+              <button
+                type="button"
+                onClick={() => startReread(stillRefused, `Read the ${stillRefused.length} still refused again?`)}
+                className={`${action} hover:border-teal hover:text-teal`}
+              >
+                Re-read the {stillRefused.length} still refused (and save the ones that go through)
+              </button>
+            ) : null}
+            {fixedNoRecap.length ? (
+              <button
+                type="button"
+                onClick={() => startReread(fixedNoRecap, `Make the recaps for the ${fixedNoRecap.length} refused returns marked fixed?`)}
+                className={`${action} hover:border-teal hover:text-teal`}
+              >
+                Make the recaps for the {fixedNoRecap.length} marked fixed
               </button>
             ) : null}
           </div>
@@ -275,20 +352,37 @@ export default function FailureList({ failures: fromServer, tables }: { failures
             <div className="mt-3 rounded-xl border border-white/[0.08] px-4 py-3 font-body text-[12.5px] text-mist">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-fog">
-                  Last re-read: {Object.values(rereadRun.results).filter((r) => r.kind === "fixed").length} go through (marked fixed) ·{" "}
-                  {Object.values(rereadRun.results).filter((r) => r.kind === "refused").length} still refused (each recorded again with its new read, the old one dismissed) ·{" "}
-                  {Object.values(rereadRun.results).filter((r) => r.kind === "error").length} didn&rsquo;t finish
-                  {rereadRun.ids.length > Object.keys(rereadRun.results).length ? ` · ${rereadRun.ids.length - Object.keys(rereadRun.results).length} not reached` : ""}
+                  {frames ? `Re-reading — ${rereadRun.ids.length - rereadLeft} of ${rereadRun.ids.length} done: ` : "Last re-read: "}
+                  {Object.values(rereadResults).filter((r) => r.kind === "fixed").length} go through ({Object.values(rereadResults).filter((r) => r.recap).length} saved as recaps) ·{" "}
+                  {Object.values(rereadResults).filter((r) => r.kind === "refused").length} still refused (recorded again with the new read, the old record dismissed) ·{" "}
+                  {Object.values(rereadResults).filter((r) => r.kind === "error").length} didn&rsquo;t finish
+                  {!frames && rereadLeft ? ` · ${rereadLeft} not reached` : ""}
                 </span>
-                <button type="button" onClick={clearReread} className={`${action} ml-auto`}>
-                  Clear
+                {!frames && rereadLeft ? (
+                  <button type="button" onClick={() => runLanes(rereadRun)} className={`${action} ml-auto hover:border-teal hover:text-teal`}>
+                    Resume
+                  </button>
+                ) : null}
+                <button type="button" onClick={clearReread} className={`${action} ${!frames && rereadLeft ? "" : "ml-auto"}`}>
+                  {frames ? "Stop" : "Clear"}
                 </button>
               </div>
+              {frames ? (
+                // Each lane works in the builder in its own frame, visible so the
+                // browser doesn't throttle it (the videos render in there).
+                <div className="mt-3 grid gap-2" style={{ gridTemplateColumns: `repeat(${frames.length}, minmax(0, 1fr))` }}>
+                  {frames.map((src, lane) => (
+                    <div key={lane} className="relative h-[320px] overflow-hidden rounded-lg border border-white/[0.08] bg-night">
+                      <iframe src={src} title={`Re-read lane ${lane + 1}`} className="absolute left-0 top-0 h-[1000px] w-[1250px] origin-top-left scale-[0.32] border-0" />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <ul className="mb-0 mt-2 list-none space-y-1 pl-0">
                 {rereadRun.ids
-                  .filter((id) => rereadRun.results[id])
+                  .filter((id) => rereadResults[id])
                   .map((id) => {
-                    const r = rereadRun.results[id];
+                    const r = rereadResults[id];
                     return (
                       <li key={id}>
                         <span className={r.kind === "fixed" ? "text-teal" : r.kind === "refused" ? "text-ember" : "text-danger"}>{r.kind === "fixed" ? "fixed" : r.kind === "refused" ? "refused" : "error"}</span>{" "}

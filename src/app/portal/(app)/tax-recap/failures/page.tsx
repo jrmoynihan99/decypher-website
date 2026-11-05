@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/firebase/session";
 import { KEEP_DAYS, listFailures } from "@/lib/tax-recap/failures-store";
 import { loadTables } from "@/lib/tax-recap/tables-store";
+import { listRecaps } from "@/lib/tax-recap/store";
+import { clientKey } from "@/lib/tax-recap/schema";
 import { Eyebrow } from "@/components/estimator/fields";
 import FailureList from "@/components/portal/tax-recap/FailureList";
 
@@ -14,7 +16,9 @@ export const metadata = { title: "Tax Recap failures — DeCypher Portal" };
 export default async function TaxRecapFailuresPage() {
   await requirePermission("receipts");
   // The tables the builder derives with, so "Retry" runs the engine as the builder would.
-  const [failures, tables] = await Promise.all([listFailures(), loadTables()]);
+  const [failures, tables, recaps] = await Promise.all([listFailures(), loadTables(), listRecaps().catch(() => [])]);
+  // Each saved recap as client + year: a refusal marked fixed whose return already has one isn't made again.
+  const recapKeys = recaps.map((r) => `${clientKey(r.clientName)}|${r.taxYear}`);
 
   return (
     <>
@@ -44,7 +48,7 @@ export default async function TaxRecapFailuresPage() {
       </p>
 
       <div className="mt-9">
-        <FailureList failures={failures} tables={tables} />
+        <FailureList failures={failures} tables={tables} recapKeys={recapKeys} />
       </div>
     </>
   );

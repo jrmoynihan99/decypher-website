@@ -76,7 +76,7 @@ import {
   type StateNumbers,
 } from "@/lib/tax-recap/schema";
 import { analyzePdf, preparePdf, redactionBlock, type PdfAnalysis } from "./pdf-prepare";
-import { REREAD_DONE_HREF, nextInQueue, readRereadQueue, rereadHref, writeRereadQueue, type RereadResult } from "./reread-queue";
+import { laneOf, nextInLane, readRun, rereadHref, writeResult, writeRun, type RereadResult, type RereadRun } from "./reread-queue";
 import { VideoStatus, useVideoMaker } from "./VideoMaker";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 
@@ -1821,20 +1821,26 @@ export default function TaxRecapBuilder({
    */
   const rereadStarted = useRef(false);
   const rereadDone = useRef(false);
-  const [rereadPos, setRereadPos] = useState<{ at: number; of: number } | null>(null);
+  const rereadSaveStarted = useRef(false);
+  const [rereadPos, setRereadPos] = useState<{ at: number; of: number; lane: number } | null>(null);
+  /** On to this lane's next refusal; a lane that's done goes blank (it runs in a frame on the Refused returns page). */
+  const nextReread = (run: RereadRun, lane: number) => {
+    const next = nextInLane(run, lane);
+    const inFrame = window.top !== window.self;
+    window.location.assign(next ? rereadHref(next, lane) : inFrame ? "about:blank" : "/portal/tax-recap/failures");
+  };
   useEffect(() => {
     if (!rereadId) return;
-    const q = readRereadQueue();
-    if (!q || !q.ids.includes(rereadId)) return;
+    const run = readRun();
+    const lane = run ? laneOf(run, rereadId) : -1;
+    if (!run || lane < 0) return;
     if (!fromFailure) {
       // Deleted, or its files are gone: said in the summary, and on to the next.
-      q.results[rereadId] = { kind: "error", detail: "the record or its kept files are gone", label: q.labels[rereadId] ?? rereadId };
-      writeRereadQueue(q);
-      const next = nextInQueue(q);
-      window.location.assign(next ? rereadHref(next) : REREAD_DONE_HREF);
+      writeResult(rereadId, { kind: "error", detail: "the record or its kept files are gone", label: run.labels[rereadId] ?? rereadId });
+      nextReread(run, lane);
       return;
     }
-    setRereadPos({ at: q.ids.indexOf(rereadId) + 1, of: q.ids.length });
+    setRereadPos({ at: run.lanes[lane].indexOf(rereadId) + 1, of: run.lanes[lane].length, lane });
     if (failureLoad === "idle") void loadFailureFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rereadId, fromFailure]);
@@ -1869,12 +1875,10 @@ export default function TaxRecapBuilder({
     } catch {
       /* the summary still says what happened */
     }
-    const q = readRereadQueue();
-    if (!q) return;
-    q.results[fromFailure.id] = { ...o, label: fromFailure.label };
-    writeRereadQueue(q);
-    const next = nextInQueue(q);
-    window.location.assign(next ? rereadHref(next) : REREAD_DONE_HREF);
+    const run = readRun();
+    if (!run) return; // stopped from the Refused returns page
+    writeResult(fromFailure.id, { ...o, label: fromFailure.label });
+    nextReread(run, rereadPos?.lane ?? laneOf(run, fromFailure.id));
   };
 
   // What the run came to: through to review, refused (once the new refusal
@@ -1891,9 +1895,33 @@ export default function TaxRecapBuilder({
       if (pickError) finish({ kind: "error", detail: pickError });
       return;
     }
-    if (stage === "review") {
+    if (stage === "review" || stage === "done") {
+      // Through: save the recap the way the button does (the video renders
+      // here too), wait for the video, then on. One that needs a person —
+      // Schedule 1's question to answer — is left for the builder.
       const p = sides.before.derived?.proof;
-      return finish({ kind: "fixed", detail: p?.verified ? "verified" : `projected (${p?.residuals.length ?? 0} lines carried)` });
+      const how = p?.verified ? "verified" : `projected (${p?.residuals.length ?? 0} lines carried)`;
+      if (!rereadSaveStarted.current) {
+        if (!canSave) {
+          return finish({
+            kind: "fixed",
+            detail: `${how} — not saved: ${askAdjustments ? "Schedule 1 has a question to answer" : "no client name or year was read"}; open it in the builder to save`,
+          });
+        }
+        rereadSaveStarted.current = true;
+        void save();
+        return;
+      }
+      if (saving) return;
+      if (saveError) return finish({ kind: "fixed", detail: `${how} — the save failed (${saveError}); open it in the builder to save` });
+      if (!saved || video.state.kind === "idle" || video.state.kind === "working") return;
+      return finish(
+        {
+          kind: "fixed",
+          detail: `${how} — recap saved${video.state.kind === "error" ? `, but the video failed (${video.state.message})` : " with its video"}`,
+          recap: saved.id,
+        },
+      );
     }
     if (sides.before.status === "error" && sides.before.problems.length) {
       const detail = sides.before.problems[0];
@@ -1907,11 +1935,11 @@ export default function TaxRecapBuilder({
       finish({ kind: "error", detail: pickError ?? (broken ? sides[broken].message : brokenMore?.side.message) ?? "a read failed" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rereadPos, failureLoad, stage, sides, moreEntities, failure, pickError]);
+  }, [rereadPos, failureLoad, stage, sides, moreEntities, failure, pickError, saving, saved, saveError, video.state, clientName, taxYear]);
 
   const stopReread = () => {
-    writeRereadQueue(null);
-    window.location.assign("/portal/tax-recap/failures");
+    writeRun(null);
+    window.location.assign(window.top !== window.self ? "about:blank" : "/portal/tax-recap/failures");
   };
 
   const save = async () => {
@@ -2164,7 +2192,7 @@ export default function TaxRecapBuilder({
             {rereadPos && fromFailure ? (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-teal/30 bg-teal/[0.06] px-4 py-3 font-body text-[13px] text-fog">
                 <span>
-                  Re-reading refused returns: {rereadPos.at} of {rereadPos.of} — <span className="text-white">{fromFailure.label}</span>. It moves on by itself.
+                  Re-reading refused returns (lane {rereadPos.lane + 1}): {rereadPos.at} of {rereadPos.of} — <span className="text-white">{fromFailure.label}</span>. It moves on by itself.
                 </span>
                 <button type="button" onClick={stopReread} className="ml-auto cursor-pointer rounded-full border border-white/15 px-3 py-1 text-[12px] text-mist hover:border-danger hover:text-danger">
                   Stop
