@@ -196,8 +196,49 @@ const OUTPUT_SCHEMA = {
         additionalProperties: false,
       },
     },
+    schedulesC: {
+      type: "array",
+      description: "Every Schedule C in the print, one entry each in print order, each read off its own page. A blank line is 0. Empty when there is none.",
+      items: {
+        type: "object",
+        properties: {
+          se: { type: "integer", description: "Which Schedule SE carries this business's line 31: 1 for the first Schedule SE in the print, 2 for the second, 0 when there is none." },
+          ...Object.fromEntries(
+            (
+              [
+                ["receipts", "Line 1, gross receipts or sales."],
+                ["returns", "Line 2, returns and allowances."],
+                ["cogs", "Line 4, cost of goods sold."],
+                ["otherIncome", "Line 6, other income."],
+                ["expenses", "Line 28, total expenses before the home office. 0 when blank — never line 29."],
+                ["tentative", "Line 29, tentative profit or (loss)."],
+                ["homeOffice", "Line 30, business use of the home."],
+                ["net", "Line 31, net profit or (loss); a loss negative."],
+              ] as const
+            ).map(([k, d]) => [k, { type: "number", description: d }]),
+          ),
+        },
+        required: ["se", "receipts", "returns", "cogs", "otherIncome", "expenses", "tentative", "homeOffice", "net"],
+        additionalProperties: false,
+      },
+    },
+    schedulesSE: {
+      type: "array",
+      description: "Every Schedule SE in the print, in print order. A blank line is 0. Empty when there is none.",
+      items: {
+        type: "object",
+        properties: {
+          farm: { type: "number", description: "Line 1a, net farm profit or (loss)." },
+          schC: { type: "number", description: "Line 2, net profit or (loss) from Schedule C and Schedule K-1 (Form 1065) box 14 code A." },
+          ssWages: { type: "number", description: "Line 8a, total Social Security wages and tips (W-2 boxes 3 and 7) — never line 7." },
+          tax: { type: "number", description: "Line 12, self-employment tax." },
+        },
+        required: ["farm", "schC", "ssWages", "tax"],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ["taxpayerName", "taxYear", "filingStatus", "stateCode", "stateForm", "notes", "lines", "otherStates"],
+  required: ["taxpayerName", "taxYear", "filingStatus", "stateCode", "stateForm", "notes", "lines", "otherStates", "schedulesC", "schedulesSE"],
   additionalProperties: false,
 };
 
@@ -340,18 +381,20 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - otherDependents: Schedule 8812 line 6 (other dependents: 17 and over, or without the required SSN). Omit when there is no Schedule 8812 or the line is blank.
 - qualifiedDividends: Form 1040 line 3a. Omit when blank.
 - capitalGain: Form 1040 line 7 (capital gain or loss; a loss as a negative number). Omit when blank.
-- capitalGainLongTerm: Schedule D line 15 (net long-term capital gain or loss) when the print has a Schedule D. Omit otherwise.
+- capitalGainLongTerm: Schedule D line 15 (net long-term capital gain or loss) when the print has a Schedule D — and when the print has a Schedule D whose line 15 is blank (every gain short-term), report 0: an exception to omitting blanks, because without it the whole of line 7 is taken as long-term. Omit only when there is no Schedule D.
 - businessNetIncome: Schedule 1 line 3, which equals Schedule C line 31 (net profit or loss). If Schedule 1 is absent, use Schedule C line 31. Omit when there is no Schedule C. A Schedule C whose only purpose is to pass income through — its receipts are described as "income issued to SSN picked up on the partnership (or S corporation) return" and the same amount is deducted as other expenses, so line 31 is 0 — is NOT a business: omit every Schedule C field for it and say so in notes.
-- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up, LESS any section 179 deduction in column (j) for those rows — i.e. what those rows contribute to line 32 and Schedule 1 line 5. A nonpassive LOSS sits in column (i), printed without parentheses: report it as a negative number. Omit when there is no S corporation row.
-- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments; a nonpassive loss in column (i) as a negative number. Omit when there is no partnership row.
+- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up, LESS any section 179 deduction in column (j) for those rows — i.e. what those rows contribute to line 32 and Schedule 1 line 5 (column (k) less column (j) — never the column (j) amount itself). A nonpassive LOSS sits in column (i), printed without parentheses: report it as a negative number. Omit when there is no S corporation row.
+- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments; a nonpassive loss in column (i) as a negative number. Every P row counts, a UPE row (below) included: the figure is what the P rows contribute to line 32 together. Omit when there is no partnership row.
+- partnershipUpe: Schedule E page 2, Part II: a partner's unreimbursed partnership expenses — a row of its own under the partnership's name, labeled "UPE", "Unreimbursed partnership expenses" or "Unreimbursed expenses", with its amount in column (i). Report the amount as a POSITIVE number (several such rows added up). Omit when there is no such row.
 - Each Schedule E Part II row goes in exactly ONE of scorpIncome and partnershipIncome, by the letter in its column (b) — S or P. Never report the same row, or the same total, under both. Columns (g) and (h) are the passive loss and income; columns (i) and (k) the nonpassive loss and income — read which column the amount is printed in.
-- rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number). Omit when there is no Schedule E page 1. Part I only: a Part II row (a partnership or S corporation) is never rental income, passive or not.
+- rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number), read on Schedule E page 1 itself. Omit when there is no Schedule E page 1. Part I only: a Part II row (a partnership or S corporation) is never rental income, passive or not. Never take it from Schedule 1 line 5 or Schedule E line 41: those add the partnership and S corporation rows (line 32) to line 26.
 - rentalProfits: Schedule E line 21 for the properties showing a profit, added up across every Schedule E page 1 copy. Omit when none.
 - rentalLosses: Schedule E line 21 for the properties showing a loss, added up across every copy, as a POSITIVE number — the losses before any limitation. Omit when none.
 - rentalRents: Schedule E line 23a, the total of line 3 (rents received) for all rental properties. When the properties run over several Schedule E page 1 copies, the totals are printed on the first copy only; read them there. Omit when there is no Schedule E Part I.
 - rentalExpenses: Schedule E line 23e, the total of line 20 (total expenses, depreciation included) for all properties, from the same first copy. Omit when there is no Schedule E Part I.
 - passivePriorUnallowed: Form 8582 line 1c plus line 2c (prior years' unallowed losses), as a positive number. Omit when there is no Form 8582 or the lines are blank.
-- rentalReps: Schedule E page 2 line 43 (reconciliation for real estate professionals), the net income or loss from rentals the taxpayer materially participated in; a loss as a negative number. Omit when blank — it is the sign that real estate professional status was claimed.
+- passiveOtherIncome: passive income from activities other than the rentals, which Form 8582 sets rental losses against: Schedule E page 2 line 29a column (h) (passive income from partnerships and S corporations) plus line 34a column (d) (passive income from estates and trusts), added up. Omit when both are blank.
+- rentalReps: Schedule E page 2 line 43 (reconciliation for real estate professionals), the net income or loss from rentals the taxpayer materially participated in; a loss as a negative number. It sits at the very bottom of Schedule E page 2, below line 42 — look for it whenever the print has Schedule E Part I, since a real estate professional's rental loss is deducted in full without Form 8582's limit. Omit when blank — it is the sign that real estate professional status was claimed.
 - totalIncome: Form 1040 line 9.
 - agi: Form 1040 line 11a (or line 11 on older layouts).
 - dependentCount: how many dependents are listed in the Dependents block on Form 1040 page 1. Omit when none.
@@ -359,7 +402,7 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - qbiIncome: Form 8995-A line 2 (qualified business income), added across the business columns. Only when the return has Form 8995-A — its title reads "Qualified Business Income Deduction" with a Part II "Determine Your Adjusted Qualified Business Income". Form 8995 (the simplified computation, one page, title "Qualified Business Income Deduction Simplified Computation") also prints a qualified business income figure: never put that one here. Omit all three 8995-A fields when the return has Form 8995 or neither.
 - qbiW2Wages: Form 8995-A line 4 (allocable share of W-2 wages), added across the business columns. Same condition.
 - qbiUbia: Form 8995-A line 7 (allocable share of the unadjusted basis of qualified property), added across the business columns. Omit when blank.
-- qbiLossCarryforward: Form 8995 line 3, the qualified business net loss carryforward from the prior year, as a positive number. Omit when blank or when the return uses Form 8995-A.
+- qbiLossCarryforward: Form 8995 line 3, the qualified business net loss carryforward from the PRIOR year, as a positive number. NOT line 16 at the bottom of the form (the loss carried forward to next year). Omit when line 3 is blank or when the return uses Form 8995-A.
 ${SCHEDULE_1_LINES}
 - itemizedDeductions: Schedule A line 17 (total itemized deductions), when the print has a Schedule A — even if the return took the standard deduction instead. Omit when there is no Schedule A.
 - saltPaid: Schedule A line 5d (state and local taxes added up, before the cap). Omit when there is no Schedule A.
@@ -371,7 +414,7 @@ ${SCHEDULE_1_LINES}
 - childCareCredit: Schedule 3 line 2 (= Form 2441 line 11), the credit for child and dependent care expenses. Omit when blank.
 - nonrefundableCredits: Form 1040 line 20 only (= Schedule 3 line 8). NOT line 21, which adds line 19's child tax credit to it. Omit when line 20 is blank.
 - seTax: Schedule 2 line 4 — every Schedule SE on the return together (a joint return can carry one for each spouse). It equals Schedule SE line 12 only when there is one Schedule SE. If Schedule 2 is absent, add up line 12 of every Schedule SE; if there is none, omit.
-- seSsWages: Schedule SE line 8a (total Social Security wages and tips, W-2 boxes 3 and 7), added up when there are several Schedules SE. Omit when blank or when there is no Schedule SE.
+- seSsWages: Schedule SE line 8a (total Social Security wages and tips, W-2 boxes 3 and 7), added up when there are several Schedules SE. NOT line 7, the year's printed maximum ($176,100 for 2025, $168,600 for 2024, $160,200 for 2023). Omit when line 8a is blank — as it is with no W-2 wages — or when there is no Schedule SE.
 - otherTaxes: Form 1040 line 23 (other taxes, including self-employment tax, from Schedule 2 line 21). Report 0 when printed as 0; omit when blank.
 - niit: Schedule 2 line 12 (= Form 8960 line 17), net investment income tax. Omit when blank or 0.
 - federalTotalTax: Form 1040 line 24.
@@ -383,11 +426,16 @@ ${SCHEDULE_1_LINES}
 - federalAmountOwed: Form 1040 line 37; omit when there is a refund.
 - federalPenalty: Form 1040 line 38 (estimated tax penalty); omit when empty.
 - grossReceipts: Schedule C line 1. If there are several Schedules C, sum them and say so in notes. Omit when there is no Schedule C.
-- totalExpenses: Schedule C line 28 (total expenses before the home office). Line 29 (tentative profit) and line 31 (net profit) are not expenses. On a Schedule C with receipts whose line 28 is blank, report 0.
-- homeOffice: Schedule C line 30.
+- schCReturns: Schedule C line 2 (returns and allowances), added up across every Schedule C. Omit when blank.
+- schCOtherIncome: Schedule C line 6 (other income, including a fuel tax credit or refund), added up across every Schedule C; a loss as a negative number. Omit when blank.
+- farmIncome: Schedule 1 line 6 (farm income or loss, = Schedule F line 34); a loss as a negative number. Omit when there is no Schedule F.
+- totalExpenses: Schedule C line 28 (total expenses before the home office). Line 29 (tentative profit) and line 31 (net profit) are not expenses. On a Schedule C with receipts whose line 28 is blank, report 0. With several Schedules C, add up each one's own line 28 — a Schedule C with receipts and no expenses adds 0, never its line 29.
+- homeOffice: Schedule C line 30 (expenses for business use of the home, Form 8829 line 36 or the simplified method), added up across every Schedule C. Not line 29: line 29 is the tentative profit just above it, and line 31 is line 29 less line 30.
 - cogs: Schedule C line 4 (cost of goods sold). Omit when blank.
 - schCWages: Schedule C line 26 (wages, less employment credits). Omit when blank.
 - schCDepreciation: Schedule C line 13 (depreciation and section 179). Omit when blank.
+- schedulesC: every Schedule C in the print, one entry each in print order, each read off that Schedule C's own page — lines 1, 2, 4, 6, 28, 29, 30 and 31, a blank line as 0 (line 28 blank is 0, never its line 29). Leave out a pass-through-only Schedule C (see businessNetIncome). "se" is the Schedule SE that carries the business: on a joint return where each spouse has a Schedule SE, match the business's line 31 into each schedule's line 2 (line 2 is the sum of that person's Schedules C, plus any partnership box 14) and give 1 for the first Schedule SE printed, 2 for the second; with one Schedule SE, 1; with none, 0. Their line 31s add up to businessNetIncome. Empty when there is no Schedule C.
+- schedulesSE: every Schedule SE in the print, in print order: line 1a, line 2, line 8a, line 12, a blank line as 0. Empty when there is none.
 - The rest of Schedule C Part II, each omitted when blank (with several Schedules C, add each line up across them): schCAdvertising line 8; schCCarTruck line 9; schCCommissions line 10; schCContractLabor line 11; schCEmployeeBenefits line 14; schCInsurance line 15; schCInterest lines 16a + 16b; schCLegalProfessional line 17; schCOfficeExpense line 18; schCPension line 19; schCRent lines 20a + 20b; schCRepairs line 21; schCSupplies line 22; schCTaxesLicenses line 23; schCTravel line 24a; schCMeals line 24b (the deductible amount as printed); schCUtilities line 25; schCOtherExpenses line 27a.
 
 State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field.
@@ -405,6 +453,7 @@ More than one state return (a move during the year, income earned in another sta
 - New York Form IT-203 (nonresident / part-year; the same lines on an amended IT-203-X): stateTaxOnIncome is line 46 (the allocated New York State tax: line 44 times the income percentage on line 45); stateTotalTax is line 58; stateLocalTax is line 51 (New York City part-year resident tax) when printed; stateDeduction is line 33.
 - Virginia Form 760PY (part-year): stateTaxOnIncome and stateTotalTax are both line 18; stateDeduction is line 12 (or line 11 when itemized); stateExemptions is line 13. On filing status 4 (spouses filing separately on one combined return, column A for you and column B for the spouse), add the two columns together on every line.
 - Arizona Form 140PY (part-year / nonresident): stateTaxOnIncome is line 56; stateTotalTax is line 62 (balance of tax); stateDeduction is line 53.
+- Nebraska Form 1040N: stateTotalTax is line 35 (Nebraska tax after nonrefundable credits) — NOT line 17 (before the credits) and never line 18, which is the personal exemption credit itself; report 0 when line 35 is printed as 0.
 - Maryland Form 505 (nonresident) with Form 505NR: stateTaxOnIncome is Form 505 line 32a (the Maryland tax from 505NR line 16, before the special nonresident tax); stateTotalTax is Form 505 line 37 (Maryland tax after credits, which includes the special nonresident tax on line 32b); statePayments is line 47; stateWithholding is line 43; stateAmountOwed is line 48; statePenalty is line 52; stateTotalDue is line 53; stateExemptions is Form 505 line 28 (the total exemption amount before any proration); stateDeduction is line 26a or 26d. Maryland Form 502 (resident): stateTotalTax is line 34 plus the local tax on line 28 is NOT modeled — report line 34 as printed; stateTaxOnIncome is line 22; stateExemptions is line 19; stateDeduction is line 17.
 - stateAdjustments: the state's net adjustment to federal AGI before its own deductions, additions less subtractions. California Form 540: line 16 minus line 14 (Schedule CA (540) Part I line 27, column C less column B). Form 540NR: Schedule CA (540NR) Part II line 27, column C less column B. Negative when the subtractions are larger. Omit when both columns are blank, and for a state that starts from its own gross income (New Jersey).
 - stateDeduction: the deduction the state return took — its standard deduction or its own itemized deductions, whichever line 18 of California Form 540 shows (= Schedule CA (540) Part II line 30). Omit for states without such a line.
@@ -414,7 +463,7 @@ More than one state return (a move during the year, income earned in another sta
 - Massachusetts Form 1: stateTaxOnIncome is line 22 (tax on 5.0% income); stateTotalTax is line 32 (income tax after credits — NOT line 37 if it differs, and never line 51); statePayments is line 51 (withholding plus the refundable credits on line 48, as the form totals them); stateWithholding is line 38; stateAmountOwed is line 55 as printed; statePenalty is the M-2210 amount, interest and penalty printed beside line 55; stateTotalDue is line 55 plus those; stateBusinessIncome is line 6a plus line 7 (business income plus the S corporation / partnership income). Report stateAdjustments only when Schedule Y or line 15 carries something beyond lines 11a/11b.
 - stateExemptionCredits: the state's exemption credits after any phase-out, when they are a credit off the tax (California 540 line 32). Omit for other states.
 - stateMedical: the state's medical expense deduction (NJ-1040 line 31). Omit when blank.
-- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31, 540NR line 37; New York IT-201 line 39). Omit when blank.
+- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31 — the tax line itself, NOT line 33, which is line 31 less the exemption credits on line 32; 540NR line 37; New York IT-201 line 39). Omit when blank.
 - stateLocalTax: a city income tax the state return carries for a city resident — New York IT-201 line 54 (NYC resident tax after NYC credits, the city taxes block on page 3). Omit when the filer isn't a city resident (lines 47–54 blank) and for every other state.
 - New York IT-201: stateTotalTax is line 61 (New York State, New York City, Yonkers and sales taxes together — line 46 alone is NOT it); stateTaxOnIncome is line 39; stateLocalTax is line 54; stateDeduction is line 34; stateAdjustments is (line 24 − line 19) − line 32, omitted when there are no additions or subtractions; statePayments is line 76; stateWithholding is lines 72, 73 and 74 added up; stateRefund is line 78; stateAmountOwed is line 80; statePenalty is lines 81 + 82; stateTotalDue is line 80. The IT-201's labels print as scrambled letters on these PDFs — go by the line numbers and the page layout.
 - statePteCreditAvailable: FTB 3804-CR Part II line 3, the pass-through entity elective tax credit available. Omit when there is no such form.
@@ -427,6 +476,7 @@ Health coverage lines (sehiDeduction and sehiPaid whenever the return has them; 
 - additionalTaxes: Form 1040 line 17 (Schedule 2 line 3), the excess advance premium tax credit repayment. Omit when blank.
 - sehiDeduction: Schedule 1 line 17, listed with Schedule 1 above.
 - sehiPaid: Form 7206 line 1, the premiums paid; with several Forms 7206 (one per spouse or business), their line 1 amounts added up. Omit when there is no Form 7206.
+- sehiBusinessProfit: Form 7206 line 4, the net profit of the trade or business the insurance plan is established under. Report it only when line 5 (all the businesses' net profits) is printed and differs from it; omit otherwise.
 - medicareWages: Form 7206 line 11, the Medicare wages from an S corporation the taxpayer owns more than 2% of. Omit when blank.
 - ptcFamilySize: Form 8962 line 1.
 - ptcPovertyLine: Form 8962 line 4.
@@ -450,7 +500,7 @@ Lines:
 - agi: Form 1040 line 11a (or line 11 on older layouts).
 ${SCHEDULE_1_LINES}
 
-Also report the tax year and the filing status. The taxpayer's name, the state code, the state form and otherStates aren't needed here: empty strings and an empty list.`;
+Also report the tax year and the filing status. The taxpayer's name, the state code, the state form, otherStates, schedulesC and schedulesSE aren't needed here: empty strings and empty lists.`;
 
 const ENTITY_SYSTEM = `You read US pass-through entity income tax returns printed from Intuit ProSeries — an S corporation's Form 1120-S or a partnership's Form 1065, with the state's own return for the entity — and report specific line values as JSON.
 

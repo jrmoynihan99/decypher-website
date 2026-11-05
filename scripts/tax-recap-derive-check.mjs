@@ -891,13 +891,19 @@ const REFUSALS = [
     assert: (r) => !r.derived.proof.residuals.some((m) => /deduction/i.test(m.line)),
   },
   {
-    // The tax team's test (2026-10-22): a Schedule C with no expenses is only
-    // ever filed for an S corporation's payroll cleanup. With no corporation
-    // on the return it's a misread line 28, and the engine says so.
-    name: "a Schedule C with receipts and no expenses, no S corporation",
+    // The tax team's test (2026-10-22) refused a Schedule C with no
+    // expenses and no corporation as a misread line 28. Engine v17: two
+    // November refusals were real ones (a partner's side consulting, a
+    // spouse's business), so with no S corporation on the return it's a
+    // business with nothing to zero — the same on both sides, said in a
+    // note. Beside a corporation it's still the payroll cleanup.
+    name: "a Schedule C with receipts and no expenses, no S corporation: a business with no write-offs (v17)",
     meta: clientA.meta,
     after: { ...clientA.after, totalExpenses: 0, homeOffice: 0, grossReceipts: clientA.after.businessNetIncome },
-    expect: /payroll cleanup/,
+    expect: null,
+    assert: (r) =>
+      r.derived.notes.some((s) => /no S corporation on the return whose payroll it could be/.test(s)) &&
+      r.before.businessNetIncome === clientA.after.businessNetIncome,
   },
   {
     name: "a partner's return without the 1065",
@@ -2201,6 +2207,43 @@ const FAILURES = JSON.parse(readFileSync(new URL("./fixtures/tax-recap-failures-
 console.log("\nFailures inbox, 2026-10-16…19 (engine v12)");
 for (const f of FAILURES) {
   const r = deriveBefore(numbers(f.after), f.meta, undefined, f.entity ? entityNumbers(f.entity) : null);
+  const ok =
+    f.expect === null
+      ? r.ok &&
+        r.before.federalTotalTax === f.federal &&
+        r.before.stateTotalTax === f.state &&
+        r.derived.proof.verified === f.verified &&
+        (f.notes ?? []).every((n) => r.derived.notes.some((s) => new RegExp(n).test(s)))
+      : !r.ok && r.reasons.some((s) => new RegExp(f.expect).test(s));
+  if (!ok) failed++;
+  console.log(`  ${ok ? "ok" : "WRONG"}  ${f.name} — ${f.proves}`);
+  if (!r.ok) console.log(`         → ${r.reasons[0]}`);
+  else {
+    const p = r.derived.proof;
+    console.log(
+      `         → derived; federal before ${money(r.before.federalTotalTax)} (want ${money(f.federal)})${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)} (want ${money(f.state)})` : ""}; ${p.verified ? "verified" : `projected (${p.residuals.length} carried)`}`,
+    );
+  }
+}
+
+/* ── The Refused returns, 2026-11-05 (engine v17) ───────────────────────────
+   The refusals the November triage fixed, as the reader read them — with
+   the one or two lines a v17 read adds or corrects patched in (the UPE
+   row, a Schedule D line 15 printed blank), each checked on the print.
+   Same pins as above: the before's federal and state totals to the
+   dollar and whether the after reproduces outright; these also hand the
+   engine the other entity and state returns on the same 1040.            */
+const NOV = JSON.parse(readFileSync(new URL("./fixtures/tax-recap-failures-2026-11.json", import.meta.url), "utf8"));
+console.log("\nRefused returns, 2026-11-05 (engine v17)");
+for (const f of NOV) {
+  const more = f.more
+    ? {
+        ...f.more,
+        entities: (f.more.entities ?? []).map((e) => ({ ...e, numbers: entityNumbers(e.numbers) })),
+        states: (f.more.states ?? []).map((s) => ({ ...s, numbers: { ...emptyStateNumbers(), ...s.numbers } })),
+      }
+    : {};
+  const r = deriveBefore(numbers(f.after), f.meta, undefined, f.entity ? entityNumbers(f.entity) : null, more);
   const ok =
     f.expect === null
       ? r.ok &&

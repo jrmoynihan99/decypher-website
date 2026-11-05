@@ -5,6 +5,7 @@ import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SubheadingReveal from "@/components/reveal/SubheadingReveal";
 import AutoplayVideo from "@/components/ui/AutoplayVideo";
+import ConsultButton from "@/components/ui/ConsultButton";
 import DecryptOnView from "@/components/ui/DecryptOnView";
 import GlowOrb from "@/components/ui/GlowOrb";
 import type { CmsThankYouPage } from "@/sanity/types";
@@ -65,17 +66,33 @@ export default function ThankYouHero({
   header = {},
   video = {},
   showVideo = true,
+  cta,
+  titleAs = "h1",
+  videoLabel,
 }: {
   header?: NonNullable<CmsThankYouPage["header"]>;
   video?: NonNullable<CmsThankYouPage["video"]>;
   /** False drops the whole video section; the header runs into the wall. */
   showVideo?: boolean;
+  /**
+   * A button under the video (or under the header when there's no video).
+   * Thank-you pages never pass one — the call is already booked; landing
+   * pages use this hero as their opener and need somewhere to send people.
+   */
+  cta?: { label: string; href?: string; note?: string };
+  /** h2 when a landing page places this hero below another section. */
+  titleAs?: "h1" | "h2";
+  /** The player's accessible name when the video has no title of its own. */
+  videoLabel?: string;
 }) {
   // Deleted in the Studio comes back as undefined, cleared comes back as "" —
   // both mean "no body line". Nothing is substituted and nothing is rendered,
   // so the title runs straight into the video with no blank row holding a
   // margin open.
   const body = header.body?.trim();
+  // Undefined falls back to the default; an explicit "" (a landing page with
+  // no eyebrow) renders nothing rather than an empty line holding a gap open.
+  const eyebrow = header.eyebrow ?? DEFAULTS.eyebrow;
 
   return (
     <SectionReveal>
@@ -90,13 +107,15 @@ export default function ThankYouHero({
         />
 
         <div className="relative mx-auto max-w-[860px]">
-          <SubheadingReveal className="relative">
-            <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-teal">
-              {header.eyebrow ?? DEFAULTS.eyebrow}
-            </p>
-          </SubheadingReveal>
+          {eyebrow && (
+            <SubheadingReveal className="relative">
+              <p className="m-0 font-mono text-xs uppercase tracking-[0.3em] text-teal">
+                {eyebrow}
+              </p>
+            </SubheadingReveal>
+          )}
           <DecryptOnView
-            as="h1"
+            as={titleAs}
             text={header.title ?? DEFAULTS.title}
             threshold={0}
             style={{ maxWidth: "22ch" }}
@@ -146,11 +165,27 @@ export default function ThankYouHero({
             {video.videoUrl ? (
               <AutoplayVideo
                 url={video.videoUrl}
-                title={video.title ?? "Pre-call briefing"}
+                title={video.title ?? videoLabel ?? "Pre-call briefing"}
                 variant="hero"
               />
             ) : (
               <HeroVideoPlaceholder />
+            )}
+          </Reveal>
+        )}
+
+        {cta && (
+          <Reveal
+            delay={showVideo ? 0.65 : 0.5}
+            className="relative mt-8 flex flex-col items-center gap-3 md:mt-10"
+          >
+            <ConsultButton size="lg" href={cta.href}>
+              {cta.label}
+            </ConsultButton>
+            {cta.note && (
+              <p className="m-0 font-mono text-[11px] tracking-[0.08em] text-dusk">
+                {cta.note}
+              </p>
             )}
           </Reveal>
         )}

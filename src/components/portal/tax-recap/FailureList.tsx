@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { readRereadQueue, rereadHref, writeRereadQueue, type RereadQueue } from "./reread-queue";
 import { Chip, Panel } from "@/components/portal/widgets/ui";
 import { shortDate } from "@/lib/widget-format";
 import type { FailureDoc, FailureFileKind, FailureStatus, FailureSummary } from "@/lib/tax-recap/failures-store";
@@ -153,6 +154,45 @@ export default function FailureList({ failures: fromServer, tables }: { failures
       setMarking(false);
     }
   };
+  /**
+   * "Re-read all": the refusals the retry still couldn't get through and
+   * that kept their files, read again from those files with today's reader
+   * — one at a time in the builder (reread-queue.ts), which marks each old
+   * record and moves on. Old records' reads predate lines the reader now
+   * takes (UPE, each Schedule C, farm income…), which is why a retry alone
+   * can't clear them. A blocked print has nothing to read.
+   */
+  const stillRefused = failures.filter(
+    (f) => f.status === "open" && f.stage !== "blocked" && f.originals.length > 0 && (retried[f.id]?.state === "refused" || retried[f.id]?.state === "error"),
+  );
+  const startReread = () => {
+    if (!stillRefused.length) return;
+    if (
+      !window.confirm(
+        `Read the ${stillRefused.length} still refused again from their kept PDFs? Each is a new read (about the cost of building a recap), one after another in the builder — leave this tab open until it comes back here.`,
+      )
+    )
+      return;
+    const q: RereadQueue = {
+      ids: stillRefused.map((f) => f.id),
+      labels: Object.fromEntries(stillRefused.map((f) => [f.id, `${f.clientName || "Unnamed"} ${f.taxYear ?? ""}`.trim()])),
+      results: {},
+    };
+    writeRereadQueue(q);
+    window.location.assign(rereadHref(q.ids[0]));
+  };
+  /** The last "Re-read all", when it has come back here. */
+  const [rereadRun, setRereadRun] = useState<RereadQueue | null>(null);
+  useEffect(() => {
+    const q = readRereadQueue();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage only exists in the browser
+    if (q && Object.keys(q.results).length) setRereadRun(q);
+  }, []);
+  const clearReread = () => {
+    writeRereadQueue(null);
+    setRereadRun(null);
+  };
+
   const retryCounts = Object.values(retried).reduce(
     (c, r) => ({ ...c, [r.state]: (c[r.state] ?? 0) + 1 }),
     {} as Partial<Record<Retried["state"], number>>,
@@ -225,7 +265,40 @@ export default function FailureList({ failures: fromServer, tables }: { failures
                 {marking ? "Marking…" : `Mark the ${passing.length} that go through as fixed`}
               </button>
             ) : null}
+            {progress && progress.done === progress.total && stillRefused.length ? (
+              <button type="button" onClick={startReread} className={`${action} hover:border-teal hover:text-teal`}>
+                Re-read the {stillRefused.length} still refused from their kept PDFs
+              </button>
+            ) : null}
           </div>
+          {rereadRun ? (
+            <div className="mt-3 rounded-xl border border-white/[0.08] px-4 py-3 font-body text-[12.5px] text-mist">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-fog">
+                  Last re-read: {Object.values(rereadRun.results).filter((r) => r.kind === "fixed").length} go through (marked fixed) ·{" "}
+                  {Object.values(rereadRun.results).filter((r) => r.kind === "refused").length} still refused (each recorded again with its new read, the old one dismissed) ·{" "}
+                  {Object.values(rereadRun.results).filter((r) => r.kind === "error").length} didn&rsquo;t finish
+                  {rereadRun.ids.length > Object.keys(rereadRun.results).length ? ` · ${rereadRun.ids.length - Object.keys(rereadRun.results).length} not reached` : ""}
+                </span>
+                <button type="button" onClick={clearReread} className={`${action} ml-auto`}>
+                  Clear
+                </button>
+              </div>
+              <ul className="mb-0 mt-2 list-none space-y-1 pl-0">
+                {rereadRun.ids
+                  .filter((id) => rereadRun.results[id])
+                  .map((id) => {
+                    const r = rereadRun.results[id];
+                    return (
+                      <li key={id}>
+                        <span className={r.kind === "fixed" ? "text-teal" : r.kind === "refused" ? "text-ember" : "text-danger"}>{r.kind === "fixed" ? "fixed" : r.kind === "refused" ? "refused" : "error"}</span>{" "}
+                        <span className="text-fog">{r.label}</span> — {r.detail}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+          ) : null}
           {progress ? (
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
               <div className="h-full rounded-full bg-teal transition-[width] duration-200" style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />

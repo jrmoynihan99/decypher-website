@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import type { DeriveMeta, DeriveMore, EntityInput, Mismatch, OtherStateInput } from "./derive";
 import {
@@ -10,6 +11,7 @@ import {
   sanitizeEntityNumbers,
   sanitizeExtract,
   sanitizeNumbers,
+  sanitizeScheduleReads,
   sanitizeStateNumbers,
   type EntityExtract,
   type EntityNumbers,
@@ -202,7 +204,8 @@ export function sanitizeMore(raw: unknown): DeriveMore {
     })
     .filter((s): s is OtherStateInput => s !== null)
     .slice(0, MAX_OTHER_STATES);
-  return { entities, states };
+  // Each Schedule C and Schedule SE as read (engine v17), for a replay to hand the engine the same.
+  return { entities, states, ...sanitizeScheduleReads(r) };
 }
 
 function sanitizeMismatches(raw: unknown): Mismatch[] {
@@ -341,12 +344,32 @@ function ref(id: string) {
   return adminDb().collection(COLLECTION).doc(id);
 }
 
-export async function recordFailure(input: FailureInput, actor: string): Promise<FailureDoc> {
+/**
+ * The same refusal twice: the engine version, everything it was handed and
+ * what it said. Create pressed again on the same reads used to open a new
+ * record each time (three of one return on the list); an open record with
+ * the same fingerprint is handed back instead. A blocked save has no reads
+ * to compare and always records.
+ */
+function failureFingerprint(input: FailureInput): string | null {
+  if (input.stage === "blocked") return null;
+  const { engineVersion, meta, after, entity, more, reasons } = input;
+  return createHash("sha256").update(JSON.stringify({ engineVersion, meta, after, entity, more, reasons })).digest("hex").slice(0, 40);
+}
+
+export async function recordFailure(input: FailureInput, actor: string): Promise<FailureDoc & { existing?: boolean }> {
   if (!isConfigured()) throw new TaxRecapFailureError("Firebase is not configured");
+  const fingerprint = failureFingerprint(input);
+  if (fingerprint) {
+    const same = await adminDb().collection(COLLECTION).where("fingerprint", "==", fingerprint).limit(5).get();
+    const open = same.docs.find((d) => d.data().status === "open");
+    if (open) return { ...toDoc(open.id, open.data()), existing: true };
+  }
   const now = new Date();
   // JSON round-trip: Firestore rejects undefined.
   const doc = {
     ...JSON.parse(JSON.stringify(input)),
+    ...(fingerprint ? { fingerprint } : {}),
     status: "open",
     note: "",
     files: {},

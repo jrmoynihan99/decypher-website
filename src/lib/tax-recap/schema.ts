@@ -119,6 +119,13 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   {
+    key: "partnershipUpe",
+    label: "Unreimbursed partnership expenses (UPE)",
+    source: "Schedule E page 2, Part II: a partner's own unreimbursed expenses (a row of its own under the partnership, column (i)), as a positive number — netted into the partnership line, zeroed on the before",
+    group: "income",
+    optional: true,
+  },
+  {
     key: "rentalIncome",
     label: "Rental real estate income or (loss)",
     source: "Schedule E line 26, as deducted after Form 8582",
@@ -157,6 +164,13 @@ export const RETURN_FIELDS = [
     key: "passivePriorUnallowed",
     label: "Prior years' unallowed passive losses",
     source: "Form 8582 line 1c plus line 2c, as a positive number",
+    group: "income",
+    optional: true,
+  },
+  {
+    key: "passiveOtherIncome",
+    label: "Passive income from other activities",
+    source: "Schedule E line 29a column (h) plus line 34a column (d): passive income from partnerships, S corporations, estates and trusts — what Form 8582 sets rental losses against",
     group: "income",
     optional: true,
   },
@@ -450,8 +464,29 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   { key: "grossReceipts", label: "Gross receipts", source: "Schedule C line 1", group: "business" },
+  {
+    key: "schCReturns",
+    label: "Returns and allowances (Sch C)",
+    source: "Schedule C line 2 — refunds to customers: not a write-off, the same on both sides",
+    group: "business",
+    optional: true,
+  },
+  {
+    key: "schCOtherIncome",
+    label: "Other business income (Sch C)",
+    source: "Schedule C line 6 — the same on both sides",
+    group: "business",
+    optional: true,
+  },
   { key: "totalExpenses", label: "Total expenses", source: "Schedule C line 28", group: "business" },
   { key: "homeOffice", label: "Home office", source: "Schedule C line 30", group: "business" },
+  {
+    key: "farmIncome",
+    label: "Farm income or (loss)",
+    source: "Schedule 1 line 6 (= Schedule F line 34) — on Schedule SE line 1a; carried as filed on both sides",
+    group: "business",
+    optional: true,
+  },
   {
     key: "cogs",
     label: "Cost of goods sold (Sch C)",
@@ -566,6 +601,13 @@ export const RETURN_FIELDS = [
     key: "sehiPaid",
     label: "Health insurance premiums paid",
     source: "Form 7206 line 1",
+    group: "coverage",
+    optional: true,
+  },
+  {
+    key: "sehiBusinessProfit",
+    label: "Profit of the business the health plan is under",
+    source: "Form 7206 line 4 — with several businesses, the deduction is capped at this one's share (lines 5–8)",
     group: "coverage",
     optional: true,
   },
@@ -985,7 +1027,66 @@ export type ReturnExtract = {
   fields: Record<ReturnFieldKey, ExtractedValue>;
   /** Every other state return in the print, each with its own lines (engine v13 reader on). */
   otherStates?: OtherStateExtract[];
+  /** Every Schedule C, each off its own page (engine v17 reader on). */
+  schedulesC?: ScheduleCRead[];
+  /** Every Schedule SE, in print order (engine v17 reader on). */
+  schedulesSE?: ScheduleSERead[];
 };
+
+/**
+ * One Schedule C as printed, a blank line as 0. The summed fields
+ * (grossReceipts, totalExpenses…) are what the engine works from; these
+ * let it check each business's own arithmetic, put a misread total right,
+ * and give each spouse their own Schedule SE (derive.ts, engine v17).
+ * `se` is which Schedule SE carries the business: 1 the first printed, 2
+ * the second, 0 none.
+ */
+export type ScheduleCRead = {
+  se: number;
+  receipts: number;
+  returns: number;
+  cogs: number;
+  otherIncome: number;
+  expenses: number;
+  tentative: number;
+  homeOffice: number;
+  net: number;
+};
+export const SCHEDULE_C_READ_KEYS = ["receipts", "returns", "cogs", "otherIncome", "expenses", "tentative", "homeOffice", "net"] as const;
+
+/** One Schedule SE as printed, a blank line as 0: farm (line 1a), Schedule C and K-1 (line 2), W-2 Social Security wages (line 8a), the tax (line 12). */
+export type ScheduleSERead = { farm: number; schC: number; ssWages: number; tax: number };
+export const SCHEDULE_SE_READ_KEYS = ["farm", "schC", "ssWages", "tax"] as const;
+
+const MAX_SCHEDULES_C = 6;
+
+/** The two lists as read or as stored: whole dollars, at most six Schedules C and two Schedules SE. */
+export function sanitizeScheduleReads(raw: { schedulesC?: unknown; schedulesSE?: unknown }): { schedulesC?: ScheduleCRead[]; schedulesSE?: ScheduleSERead[] } {
+  const money = (v: unknown) => {
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) && Math.abs(x) < 1e10 ? Math.round(x) : 0;
+  };
+  const cs = (Array.isArray(raw.schedulesC) ? raw.schedulesC : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+    .map((x) => {
+      const se = Number(x.se);
+      const out = { se: se === 1 || se === 2 ? se : 0 } as ScheduleCRead;
+      for (const k of SCHEDULE_C_READ_KEYS) out[k] = money(x[k]);
+      return out;
+    })
+    .filter((x) => SCHEDULE_C_READ_KEYS.some((k) => x[k] !== 0))
+    .slice(0, MAX_SCHEDULES_C);
+  const ses = (Array.isArray(raw.schedulesSE) ? raw.schedulesSE : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+    .map((x) => {
+      const out = {} as ScheduleSERead;
+      for (const k of SCHEDULE_SE_READ_KEYS) out[k] = money(x[k]);
+      return out;
+    })
+    .filter((x) => SCHEDULE_SE_READ_KEYS.some((k) => x[k] !== 0))
+    .slice(0, 2);
+  return { ...(cs.length ? { schedulesC: cs } : {}), ...(ses.length ? { schedulesSE: ses } : {}) };
+}
 
 /**
  * One thing the client does next. A step is a plain line, a link, or a line
@@ -1292,6 +1393,7 @@ export function sanitizeExtract(raw: unknown): ReturnExtract | null {
     notes: text(r.notes, 2000),
     fields,
     ...(otherStates.length ? { otherStates } : {}),
+    ...sanitizeScheduleReads(r),
   };
 }
 

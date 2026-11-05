@@ -39,10 +39,20 @@ export default function ScheduleHero({
   hero,
   stats,
   thankYou,
+  eventKey,
+  titleAs = "h1",
 }: {
   hero: NonNullable<SchedulePageDoc["hero"]>;
   stats: StatContent[];
   thankYou: ThankYouRouting;
+  /**
+   * Book a fixed event instead of routing by income (see ScheduleForm). Unset
+   * on Book a Call; a landing page's booking section sets it for the referral
+   * call.
+   */
+  eventKey?: string;
+  /** h2 when a landing page places the form below its hero. */
+  titleAs?: "h1" | "h2";
 }) {
   const [leaving, setLeaving] = useState(false);
 
@@ -70,7 +80,7 @@ export default function ScheduleHero({
             </p>
           </SubheadingReveal>
           <DecryptOnView
-            as="h1"
+            as={titleAs}
             text={hero.title ?? ""}
             threshold={0}
             style={{ maxWidth: "14ch" }}
@@ -100,6 +110,7 @@ export default function ScheduleHero({
 
         <Reveal delay={0.35}>
           <ScheduleForm
+            eventKey={eventKey}
             onBooked={() => {
               setLeaving(true);
               window.location.assign(

@@ -22,8 +22,13 @@ export async function POST(req: Request) {
   try {
     const input = sanitizeFailureInput(body);
     const failure = await recordFailure(input, session.email);
-    console.log(`[tax-recap] ${session.email} recorded failure ${failure.id} (${input.reasons.length} reasons)`);
-    return NextResponse.json({ ok: true, id: failure.id });
+    console.log(
+      failure.existing
+        ? `[tax-recap] ${session.email} hit open failure ${failure.id} again (same reads, same reasons)`
+        : `[tax-recap] ${session.email} recorded failure ${failure.id} (${input.reasons.length} reasons)`,
+    );
+    // `kept`: the originals already on a record handed back, so they aren't sent twice.
+    return NextResponse.json({ ok: true, id: failure.id, existing: !!failure.existing, kept: failure.originals.length });
   } catch (e) {
     if (e instanceof TaxRecapFailureError) {
       return NextResponse.json({ ok: false, message: e.message }, { status: 400 });

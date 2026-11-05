@@ -4,6 +4,8 @@ import type { StructureResolver } from "sanity/structure";
  * Studio sidebar:
  *
  *   Pages          → the six page documents (fixed IDs — one doc per template)
+ *   Landing Pages  → campaign pages built from the section library — a LIST,
+ *                    and the one page type whose sections the client arranges
  *   Affiliate Pages→ partner landing pages — a LIST, not fixed docs: the client
  *                    adds one per affiliate from here
  *   Thank You Pages→ post-booking pages — also a LIST: one per ad campaign, so
@@ -33,6 +35,7 @@ const PAGES: Array<{ type: string; title: string }> = [
 
 const HANDLED = [
   ...PAGES.map((p) => p.type),
+  "landingPage",
   "affiliatePage",
   "thankYouPage",
   "legalPage",
@@ -72,7 +75,17 @@ export const structure: StructureResolver = (S) =>
               ),
             ),
         ),
-      // A document list, not fixed children: affiliate pages are the one page
+      // Built from the section library — any sections, any order. A list, like
+      // the affiliate pages: one per campaign or audience. Newest first, since
+      // the one being built right now is the one being looked for.
+      S.listItem()
+        .title("Landing Pages")
+        .child(
+          S.documentTypeList("landingPage")
+            .title("Landing Pages")
+            .defaultOrdering([{ field: "_createdAt", direction: "desc" }]),
+        ),
+      // A document list, not fixed children: affiliate pages are the other page
       // type the client creates more of.
       S.listItem()
         .title("Affiliate Pages")

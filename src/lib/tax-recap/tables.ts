@@ -841,6 +841,94 @@ const FEDERAL_2023: FederalCard = {
 };
 
 /**
+ * Federal 2022: Rev. Proc. 2021-45 (brackets, standard deduction, QBI
+ * threshold, EIC, the capital gains brackets); wage base $147,000; the
+ * American Rescue Plan's enhanced premium tax credit table with the 2022
+ * repayment caps; the flat $10,000 SALT cap. Back years come in amended
+ * (1040-X) returns. Not yet checked on a 2022 return with credits; a wrong
+ * figure can't produce a wrong recap — the after has to reproduce first.
+ */
+const FEDERAL_2022: FederalCard = {
+  ...FEDERAL_2023,
+  brackets: {
+    single: b([[10275, 0.10], [41775, 0.12], [89075, 0.22], [170050, 0.24], [215950, 0.32], [539900, 0.35], [null, 0.37]]),
+    mfj: b([[20550, 0.10], [83550, 0.12], [178150, 0.22], [340100, 0.24], [431900, 0.32], [647850, 0.35], [null, 0.37]]),
+    qss: b([[20550, 0.10], [83550, 0.12], [178150, 0.22], [340100, 0.24], [431900, 0.32], [647850, 0.35], [null, 0.37]]),
+    mfs: b([[10275, 0.10], [41775, 0.12], [89075, 0.22], [170050, 0.24], [215950, 0.32], [323925, 0.35], [null, 0.37]]),
+    hoh: b([[14650, 0.10], [55900, 0.12], [89050, 0.22], [170050, 0.24], [215950, 0.32], [539900, 0.35], [null, 0.37]]),
+  },
+  standardDeduction: { single: 12950, mfj: 25900, qss: 25900, mfs: 12950, hoh: 19400 },
+  selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 147000 },
+  qbi: { ...FEDERAL_2025.qbi, threshold: { single: 170050, mfs: 170050, hoh: 170050, mfj: 340100, qss: 340100 } },
+  // $1,500 refundable per child (Schedule 8812 for 2022); the EIC table's
+  // figures ($560, $3,733, $6,164, $6,935 maximums).
+  additionalChildTaxCredit: { perChild: 1500, earnedAbove: 2500, rate: 0.15 },
+  earnedIncomeCredit: {
+    rows: [
+      { rate: 0.0765, earnedAmount: 7320, phaseOutRate: 0.0765, phaseOutStart: 9160, phaseOutJoint: 15290 },
+      { rate: 0.34, earnedAmount: 10980, phaseOutRate: 0.1598, phaseOutStart: 20130, phaseOutJoint: 26260 },
+      { rate: 0.4, earnedAmount: 15410, phaseOutRate: 0.2106, phaseOutStart: 20130, phaseOutJoint: 26260 },
+      { rate: 0.45, earnedAmount: 15410, phaseOutRate: 0.2106, phaseOutStart: 20130, phaseOutJoint: 26260 },
+    ],
+    investmentLimit: 10300,
+  },
+  dependentStandardDeduction: { minimum: 1150, earnedPlus: 400 },
+  capitalGains: {
+    ...FEDERAL_2025.capitalGains,
+    zeroRateBelow: { single: 41675, mfs: 41675, hoh: 55800, mfj: 83350, qss: 83350 },
+    topRateAbove: { single: 459750, mfs: 258600, hoh: 488500, mfj: 517200, qss: 517200 },
+  },
+  ptc: {
+    ...FEDERAL_2025.ptc,
+    repaymentLimit: [
+      { below: 200, single: 325, other: 650 },
+      { below: 300, single: 825, other: 1650 },
+      { below: 400, single: 1400, other: 2800 },
+    ],
+  },
+};
+
+/**
+ * Federal 2021: Rev. Proc. 2020-45; wage base $142,800. The American Rescue
+ * Plan's 2021 credits: the larger, fully refundable child tax credit
+ * ($3,000 / $3,600, two phase-outs, advance payments reconciled) is NOT
+ * modeled here — derive.ts refuses a 2021 return with children rather than
+ * price it on this card's $2,000. The earned income credit is the 2021
+ * expanded one (the childless credit at 15.3% up to $9,820 of earnings), and
+ * excess advance premium credit wasn't repaid for 2021 (caps of $0).
+ */
+const FEDERAL_2021: FederalCard = {
+  ...FEDERAL_2022,
+  brackets: {
+    single: b([[9950, 0.10], [40525, 0.12], [86375, 0.22], [164925, 0.24], [209425, 0.32], [523600, 0.35], [null, 0.37]]),
+    mfj: b([[19900, 0.10], [81050, 0.12], [172750, 0.22], [329850, 0.24], [418850, 0.32], [628300, 0.35], [null, 0.37]]),
+    qss: b([[19900, 0.10], [81050, 0.12], [172750, 0.22], [329850, 0.24], [418850, 0.32], [628300, 0.35], [null, 0.37]]),
+    mfs: b([[9950, 0.10], [40525, 0.12], [86375, 0.22], [164925, 0.24], [209425, 0.32], [314150, 0.35], [null, 0.37]]),
+    hoh: b([[14200, 0.10], [54200, 0.12], [86350, 0.22], [164900, 0.24], [209400, 0.32], [523600, 0.35], [null, 0.37]]),
+  },
+  standardDeduction: { single: 12550, mfj: 25100, qss: 25100, mfs: 12550, hoh: 18800 },
+  selfEmployment: { ...FEDERAL_2025.selfEmployment, wageBase: 142800 },
+  qbi: { ...FEDERAL_2025.qbi, threshold: { single: 164900, mfs: 164925, hoh: 164900, mfj: 329800, qss: 329800 } },
+  childTaxCredit: { ...FEDERAL_2023.childTaxCredit, perChild: 2000 },
+  earnedIncomeCredit: {
+    rows: [
+      { rate: 0.153, earnedAmount: 9820, phaseOutRate: 0.153, phaseOutStart: 11610, phaseOutJoint: 17560 },
+      { rate: 0.34, earnedAmount: 10640, phaseOutRate: 0.1598, phaseOutStart: 19520, phaseOutJoint: 25470 },
+      { rate: 0.4, earnedAmount: 14950, phaseOutRate: 0.2106, phaseOutStart: 19520, phaseOutJoint: 25470 },
+      { rate: 0.45, earnedAmount: 14950, phaseOutRate: 0.2106, phaseOutStart: 19520, phaseOutJoint: 25470 },
+    ],
+    investmentLimit: 10000,
+  },
+  dependentStandardDeduction: { minimum: 1100, earnedPlus: 350 },
+  capitalGains: {
+    ...FEDERAL_2025.capitalGains,
+    zeroRateBelow: { single: 40400, mfs: 40400, hoh: 54100, mfj: 80800, qss: 80800 },
+    topRateAbove: { single: 445850, mfs: 250800, hoh: 473750, mfj: 501600, qss: 501600 },
+  },
+  ptc: { ...FEDERAL_2025.ptc, repaymentLimit: [{ below: 100000, single: 0, other: 0 }] },
+};
+
+/**
  * Federal 2026: Rev. Proc. 2025-32 brackets and the 2025 Act's indexed
  * standard deduction ($16,100 / $32,200 / $24,150); SSA wage base
  * $184,500; the QBI phase-in range widened to $75,000 / $150,000; the
@@ -932,6 +1020,8 @@ function statesForYear(year: number): Record<string, StateCard> {
 /* ─────────────────────────────────── seeds ─────────────────────────────────── */
 
 const SEEDS: Record<number, YearCard> = {
+  2021: { federal: FEDERAL_2021, states: statesForYear(2021) },
+  2022: { federal: FEDERAL_2022, states: statesForYear(2022) },
   2023: { federal: FEDERAL_2023, states: statesForYear(2023) },
   2024: { federal: FEDERAL_2024, states: statesForYear(2024) },
   2025: {

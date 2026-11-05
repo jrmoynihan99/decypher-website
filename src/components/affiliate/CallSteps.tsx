@@ -4,52 +4,52 @@ import { useSpotlight } from "@/hooks/useSpotlight";
 import Reveal from "@/components/reveal/Reveal";
 import SectionReveal from "@/components/reveal/SectionReveal";
 import SectionHeading from "@/components/ui/SectionHeading";
+import { CALL_STEPS, CALL_STEPS_HEADING } from "@/lib/landing-sections";
 
 /**
  * What the call actually covers. Identical on every affiliate page and not in
  * the CMS on purpose: it describes DeCypher's call, not the partner's offer, so
  * there's nothing here a partner page should be able to contradict. If the call
- * itself changes, it changes here once for all of them.
+ * itself changes, it changes in lib/landing-sections.ts once for all of them.
+ *
+ * Landing pages reuse the card row as their generic "Steps" section and may
+ * pass their own heading, card label and steps; anything left out falls back
+ * to the call steps.
  */
-const STEPS = [
-  {
-    tag: "01 / CALL",
-    title: "We look at your income",
-    body: "Brand deals, affiliate income, product sales — we map where your money is actually coming from, and where it's leaking on the way in.",
-  },
-  {
-    tag: "02 / CALL",
-    title: "We flag what you're missing",
-    body: "The write-offs creators consistently leave on the table, whether an S-corp election makes sense for you yet, and what's quietly costing you at tax time.",
-  },
-  {
-    tag: "03 / CALL",
-    title: "You get your action plan",
-    body: "Exactly what to do next to improve your financial position, grow the business, and cut your biggest expense — taxes. Yours to keep either way.",
-  },
-];
 
-const HEADING = {
-  eyebrow: "[ 03 // the call ]",
-  title: "Three things get covered. Nothing else.",
-  sub: "// 30 MINUTES — NO PITCH DECK, NO OBLIGATION",
-};
+interface Step {
+  /** "01 / CALL" — the number, then the card label. */
+  tag: string;
+  title: string;
+  body?: string;
+}
 
-export default function CallSteps() {
+export default function CallSteps({
+  eyebrow = "[ 03 // the call ]",
+  title = CALL_STEPS_HEADING.title,
+  sub = CALL_STEPS_HEADING.sub,
+  label = CALL_STEPS_HEADING.label,
+  steps = CALL_STEPS,
+}: {
+  eyebrow?: string;
+  title?: string;
+  sub?: string;
+  label?: string;
+  steps?: { title: string; body?: string }[];
+} = {}) {
+  const cards: Step[] = steps.map((s, i) => ({
+    ...s,
+    tag: `${String(i + 1).padStart(2, "0")} / ${label}`,
+  }));
   return (
     <section className="relative z-[1] mx-auto max-w-[1160px] px-6 pb-[90px] pt-[30px]">
-      <SectionHeading
-        eyebrow={HEADING.eyebrow}
-        title={HEADING.title}
-        sub={HEADING.sub}
-        subMono
-      />
+      <SectionHeading eyebrow={eyebrow} title={title} sub={sub} subMono />
 
       <SectionReveal
         amount={0.12}
         className="mt-12 grid gap-5 md:grid-cols-3"
       >
-        {STEPS.map((step, i) => (
+        {cards.map((step, i) => (
           <Reveal key={step.tag} delay={0.1 + i * 0.1} className="h-full">
             <StepCard step={step} />
           </Reveal>
@@ -63,7 +63,7 @@ export default function CallSteps() {
  * Carries the cursor spotlight but no hover lift — these aren't links, and a
  * lift would advertise a click that goes nowhere (same call as PerkCard).
  */
-function StepCard({ step }: { step: (typeof STEPS)[number] }) {
+function StepCard({ step }: { step: Step }) {
   const { ref, onMouseMove, onMouseLeave } = useSpotlight<HTMLDivElement>();
   const [num, label] = step.tag.split(" / ");
 
@@ -99,9 +99,11 @@ function StepCard({ step }: { step: (typeof STEPS)[number] }) {
         <b className="mt-3 block font-display text-[18px] font-semibold tracking-[-0.01em] text-fog">
           {step.title}
         </b>
-        <p className="mb-0 mt-2 text-[14.5px] leading-relaxed text-muted">
-          {step.body}
-        </p>
+        {step.body && (
+          <p className="mb-0 mt-2 text-[14.5px] leading-relaxed text-muted">
+            {step.body}
+          </p>
+        )}
       </div>
     </div>
   );

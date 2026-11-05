@@ -376,6 +376,153 @@ export interface AffiliatePageDoc extends PageBase {
   };
 }
 
+// ── landing pages (the section library) ─────────────────────────────
+
+interface SectionBase {
+  _key: string;
+}
+
+/** Eyebrow + title, both optional — empty falls back to the section's default. */
+interface HeadedSection extends SectionBase {
+  eyebrow?: string;
+  title?: string;
+}
+
+interface CtaFields {
+  ctaLabel?: string;
+  /** Empty → this page's booking section if it has one, else the consult link. */
+  ctaHref?: string;
+}
+
+export interface SectionHeroVideo extends SectionBase, CtaFields {
+  _type: "sectionHeroVideo";
+  eyebrow?: string;
+  title?: string;
+  body?: string;
+  videoUrl?: string;
+  ctaNote?: string;
+}
+
+export interface SectionHeroImage extends SectionBase, CtaFields {
+  _type: "sectionHeroImage";
+  badge?: string;
+  headlineLine1?: string;
+  headlineLine2?: string;
+  body?: string;
+  ctaNote?: string;
+  /** Resolved by the landing query — a CDN URL, not a raw asset ref. */
+  imageUrl?: string;
+  imageAlt?: string;
+  quote?: { text?: string; attribution?: string };
+}
+
+export interface SectionStats extends HeadedSection {
+  _type: "sectionStats";
+}
+
+export interface SectionTestimonials extends HeadedSection {
+  _type: "sectionTestimonials";
+}
+
+export interface SectionVideoWall extends HeadedSection {
+  _type: "sectionVideoWall";
+  sub?: string;
+  /** Dereferenced picks, unrenderable ones dropped. Empty = whole collection. */
+  videos?: CmsVideoTestimonial[];
+}
+
+export interface SectionRoster extends HeadedSection {
+  _type: "sectionRoster";
+  /** Raw refs, matched against the creators the template already fetched. */
+  creators?: { _ref: string }[];
+}
+
+export interface SectionEstimator extends HeadedSection {
+  _type: "sectionEstimator";
+  sub?: string;
+}
+
+export interface SectionVideo extends HeadedSection {
+  _type: "sectionVideo";
+  sub?: string;
+  videoUrl?: string;
+}
+
+export interface SectionServices extends HeadedSection {
+  _type: "sectionServices";
+}
+
+export interface SectionSteps extends HeadedSection {
+  _type: "sectionSteps";
+  sub?: string;
+  label?: string;
+  steps?: { title: string; body?: string }[];
+}
+
+export interface SectionValueStack extends HeadedSection {
+  _type: "sectionValueStack";
+  badge?: string;
+  items?: ValueStackItem[];
+  subtotal?: string;
+  totalLabel?: string;
+  totalValue?: string;
+  footnote?: string;
+  closingLine?: string;
+}
+
+export interface SectionBooking extends HeadedSection {
+  _type: "sectionBooking";
+  body?: string;
+  /** Undefined on sections that predate the field — treated as on. */
+  showStats?: boolean;
+  callType?: "standard" | "referral";
+  /** Route of the picked thank-you page (dereferenced by the landing query). */
+  thankYouSlug?: string | null;
+}
+
+export interface SectionFaq extends HeadedSection {
+  _type: "sectionFaq";
+  sub?: string;
+  /** Dereferenced picks. Empty = Site Settings → FAQ picks. */
+  questions?: FaqTeaser[];
+}
+
+export interface SectionCta extends SectionBase, CtaFields {
+  _type: "sectionCta";
+  title?: string;
+  body?: string;
+  readout?: string;
+}
+
+export type LandingSection =
+  | SectionHeroVideo
+  | SectionHeroImage
+  | SectionStats
+  | SectionTestimonials
+  | SectionVideoWall
+  | SectionRoster
+  | SectionEstimator
+  | SectionVideo
+  | SectionServices
+  | SectionSteps
+  | SectionValueStack
+  | SectionBooking
+  | SectionFaq
+  | SectionCta;
+
+/**
+ * A landing page: a stack of library sections the client arranges in Studio.
+ * The only page type whose layout is data — see LandingTemplate for how the
+ * backdrop is fitted to whatever order they chose.
+ */
+export interface LandingPageDoc extends PageBase {
+  _type: "landingPage";
+  title?: string;
+  hideFromSearch?: boolean;
+  trackingCode?: string;
+  sections?: LandingSection[];
+}
+
 export type PageDoc =
   | HomePageDoc
   | ServicesPageDoc
@@ -383,7 +530,8 @@ export type PageDoc =
   | TeamPageDoc
   | SchedulePageDoc
   | CareersPageDoc
-  | AffiliatePageDoc;
+  | AffiliatePageDoc
+  | LandingPageDoc;
 
 /**
  * A legal document — privacy policy, terms of use. Deliberately not a PageDoc:

@@ -28,9 +28,18 @@ const DEFAULTS = {
 export default function ValueStack({
   content,
   partnerName,
+  badge = "VIP INCLUDED",
+  closingLine = "// NO CARD, NO TRIAL",
 }: {
   content: ValueStackContent;
   partnerName?: string;
+  /**
+   * The pill in the receipt's header and the mono line under it. Both are
+   * fixed on affiliate pages (every partner offer is a VIP perk); a landing
+   * page sets its own, and "" drops either.
+   */
+  badge?: string;
+  closingLine?: string;
 }) {
   const items = content.items ?? [];
   if (items.length === 0) return null;
@@ -62,9 +71,11 @@ export default function ValueStack({
               <p className="m-0 font-mono text-[10px] tracking-[0.2em] text-dusk">
                 {ledger}
               </p>
-              <span className="rounded-full border border-teal/35 bg-teal/10 px-2.5 py-1 font-mono text-[9.5px] font-bold tracking-[0.18em] text-teal">
-                VIP INCLUDED
-              </span>
+              {badge && (
+                <span className="rounded-full border border-teal/35 bg-teal/10 px-2.5 py-1 font-mono text-[9.5px] font-bold tracking-[0.18em] text-teal">
+                  {badge}
+                </span>
+              )}
             </div>
           </Reveal>
 
@@ -139,14 +150,16 @@ export default function ValueStack({
           </Reveal>
         </div>
 
-        <SubheadingReveal
-          delay={0.3 + items.length * 0.09}
-          className="mt-5 text-center"
-        >
-          <p className="m-0 font-mono text-[11px] tracking-[0.1em] text-dusk">
-            {"// NO CARD, NO TRIAL"}
-          </p>
-        </SubheadingReveal>
+        {closingLine && (
+          <SubheadingReveal
+            delay={0.3 + items.length * 0.09}
+            className="mt-5 text-center"
+          >
+            <p className="m-0 font-mono text-[11px] tracking-[0.1em] text-dusk">
+              {closingLine}
+            </p>
+          </SubheadingReveal>
+        )}
       </SectionReveal>
     </section>
   );

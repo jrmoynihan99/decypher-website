@@ -94,6 +94,8 @@ import {
   type RecapAnalysis,
   type ReturnFieldKey,
   type ReturnNumbers,
+  type ScheduleCRead,
+  type ScheduleSERead,
   type StateNumbers,
 } from "./schema";
 import {
@@ -110,7 +112,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "16";
+export const DERIVE_VERSION = "17";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -152,7 +154,13 @@ export type OtherStateInput = { stateCode: string; stateForm: string | null; num
  * first — a second S corporation, a partnership beside it — and state
  * returns beyond the main one. Each gets its own before.
  */
-export type DeriveMore = { entities?: EntityInput[]; states?: OtherStateInput[] };
+export type DeriveMore = {
+  entities?: EntityInput[];
+  states?: OtherStateInput[];
+  /** Each Schedule C and Schedule SE as printed (engine v17): each business's own arithmetic, and each spouse's own Schedule SE. */
+  schedulesC?: ScheduleCRead[];
+  schedulesSE?: ScheduleSERead[];
+};
 
 /** A line the tables didn't reproduce: what the after return prints vs what they give. */
 export type Mismatch = { line: string; read: number; computed: number };
@@ -396,7 +404,14 @@ type QbiInputs = { income: number; w2Wages: number; ubia: number };
  * the 1040 it is (0 the taxpayer, 1 the spouse): a Schedule C of the same
  * person's goes on the same Schedule SE.
  */
-type Partner = { person: 0 | 1; ordinary: number; guaranteed: number; premiums: number; wages: number };
+/**
+ * One partner's K-1 on this 1040. `ordinary` is what Schedule E carries for
+ * it: box 1 less `upe`, the partner's own unreimbursed partnership expenses
+ * (Schedule E Part II's UPE row, engine v17), which lower the income, the
+ * Schedule SE and the QBI the same way. `upe` is a write-off: it leaves
+ * with the others on the before.
+ */
+type Partner = { person: 0 | 1; ordinary: number; guaranteed: number; premiums: number; wages: number; upe: number };
 
 /**
  * Schedule E Part I. The properties with a profit and the ones with a loss
@@ -424,6 +439,13 @@ type Rental = {
    * reproduces that way.
    */
   noAllowance?: boolean;
+  /**
+   * Passive income from other activities — a trust's K-1 (Schedule E Part
+   * III), a passive partnership row — that Form 8582 sets the rental losses
+   * against before the special allowance (engine v17). Already inside
+   * other income; the same on every scenario.
+   */
+  otherPassive?: number;
 };
 
 /**
@@ -500,6 +522,20 @@ type FederalInputs = {
   schCOwner: 0 | 1;
   /** The Schedule C filer's own W-2 Social Security wages: what's used up of the wage base. 0 when the W-2 on a joint return is the spouse's. */
   seWages: number;
+  /**
+   * Both spouses with Schedules C of their own (engine v17): each person's
+   * self-employment profit (their Schedules C, plus a farm on their
+   * schedule) and Social Security wages, one Schedule SE each — each with
+   * its own wage base. Adds up to `netProfit`; absent, one schedule.
+   */
+  schCSplit?: { person: 0 | 1; profit: number; wages: number }[] | null;
+  /**
+   * Form 7206 line 6 with several businesses: the share of the profits the
+   * business the health plan is under has (line 4 ÷ line 5). The deduction
+   * is capped at that share of the profit less that share of the SE
+   * deduction (lines 7–8). Absent, the whole profit.
+   */
+  sehiShare?: number | null;
   /** S corporation ordinary income from the K-1 — not subject to SE tax. */
   scorp: number;
   /** The partners on this return, when the business is a partnership. */
@@ -758,6 +794,37 @@ function additionalChildTaxCredit(
 }
 
 /**
+ * Each Schedule C as printed (engine v17 reader), with the two misreads the
+ * summed lines keep showing put right on the business itself — line 29 taken
+ * for line 28 on one with no expenses, and line 29 taken for line 30 — or
+ * null when one of them doesn't hold together (receipts − returns + line 6
+ * − cost of goods − expenses − home office = line 31) or their line 31s
+ * don't add up to Schedule 1 line 3.
+ */
+function checkedSchedulesC(list: ScheduleCRead[], line3: number): { list: ScheduleCRead[]; fixes: string[] } | null {
+  if (!list.length) return null;
+  const fixes: string[] = [];
+  const out = list.map((c, i) => {
+    const kept = c.receipts - c.returns + c.otherIncome;
+    const name = list.length > 1 ? `Schedule C #${i + 1}` : "The Schedule C";
+    let { expenses, homeOffice } = c;
+    if (expenses > 0 && !off(expenses, c.tentative) && !off(kept - c.cogs, c.tentative) && off(kept - c.cogs - expenses - homeOffice, c.net)) {
+      fixes.push(`${name}'s expenses were read as ${fmt(expenses)}, its line 29 — it has receipts and no expenses, so line 28 is $0`);
+      expenses = 0;
+    }
+    const tentative = kept - c.cogs - expenses;
+    if (homeOffice > 0 && !off(homeOffice, tentative) && off(tentative - homeOffice, c.net) && tentative - c.net > 0) {
+      fixes.push(`${name}'s home office was read as ${fmt(homeOffice)}, its line 29; line 31 is line 29 less line 30, so line 30 is ${fmt(tentative - c.net)}`);
+      homeOffice = tentative - c.net;
+    }
+    return { ...c, expenses, homeOffice };
+  });
+  const holds = out.every((c) => !off(c.receipts - c.returns + c.otherIncome - c.cogs - c.expenses - c.homeOffice, c.net));
+  if (!holds || off(out.reduce((s, c) => s + c.net, 0), line3)) return null;
+  return { list: out, fixes };
+}
+
+/**
  * One Schedule SE: a sole proprietor's, or each partner's own. The Social
  * Security part stops at what's left of the wage base after that person's
  * own W-2 wages; under $400 of net earnings there is no tax at all.
@@ -797,6 +864,11 @@ function splitHalf(half: number, parts: number[]): number[] {
  * `schCHalf` is the Schedule C's part, `partnerHalf[k]` partner k's.
  */
 function seSchedules(card: FederalCard, i: FederalInputs) {
+  // Each spouse with a Schedule C of their own: a schedule each.
+  if (i.partners.length === 0 && i.schCSplit && i.schCSplit.length > 1) {
+    const units = i.schCSplit.map((p) => ({ ...scheduleSe(card, p.profit, p.wages), person: p.person }));
+    return { units, schCHalf: units.reduce((s, u) => s + u.half, 0), partnerHalf: [] as number[] };
+  }
   // A Schedule C alone (or nothing at all): one schedule, as a sole
   // proprietor's always was.
   if (i.partners.length === 0) {
@@ -891,7 +963,13 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
     // A more-than-2% shareholder's plan is the corporation's (capped at the
     // Medicare wages on Form 7206 line 11); with a Schedule C beside the
     // corporation and no such wages read, the plan is the Schedule C's.
-    const sehiCap = viaScorp ? i.scorpMedicareWages : Math.max(0, i.netProfit - schCHalf - i.sep);
+    // With several businesses, the one the plan is under (Form 7206 lines 4–8).
+    const share = i.sehiShare ?? null;
+    const sehiCap = viaScorp
+      ? i.scorpMedicareWages
+      : share !== null
+        ? Math.max(0, Math.round(i.netProfit * share) - Math.round(schCHalf * share) - i.sep)
+        : Math.max(0, i.netProfit - schCHalf - i.sep);
     sehi = i.sehiPaid !== null ? Math.min(i.sehiPaid, sehiCap) : 0;
   }
 
@@ -917,7 +995,9 @@ function federal(card: FederalCard, status: FilingStatus, i: FederalInputs): Fed
     const r = i.rental;
     const nonpassive = r.reps ? r.profits - r.losses : 0;
     const passive1d = (r.reps ? 0 : r.profits - r.losses) - r.prior;
-    const passiveNet = passive1d >= 0 ? passive1d : Math.max(passive1d, r.noAllowance ? 0 : -passiveAllowance);
+    // Passive income from other activities absorbs the loss first (Form 8582 line 4).
+    const absorbed = Math.max(0, r.otherPassive ?? 0);
+    const passiveNet = passive1d >= 0 ? passive1d : Math.max(passive1d, -absorbed - (r.noAllowance ? 0 : passiveAllowance));
     rentalDeducted = nonpassive + passiveNet;
   }
 
@@ -1961,6 +2041,15 @@ function buildModel(
         : "The tax year wasn't read from the after return",
     );
   }
+  // 2021's child tax credit was the American Rescue Plan's: $3,000 / $3,600,
+  // fully refundable, two phase-outs, the advance payments reconciled on
+  // Schedule 8812. The card doesn't model it, and pricing it as the
+  // ordinary $2,000 credit would be wrong.
+  if (year === 2021 && (n(after.qualifyingChildren) > 0 || n(after.childTaxCredit) > 0)) {
+    reasons.push(
+      "2021's child tax credit (the American Rescue Plan's fully refundable credit, with advance payments) isn't modeled — type the before from a before print",
+    );
+  }
   const status = parseFilingStatus(meta.filingStatus);
   if (!status) {
     reasons.push(
@@ -1995,6 +2084,28 @@ function buildModel(
   let s179Note: string | null = null;
   /** The entity returns beyond the first, as reconciled below. */
   let otherNumbers = moreEntities.map((x) => x.numbers);
+  /**
+   * A partner's own unreimbursed partnership expenses (UPE: a car, a home
+   * office the partnership doesn't pay back), on a Schedule E Part II row
+   * of their own under the partnership. Schedule E's partnership line is
+   * the K-1 less them (engine v17).
+   */
+  const upe = Math.max(0, n(after.partnershipUpe));
+  // The partnership line read off the K-1's row alone, the UPE row below it
+  // left out: one of the K-1s exactly, and nothing nets to it with the
+  // UPE taken off. The line is the two rows together.
+  if (entity && upe > 0 && (meta.entityForm === "1065" || several)) {
+    const k1Rows = [entity, ...otherNumbers].flatMap((x) => [
+      n(x.k1Ordinary) + n(x.k1Guaranteed),
+      ...(has(x.k1Ordinary2) ? [x.k1Ordinary2 + n(x.k1Guaranteed2), n(x.k1Ordinary) + n(x.k1Guaranteed) + x.k1Ordinary2 + n(x.k1Guaranteed2)] : []),
+    ]);
+    if (!several && !k1Rows.some((v) => !off(v - upe, partnershipIncome)) && k1Rows.some((v) => v !== 0 && !off(v, partnershipIncome))) {
+      softNotes.push(
+        `Schedule E's partnership line was read as ${fmt(partnershipIncome)}, the K-1's row alone; the ${fmt(upe)} of unreimbursed partnership expenses on the row below it comes off, so the line is ${fmt(partnershipIncome - upe)}`,
+      );
+      partnershipIncome -= upe;
+    }
+  }
 
   // A partnership's K-1 taken for rental income: Schedule E line 26 read
   // as exactly the K-1 (a loss, here, in column (i)) with no rental
@@ -2047,6 +2158,27 @@ function buildModel(
     softNotes.push(`Schedule E's one K-1 (${fmt(scorpIncome)}) was read as both S corporation and partnership income; it's counted once, as the ${meta.entityForm === "1065" ? "partnership's" : "corporation's"}`);
     if (meta.entityForm === "1065") scorpIncome = 0;
     else partnershipIncome = 0;
+  }
+  // A partnership row beside the corporation's own, with no 1065 added:
+  // the corporation's K-1s (one, or both spouses') are the S corporation
+  // rows to the dollar, so the partnership row is another K-1 — an
+  // investment (one 2023 return's $348 beside $425,607). Folded into the
+  // corporation it broke the K-1 check; it's income as filed on both sides
+  // (engine v17), so its own write-offs aren't counted: the savings can come
+  // out short, never long.
+  if (
+    meta.entityForm === "1120-S" &&
+    entity &&
+    partnershipIncome !== 0 &&
+    scorpIncome !== 0 &&
+    [n(entity.k1Ordinary) - n(entity.k1Section179), ...(status === "mfj" && has(entity.k1Ordinary2) ? [n(entity.k1Ordinary) + entity.k1Ordinary2 - n(entity.k1Section179)] : [])].some(
+      (v) => !off(v, scorpIncome),
+    )
+  ) {
+    softNotes.push(
+      `Schedule E also carries ${fmt(partnershipIncome)} from a partnership K-1 whose 1065 wasn't added — not the corporation's (its K-1s are the ${fmt(scorpIncome)} on the S corporation rows). It's carried as filed on both sides; add the 1065 to have its own write-offs counted`,
+    );
+    partnershipIncome = 0;
   }
   // Both spouses own the corporation: two K-1s from it on a joint return,
   // which Schedule E carries together. The household's share is the two
@@ -2102,6 +2234,10 @@ function buildModel(
     const s179 = n(entity.k1Section179);
     if (s179 > 0 && !off(k1, scorpIncome) && off(k1 - s179, scorpIncome)) {
       s179Note = `Schedule E's S corporation income was read as the K-1's ${fmt(k1)} of ordinary income; its ${fmt(s179)} section 179 deduction (column (j)) nets it to ${fmt(k1 - s179)}, which is what Schedule 1 carries`;
+      scorpIncome = k1 - s179;
+    } else if (s179 > 0 && k1 !== s179 && !off(s179, scorpIncome) && off(k1 - s179, scorpIncome)) {
+      // Column (j) itself taken for the income (engine v17).
+      s179Note = `Schedule E's S corporation income was read as ${fmt(scorpIncome)}, the section 179 deduction in column (j); the row is the K-1's ${fmt(k1)} less it: ${fmt(k1 - s179)}`;
       scorpIncome = k1 - s179;
     }
   }
@@ -2165,14 +2301,34 @@ function buildModel(
         ? n(x.k1Ordinary) + n(x.k1Ordinary2) - n(x.k1Section179)
         : n(x.k1Ordinary) + n(x.k1Guaranteed) + n(x.k1Ordinary2) + n(x.k1Guaranteed2);
     const want = (form: "1120-S" | "1065") => all.reduce((s, x, i) => s + (forms[i] === form ? k1Of(x, form) : 0), 0);
+    // Column (j) itself — the corporations' section 179 deduction — taken for
+    // their income: the S corporation rows are the K-1s less it (engine v17;
+    // one 2025 return's $48,650 for $47,470).
+    const s179All = all.reduce((s, x, i) => s + (forms[i] === "1120-S" ? n(x.k1Section179) : 0), 0);
+    if (s179All > 0 && scorpIncome !== 0 && !off(scorpIncome, s179All) && off(scorpIncome, want("1120-S"))) {
+      softNotes.push(
+        `Schedule E's S corporation income was read as ${fmt(scorpIncome)}, the section 179 deduction in column (j); the rows are the K-1s less it: ${fmt(want("1120-S"))}`,
+      );
+      scorpIncome = want("1120-S");
+    }
+    // The partner's own unreimbursed expenses come off the partnerships' K-1s on Schedule E.
+    const upeOff = forms.includes("1065") ? upe : 0;
+    // Schedule E's K-1 rows read without the UPE row: they add up to the
+    // K-1s exactly, and only with it taken off does the 1040 net to them.
+    if (upeOff > 0 && !off(want("1120-S") + want("1065"), scorpIncome + partnershipIncome)) {
+      softNotes.push(
+        `Schedule E's K-1 rows were read as ${fmt(scorpIncome + partnershipIncome)}, the K-1s alone; the ${fmt(upeOff)} of unreimbursed partnership expenses on its own row comes off, so the K-1 lines come to ${fmt(scorpIncome + partnershipIncome - upeOff)}`,
+      );
+      partnershipIncome -= upeOff;
+    }
     // A second K-1 that isn't on Schedule E is another owner's (the reader
     // reports two when the entity has two owners).
-    if (off(want("1120-S") + want("1065"), scorpIncome + partnershipIncome)) {
+    if (off(want("1120-S") + want("1065") - upeOff, scorpIncome + partnershipIncome)) {
       for (let i = 0; i < all.length; i++) {
         if (!has(all[i].k1Ordinary2)) continue;
         const without = { ...all[i], k1Ordinary2: null, k1Guaranteed2: null, ownershipPct2: null };
         const trial = all.map((x, j) => (j === i ? without : x));
-        const total = trial.reduce((s, x, j) => s + k1Of(x, forms[j]), 0);
+        const total = trial.reduce((s, x, j) => s + k1Of(x, forms[j]), 0) - upeOff;
         if (!off(total, scorpIncome + partnershipIncome)) {
           softNotes.push(`${names[i]}'s second K-1 (${fmt(n(all[i].k1Ordinary2))}) isn't on this 1040's Schedule E — it's another owner's`);
           all = trial;
@@ -2193,7 +2349,7 @@ function buildModel(
         : x,
     );
     const wantS = want("1120-S");
-    const wantP = want("1065");
+    const wantP = want("1065") - upeOff;
     if (!off(wantS + wantP, scorpIncome + partnershipIncome)) {
       if (off(wantS, scorpIncome) || off(wantP, partnershipIncome)) {
         k1Note = `Schedule E's K-1 rows were read as ${fmt(scorpIncome)} of S corporation income and ${fmt(partnershipIncome)} of partnership income; by the entity returns' own forms it's ${fmt(wantS)} from the corporations and ${fmt(wantP)} from the partnerships`;
@@ -2295,6 +2451,25 @@ function buildModel(
             ...(schC ? (["grossReceipts", "businessNetIncome"] as ReturnFieldKey[]) : []),
           ]
         : ["grossReceipts", "businessNetIncome", "totalIncome", "agi", "taxableIncome", "incomeTax", "seTax", "federalTotalTax"];
+  // No Schedule SE tax at all: a Schedule C loss that wipes out the
+  // partnership share on the same schedule, or a partnership that put
+  // nothing on this 1040. Schedule 2 line 4 is then blank and the reader
+  // leaves it out; under $400 of net earnings the tax is $0 by the form's
+  // own rule, so blank is $0 (engine v17). Only when every source of
+  // earnings on the return comes to under that: with two people on a joint
+  // return each has their own schedule, so neither may have any.
+  if (required.includes("seTax") && !has(after.seTax)) {
+    const se = card?.federal.selfEmployment;
+    const parts = [schC ? n(after.businessNetIncome) : 0, partnershipIncome];
+    const under = (v: number) => !se || Math.round(Math.max(0, v) * se.netEarningsFactor) < 400;
+    const none = status === "mfj" ? parts.every((v) => under(v)) && under(parts.reduce((s, v) => s + Math.max(0, v), 0)) : under(parts[0] + parts[1]);
+    if (se && none && n(after.otherTaxes) <= n(after.niit) + n(after.additionalTaxes)) {
+      softNotes.push(
+        `Self-employment tax wasn't read: the Schedule SE earnings on this return (${parts.filter((v) => v !== 0).map(fmt).join(" and ") || "none"}) come to less than $400 after the 92.35%, so there is no SE tax — taken as $0`,
+      );
+      after = { ...after, seTax: 0 };
+    }
+  }
   const missing = required.filter((k) => !has(after[k]));
   if (missing.length) {
     reasons.push(`These lines weren't read from the after return: ${missing.map(label).join(", ")}`);
@@ -2321,6 +2496,22 @@ function buildModel(
       ? [{ e: entity, form: shape === "partnership" ? "1065" : "1120-S", name: shape === "partnership" ? "1065" : "1120-S", stateCode: meta.entityStateCode ?? null }]
       : [];
   for (const ui of unitInputs) {
+    // A partnership with no income at all this year (a holding company, one
+    // that hasn't started): its receipts line is blank, not unread. Every
+    // line the before is figured from is $0, so it changes nothing.
+    if (
+      ui.form === "1065" &&
+      !has(ui.e.grossReceipts) &&
+      has(ui.e.totalIncome) &&
+      ui.e.totalIncome === 0 &&
+      n(ui.e.ordinaryIncome) === 0 &&
+      n(ui.e.totalDeductions) === 0 &&
+      n(ui.e.k1Ordinary) === 0 &&
+      n(ui.e.k1Ordinary2) === 0
+    ) {
+      softNotes.push(`${ui.name} has no income, deductions or K-1 income this year (its receipts line is blank), so it adds nothing to either side`);
+      ui.e = { ...ui.e, grossReceipts: 0 };
+    }
     const need: EntityFieldKey[] = ["grossReceipts", "totalIncome", "totalDeductions", "ordinaryIncome", "k1Ordinary"];
     const miss = need.filter((k) => !has(ui.e[k]));
     if (miss.length) {
@@ -2339,7 +2530,15 @@ function buildModel(
   // "other income" and is modeled on its own (Form 8582).
   const rentalReadNet = n(after.rentalIncome);
   const hasRental = has(after.rentalIncome) || n(after.rentalLosses) > 0 || n(after.rentalProfits) > 0;
-  const otherIncome = (after.totalIncome as number) - w2 - n(after.businessNetIncome) - k1Income - rentalReadNet;
+  /**
+   * Schedule F's net farm profit or loss (Schedule 1 line 6): on Schedule SE
+   * line 1a beside the Schedule C, and qualified business income like it.
+   * Carried as filed on every scenario — the farm's own expenses aren't
+   * zeroed (engine v17, until the tax team says a farm's write-offs are
+   * DeCypher's): the savings can come out short, never long.
+   */
+  const farm = n(after.farmIncome);
+  const otherIncome = (after.totalIncome as number) - w2 - n(after.businessNetIncome) - k1Income - rentalReadNet - farm;
 
   /* 2 · shape: is this a return the engine models? */
 
@@ -2347,7 +2546,43 @@ function buildModel(
   // next to an S corporation or a partnership — has to be gross receipts
   // less expenses.
   const hasSchC = kinds.schC;
+  // Each Schedule C as printed (engine v17 reader). When the summed lines
+  // don't hold together but every business does — line 29 summed in for a
+  // business with no expenses, the home office read off line 29 — the sums
+  // are taken from the businesses (three Schedules C on one 2023 return
+  // read as $251,799 of expenses for $187,178).
+  const schedC = hasSchC ? checkedSchedulesC(more.schedulesC ?? [], n(after.businessNetIncome)) : null;
+  if (schedC) {
+    const t = (k: "receipts" | "returns" | "cogs" | "otherIncome" | "expenses" | "homeOffice") => schedC.list.reduce((s, c) => s + c[k], 0);
+    const flatHolds = !off(
+      n(after.grossReceipts) - n(after.schCReturns) + n(after.schCOtherIncome) - n(after.cogs) - n(after.totalExpenses) - n(after.homeOffice),
+      n(after.businessNetIncome),
+    );
+    if (!flatHolds) {
+      softNotes.push(
+        `The Schedule C totals as read (expenses ${fmt(n(after.totalExpenses))}, home office ${fmt(n(after.homeOffice))}) don't come to the net profit; each of the ${schedC.list.length === 1 ? "Schedule C's lines" : `${schedC.list.length} Schedules C`} does, so the totals are taken from ${schedC.list.length === 1 ? "them" : "the businesses"}: expenses ${fmt(t("expenses"))}, home office ${fmt(t("homeOffice"))}${
+          schedC.fixes.length ? ` (${schedC.fixes.join("; ")})` : ""
+        }`,
+      );
+      const orNull = (v: number) => (v !== 0 ? v : null);
+      after = {
+        ...after,
+        grossReceipts: t("receipts"),
+        schCReturns: orNull(t("returns")),
+        schCOtherIncome: orNull(t("otherIncome")),
+        cogs: orNull(t("cogs")),
+        totalExpenses: t("expenses"),
+        homeOffice: orNull(t("homeOffice")),
+      };
+    }
+  }
   const gross = hasSchC ? n(after.grossReceipts) : 0;
+  /**
+   * What the Schedule C keeps on every scenario: the receipts less returns
+   * and allowances (line 2: refunds, not a write-off) plus line 6's other
+   * income (engine v17). The before is this with every expense gone.
+   */
+  const schCKept = hasSchC ? gross - Math.max(0, n(after.schCReturns)) + n(after.schCOtherIncome) : 0;
   const netAfter = hasSchC ? n(after.businessNetIncome) : 0;
   // Line 28 blank (no expenses) with line 29 or 31 taken for it: the
   // "expenses" read are the net profit itself, and the receipts already
@@ -2356,24 +2591,98 @@ function buildModel(
     hasSchC &&
     n(after.totalExpenses) > 0 &&
     !off(n(after.totalExpenses), netAfter) &&
-    !off(gross - n(after.cogs) - n(after.homeOffice), netAfter)
+    !off(schCKept - n(after.cogs) - n(after.homeOffice), netAfter)
   ) {
     softNotes.push(
       `Schedule C's total expenses were read as ${fmt(n(after.totalExpenses))}, which is its net profit (line 29 or 31); line 28 is blank, so the expenses are $0`,
     );
     after = { ...after, totalExpenses: 0 };
   }
+  // Line 29 (the tentative profit, just above it) read for line 30: the home
+  // office "read" is exactly what's left after the expenses, and the net
+  // profit is that less the real line 30 — which is then the difference
+  // (one 2024 return's $338 for $745). Only when that's a home office at
+  // all: positive, and no more than the tentative profit plus a loss.
+  if (hasSchC && n(after.homeOffice) > 0) {
+    const tentative = schCKept - n(after.cogs) - n(after.totalExpenses);
+    const line30 = tentative - netAfter;
+    if (!off(n(after.homeOffice), tentative) && off(tentative - n(after.homeOffice), netAfter) && line30 > 0) {
+      softNotes.push(
+        `Schedule C's home office was read as ${fmt(n(after.homeOffice))}, which is line 29 (the tentative profit); line 31 (${fmt(netAfter)}) is line 29 less line 30, so line 30 is ${fmt(line30)}`,
+      );
+      after = { ...after, homeOffice: line30 };
+    }
+  }
   const expenses = n(after.totalExpenses);
   const homeOffice = n(after.homeOffice);
   // Cost of goods sold on a Schedule C is purchases and materials — a
   // write-off like the rest, zeroed on the before with the expenses.
   const schCogs = hasSchC ? n(after.cogs) : 0;
-  if (hasSchC && off(gross - schCogs - expenses - homeOffice, netAfter)) {
+  if (hasSchC && off(schCKept - schCogs - expenses - homeOffice, netAfter)) {
     reasons.push(
-      `Schedule C net profit (${fmt(netAfter)}) isn't gross receipts − cost of goods sold − expenses − home office (${fmt(gross - schCogs - expenses - homeOffice)}): returns and allowances, or other income on line 6 — zeroing the expenses wouldn't give the before`,
+      `Schedule C net profit (${fmt(netAfter)}) isn't gross receipts${n(after.schCReturns) ? " − returns and allowances" : ""}${n(after.schCOtherIncome) ? " + other income (line 6)" : ""} − cost of goods sold − expenses − home office (${fmt(schCKept - schCogs - expenses - homeOffice)}): returns and allowances (line 2), or other income on line 6, not read — zeroing the expenses wouldn't give the before`,
     );
     return refuse();
   }
+  // Both spouses with Schedules C of their own (engine v17 reader): each on
+  // their own Schedule SE with their own Social Security wage base — merged
+  // onto one, a couple over the base pays too little SE tax (one 2025
+  // return's $56,556 figured as $35,580). Only when every number agrees:
+  // each Schedule SE's line 2 is its own businesses' line 31s, the farms
+  // are the farm, and the businesses add up to the totals the before is
+  // figured from. Otherwise one schedule, as before.
+  const seReads = more.schedulesSE ?? [];
+  const seSplit = (() => {
+    if (!schedC || status !== "mfj" || shape !== "soleProp" || seReads.length !== 2 || schedC.list.length < 2) return null;
+    // Which schedule carries which business is settled by the numbers, not
+    // by the reader's guess: every way of putting the businesses on the two
+    // schedules whose line 31s come to each one's line 2. The reader's own
+    // answer when it's one of them; otherwise the only one there is.
+    const kept = (c: ScheduleCRead) => c.receipts - c.returns + c.otherIncome;
+    const k = schedC.list.length;
+    const fits: number[][] = [];
+    for (let mask = 1; mask < (1 << k) - 1; mask++) {
+      const se = schedC.list.map((_, i) => ((mask >> i) & 1 ? 2 : 1));
+      const net = (j: number) => schedC.list.reduce((s, c, i) => s + (se[i] === j ? c.net : 0), 0);
+      if (!off(net(1), seReads[0].schC) && !off(net(2), seReads[1].schC)) fits.push(se);
+    }
+    const readers = schedC.list.map((c) => c.se);
+    const pick = fits.find((se) => se.every((j, i) => j === readers[i])) ?? (fits.length === 1 ? fits[0] : null);
+    if (!pick) return null;
+    const list = schedC.list.map((c, i) => ({ ...c, se: pick[i] }));
+    const of = (j: number, f: (c: ScheduleCRead) => number) => list.filter((c) => c.se === j).reduce((s, c) => s + f(c), 0);
+    if (off(seReads[0].farm + seReads[1].farm, farm)) return null;
+    const total = (f: (c: ScheduleCRead) => number) => of(1, f) + of(2, f);
+    if (off(total(kept), schCKept) || off(total((c) => c.cogs), schCogs) || off(total((c) => c.expenses), expenses) || off(total((c) => c.homeOffice), homeOffice)) return null;
+    return [1, 2].map((j) => ({
+      person: (j - 1) as 0 | 1,
+      kept: of(j, kept),
+      cogs: of(j, (c) => c.cogs),
+      expenses: of(j, (c) => c.expenses),
+      homeOffice: of(j, (c) => c.homeOffice),
+      farm: seReads[j - 1].farm,
+      wages: Math.max(0, seReads[j - 1].ssWages),
+    }));
+  })();
+  /** Each spouse's Schedule SE profit in a scenario (null: one schedule). */
+  const splitFor = (s: { expenses: boolean; homeOffice: boolean } | null) =>
+    seSplit
+      ? seSplit.map((p) => ({
+          person: p.person,
+          profit: p.kept - (!s || s.expenses ? p.cogs + p.expenses : 0) - (!s || s.homeOffice ? p.homeOffice : 0) + p.farm,
+          wages: p.wages,
+        }))
+      : null;
+  if (seSplit) {
+    softNotes.push(
+      `Each spouse has a Schedule SE of their own (${seSplit.map((p) => fmt(p.kept - p.cogs - p.expenses - p.homeOffice + p.farm)).join(" and ")}), each with their own Social Security wage base — figured that way on both sides`,
+    );
+  }
+  // Form 7206 with several businesses: the plan is under one of them, and
+  // the deduction is capped at its share (line 6 = line 4 ÷ line 5).
+  const sehiBiz = n(after.sehiBusinessProfit);
+  const profitable = schedC ? schedC.list.reduce((s, c) => s + Math.max(0, c.net), 0) + Math.max(0, farm) : netAfter + farm;
+  const sehiShare = sehiBiz > 0 && profitable > 0 && off(sehiBiz, profitable) && sehiBiz < profitable ? round4(sehiBiz / profitable) : null;
 
   // Each entity return, one unit each. With several, each reason names the
   // return; with one, the 1040's own K-1 line is checked against it here
@@ -2480,6 +2789,8 @@ function buildModel(
   // less deductions, and the K-1s on this 1040 — the owner's, and the
   // spouse's when both are partners — have to add up to what Schedule E
   // reports, each at its share of the ordinary income.
+  /** How many 1065s `partnershipUnit` has built: the UPE goes with the first. */
+  let partnershipUnitsSeen = 0;
   const partnershipUnit = (ui: (typeof unitInputs)[number]): Unit => {
     const u = unitBase(ui);
     const e = ui.e;
@@ -2507,20 +2818,32 @@ function buildModel(
         : []),
     ];
     let k1Sum = k1s.reduce((s, k) => s + k.ordinary + k.guaranteed, 0);
-    // The reader reports a second K-1 when the partnership has two owners;
-    // when only the first is on this 1040's Schedule E, the second is
-    // another partner's (one partnership's 60/40 split, the 40% not on the
-    // return).
-    if (!several && k1s.length > 1 && off(k1Sum, partnershipIncome) && !off(k1s[0].ordinary + k1s[0].guaranteed, partnershipIncome)) {
-      softNotes.push(
-        `The 1065's second K-1 (${fmt(k1s[1].ordinary)}${k1s[1].pct !== null ? `, ${Math.round(k1s[1].pct * 1000) / 10}%` : ""}) isn't on this 1040's Schedule E, which carries the first alone — it's another partner's`,
-      );
-      k1s = [k1s[0]];
-      k1Sum = k1s[0].ordinary + k1s[0].guaranteed;
+    /** The partner's own unreimbursed expenses: off the first partnership's K-1 on Schedule E. */
+    const unitUpe = partnershipUnitsSeen++ === 0 ? upe : 0;
+    // The reader reports both K-1s when the partnership has two owners, in
+    // the order they're printed — which isn't whose they are (the names are
+    // painted over). The one on this 1040 is the one Schedule E carries:
+    // that K-1 less the partner's own expenses is the line, to the dollar.
+    // Both are on it only when both owners file this return.
+    if (!several && k1s.length > 1 && off(k1Sum - unitUpe, partnershipIncome)) {
+      const fits = k1s.map((k) => !off(k.ordinary + k.guaranteed - unitUpe, partnershipIncome));
+      const keep = fits[0] ? 0 : fits[1] ? 1 : -1;
+      if (keep >= 0) {
+        const other = k1s[1 - keep];
+        softNotes.push(
+          `The 1065's ${keep === 0 ? "second" : "first"} K-1 (${fmt(other.ordinary)}${other.pct !== null ? `, ${Math.round(other.pct * 1000) / 10}%` : ""}) isn't on this 1040's Schedule E, which carries the ${keep === 0 ? "first" : "second"} alone${
+            unitUpe > 0 ? ` (less the ${fmt(unitUpe)} of unreimbursed partnership expenses)` : ""
+          } — it's another partner's`,
+        );
+        k1s = [k1s[keep]];
+        k1Sum = k1s[0].ordinary + k1s[0].guaranteed;
+      }
     }
-    if (!several && off(k1Sum, partnershipIncome)) {
+    if (!several && off(k1Sum - unitUpe, partnershipIncome)) {
       reasons.push(
-        `The 1040's partnership income (${fmt(partnershipIncome)}) doesn't match the K-1s' ordinary income and guaranteed payments (${fmt(k1Sum)}) — another K-1, a basis limitation, or a passive loss`,
+        `The 1040's partnership income (${fmt(partnershipIncome)}) doesn't match the K-1s' ordinary income and guaranteed payments (${fmt(k1Sum)})${
+          unitUpe > 0 ? ` less the ${fmt(unitUpe)} of unreimbursed partnership expenses` : ""
+        } — another K-1, a basis limitation, or a passive loss`,
       );
     }
     const gpOnReturn = k1s.reduce((s, k) => s + k.guaranteed, 0);
@@ -2528,16 +2851,33 @@ function buildModel(
       unitReason(ui, `The K-1s' guaranteed payments (${fmt(gpOnReturn)}) are more than the 1065 deducts on line 10 (${fmt(guaranteed)})`);
     }
     k1s.forEach((k, i) => {
-      const pct = k.pct ?? (ordinary !== 0 ? round4(k.ordinary / ordinary) : 0);
+      let pct = k.pct ?? (ordinary !== 0 ? round4(k.ordinary / ordinary) : 0);
       if (ordinary !== 0 && off(k.ordinary, Math.round(ordinary * pct))) {
-        unitReason(
-          ui,
-          `A K-1 reports ${fmt(k.ordinary)} of the 1065's ${fmt(ordinary)}, but its profit share is ${Math.round(pct * 1000) / 10}% (${fmt(Math.round(ordinary * pct))}) — a special allocation or a mid-year change the engine doesn't model`,
-        );
+        // A partner who came in or left during the year: item J's ending
+        // share (0% for one who left) isn't what the year's income was
+        // split by. The K-1 that Schedule E carries is the partner's part
+        // of the year, so its share of the 1065's income is the share —
+        // the before splits its receipts the same way (the default
+        // proration by days; a closing of the books mid-year could split
+        // them otherwise).
+        const effective = round4(k.ordinary / ordinary);
+        if (effective > 0 && effective <= 1 && (several || !off(k.ordinary + k.guaranteed - unitUpe, partnershipIncome))) {
+          softNotes.push(
+            `A K-1 reports ${fmt(k.ordinary)} of the 1065's ${fmt(ordinary)} although its profit share reads ${Math.round(pct * 1000) / 10}% — a partner who came in or left during the year. Its share of the year's income, ${Math.round(effective * 1000) / 10}%, is taken as the share on the before too (the year prorated by days)`,
+          );
+          pct = effective;
+        } else {
+          unitReason(
+            ui,
+            `A K-1 reports ${fmt(k.ordinary)} of the 1065's ${fmt(ordinary)}, but its profit share is ${Math.round(pct * 1000) / 10}% (${fmt(Math.round(ordinary * pct))}) — a special allocation or a mid-year change the engine doesn't model`,
+          );
+        }
       }
       shares.push(pct);
-      // The first K-1 is the taxpayer's, the second the spouse's.
-      partners.push({ person: i === 0 ? 0 : 1, ordinary: k.ordinary, guaranteed: k.guaranteed, premiums: 0, wages: 0 });
+      // The first K-1 on this 1040 is the taxpayer's, the second the
+      // spouse's; the partner's own expenses go with the first.
+      const own = i === 0 ? unitUpe : 0;
+      partners.push({ person: i === 0 ? 0 : 1, ordinary: k.ordinary - own, guaranteed: k.guaranteed, premiums: 0, wages: 0, upe: own });
     });
     if (shares.reduce((s, p) => s + p, 0) > 1.001) {
       unitReason(ui, "The partners' profit shares on this return add up to more than 100%");
@@ -2550,7 +2890,7 @@ function buildModel(
       shares,
       partners,
       // With one entity return, what the 1040's line carries for it.
-      k1After: several ? k1Sum : partnershipIncome,
+      k1After: several ? k1Sum - unitUpe : partnershipIncome,
     };
   };
 
@@ -2586,13 +2926,18 @@ function buildModel(
   // Social Security and Medicare tax gets paid. Beside the corporation it
   // leaves with that deduction on the before (officer compensation when
   // that covers it, the other deductions it was booked among otherwise).
-  // With no corporation it's a misread.
-  const payrollSchC = hasSchC && gross > 0 && expenses === 0 && schCogs === 0 && homeOffice === 0 && !off(netAfter, gross);
-  if (payrollSchC && !kinds.scorp) {
-    reasons.push(
-      `The Schedule C has ${fmt(gross)} of receipts and no expenses. The tax team only files one like that for an S corporation's payroll cleanup (the owners' pay run through a Schedule C) — add the corporation's 1120-S so its before is figured with it, or check that the Schedule C's expenses (line 28) were read`,
+  // With no corporation on the return (no S corporation K-1 on Schedule E,
+  // so no payroll to clean up) it's a business with no expenses — a
+  // partner's consulting on the side (engine v17; it used to be refused as
+  // a misread). Nothing on it to zero: the same on both sides. Were its
+  // expenses misread away, the savings would come out short, never long,
+  // and its net profit is still checked through Schedule SE.
+  const receiptsOnly = hasSchC && gross > 0 && expenses === 0 && schCogs === 0 && homeOffice === 0 && !off(netAfter, schCKept);
+  const payrollSchC = receiptsOnly && kinds.scorp;
+  if (receiptsOnly && !kinds.scorp) {
+    softNotes.push(
+      `The Schedule C has ${fmt(gross)} of receipts and no expenses, and there's no S corporation on the return whose payroll it could be; it's taken as a business with no write-offs — the same on both sides, so it adds nothing to the savings`,
     );
-    return refuse();
   }
   /**
    * The payroll cleanup is the officer's pay when the officer compensation
@@ -2741,7 +3086,22 @@ function buildModel(
   // Schedule D, only its long-term net is preferential.
   const longTerm = has(after.capitalGainLongTerm) ? Math.min(after.capitalGainLongTerm, n(after.capitalGain)) : n(after.capitalGain);
   const preferential = Math.max(0, n(after.qualifiedDividends)) + Math.max(0, longTerm);
-  const qbiCarryforward = qbiRead ? 0 : Math.max(0, n(after.qbiLossCarryforward));
+  let qbiCarryforward = qbiRead ? 0 : Math.max(0, n(after.qbiLossCarryforward));
+  // Form 8995 line 16 read for line 3: the loss carried forward to NEXT
+  // year, which with nothing coming in is this year's QBI loss itself, to
+  // the dollar. Taken off the before's QBI it would make the before's tax
+  // too high (one 2024 return's $38,258: $1,045 of savings that weren't).
+  {
+    const thisYear =
+      n(after.businessNetIncome) + partnershipIncome + scorpIncome - n(after.seTaxDeduction) - n(after.sehiDeduction) - n(after.sepDeduction);
+    if (qbiCarryforward > 0 && thisYear < 0 && !off(qbiCarryforward, -thisYear)) {
+      softNotes.push(
+        `The QBI loss carryforward was read as ${fmt(qbiCarryforward)}, which is this year's own qualified business loss — Form 8995 line 16, carried to next year, not line 3 from last year. Nothing came in from last year, so it's taken as $0`,
+      );
+      qbiCarryforward = 0;
+      after = { ...after, qbiLossCarryforward: null };
+    }
+  }
   const sep = Math.max(0, n(after.sepDeduction));
   // Schedule 1 lines 20 and 13: part of the "other" adjustments as read,
   // taken back out of them when the before switches retirement off.
@@ -2785,6 +3145,27 @@ function buildModel(
       }
       rental = { profits, losses, prior: n(after.passivePriorUnallowed), reps: n(after.rentalReps) !== 0, qbi: true, rents, expenses: rentalExpenses, expensesRead: true };
     }
+    // Passive income from other activities on the return, which Form 8582
+    // sets the rental losses against first (a trust's K-1: one 2024 return's
+    // $19,646, at an income far past the special allowance).
+    if (n(after.passiveOtherIncome) > 0) {
+      rental = { ...rental, otherPassive: n(after.passiveOtherIncome) };
+      softNotes.push(
+        `${fmt(n(after.passiveOtherIncome))} of passive income from other activities (a trust's or a passive partnership's K-1) takes up that much of the rental losses first on Form 8582, on both sides`,
+      );
+    }
+  }
+  // A self-rental (engine v17): the Schedule C's rent (lines 20a + 20b) is,
+  // to the dollar, what Schedule E receives — the business rents the
+  // property from its owner. Zeroing the business's rent while the property
+  // still collected it counted that rent twice on the before (one 2024
+  // return's $64,193); without the write-offs neither side has it.
+  const selfRent =
+    rental && rental.expensesRead && hasSchC && n(after.schCRent) > 0 && !off(n(after.schCRent), rental.rents) ? n(after.schCRent) : 0;
+  if (selfRent > 0) {
+    softNotes.push(
+      `The Schedule C's ${fmt(selfRent)} of rent is exactly the rent Schedule E receives: the business rents the property from its owner (a self-rental). Without the write-offs the business pays no rent, so the property receives none either — both go on the before`,
+    );
   }
 
   // Schedule A as read; the medical piece inside the total is at the after's AGI.
@@ -2817,7 +3198,10 @@ function buildModel(
     nii: null,
     qbiLimit: qbiLimitAfter,
     extra: NO_EXTRAS,
-    netProfit: netAfter,
+    // Schedule F beside the Schedule C: the same Schedule SE, carried as filed.
+    netProfit: netAfter + farm,
+    schCSplit: splitFor(null),
+    sehiShare,
     schCOwner: 0,
     // The Schedule C's wage base is used up by the W-2 wages — the sole
     // proprietor's, or the shareholder's (the officer's own and any other
@@ -2912,7 +3296,7 @@ function buildModel(
       // W-2 is; with the write-offs gone the before's earnings can reach it,
       // and then it matters. Said, with how to settle it.
       const wageBase = fed.selfEmployment.wageBase;
-      const beforeEarnings = (gross + sum(partnershipUnits, (u) => u.income * (u.shares[0] ?? 0))) * fed.selfEmployment.netEarningsFactor;
+      const beforeEarnings = (schCKept + sum(partnershipUnits, (u) => u.income * (u.shares[0] ?? 0))) * fed.selfEmployment.netEarningsFactor;
       if (fits.length > 1 && w2 > 0 && !wages.read && beforeEarnings > wageBase - w2) {
         softNotes.push(
           `The SE tax as printed doesn't say whose the ${fmt(w2)} of W-2 wages are (it reproduces either way), and on the before it matters: the Schedule C filer's own wages leave less of the ${fmt(wageBase)} Social Security wage base. They're taken as the Schedule C filer's; if they're the spouse's, type the W-2 lines (taxpayer's and spouse's) in the after column and recompute the before column`,
@@ -2964,7 +3348,7 @@ function buildModel(
   // with the officer's pay when there is one (the deferral is on the
   // officer's W-2), and stays otherwise.
   let ssExtra = 0;
-  if (hasSchC && partners.length === 0 && w2 > 0 && has(after.seTax) && !seWagesNote && off(federal(fed, status, base).seTax, after.seTax)) {
+  if (hasSchC && !seSplit && partners.length === 0 && w2 > 0 && has(after.seTax) && !seWagesNote && off(federal(fed, status, base).seTax, after.seTax)) {
     const se = fed.selfEmployment;
     const earnings = netAfter > 0 ? Math.round(netAfter * se.netEarningsFactor) : 0;
     const solved = Math.round(se.wageBase - (after.seTax - Math.round(earnings * se.medicareRate)) / se.socialSecurityRate);
@@ -3612,8 +3996,13 @@ function buildModel(
   // the federal figure by its own expense rules (meals in full). The gap is
   // an expense-side thing, so it scales with the share of write-offs
   // switched on: nothing on the before, all of it on the after.
+  // A partner's state line holds the K-1 too (Massachusetts Form 1 line 7
+  // beside line 6a), and the state figure is started from it with any
+  // Schedule C beside it (`biz` below): measured against the Schedule C
+  // alone, the whole K-1 was counted a second time and carried as a "gap"
+  // (engine v17; a Massachusetts partner's before came out under the after).
   const stateBizDelta = has(after.stateBusinessIncome)
-    ? after.stateBusinessIncome - (shape === "scorp" ? k1After : netAfter)
+    ? after.stateBusinessIncome - (shape === "scorp" ? k1After : shape === "partnership" ? k1After + (hasSchC ? netAfter : 0) : netAfter)
     : 0;
   for (const u of scorpUnits) {
     const c = u.card;
@@ -3731,7 +4120,10 @@ function buildModel(
       const offset = partnerOffsets[partnershipUnits.indexOf(u)];
       const ps: Partner[] = partners.slice(offset, offset + u.partners.length).map((p, k) => ({
         ...p,
-        ordinary: ords[k],
+        // The partner's own unreimbursed expenses are write-offs: on Schedule
+        // E with the others switched on, gone with them off.
+        ordinary: ords[k] - (s.writeOffs ? p.upe : 0),
+        upe: s.writeOffs ? p.upe : 0,
         guaranteed: s.healthInsurance ? p.guaranteed : 0,
         premiums: s.healthInsurance ? p.premiums : 0,
       }));
@@ -3861,7 +4253,7 @@ function buildModel(
         ? netAfter
         : 0
       : hasSchC
-        ? gross - (s.expenses ? schCogs + expenses : 0) - (s.homeOffice ? homeOffice : 0)
+        ? schCKept - (s.expenses ? schCogs + expenses : 0) - (s.homeOffice ? homeOffice : 0)
         : 0;
     const outcomes = units.map((u, j) => unitRun(u, j, s));
     const k1 = outcomes.reduce((t, o) => t + o.k1, 0);
@@ -3870,19 +4262,19 @@ function buildModel(
     /** Share of the write-offs switched on, 0 on the before and 1 on the after. */
     const fraction =
       shape === "soleProp"
-        ? (gross - schCProfit) / Math.max(1, gross - netAfter)
+        ? (schCKept - schCProfit) / Math.max(1, schCKept - netAfter)
         : (sum(units, (u) => u.income) - outcomes.reduce((t, o) => t + o.ordinary, 0)) / Math.max(1, sum(units, (u) => u.income - u.ordinaryAfter));
     /** The business income the state starts from: the Schedule C beside a partnership counts too. */
     const biz = shape === "soleProp" ? schCProfit : k1 + (shape === "partnership" && hasSchC ? schCProfit : 0);
     if (shape === "soleProp") {
       // Without Form 8995-A, the wage limit is the Schedule C's own wages,
       // which leave with the expenses.
-      fi = { ...inputs, netProfit: schCProfit, qbiLimit: qbiRead ? null : { w2Wages: s.expenses ? n(after.schCWages) : 0, ubia: 0 } };
+      fi = { ...inputs, netProfit: schCProfit + farm, schCSplit: splitFor(s), qbiLimit: qbiRead ? null : { w2Wages: s.expenses ? n(after.schCWages) : 0, ubia: 0 } };
     } else if (shape === "partnership") {
       fi = {
         ...inputs,
         partners: ps,
-        netProfit: hasSchC ? schCProfit : inputs.netProfit,
+        netProfit: hasSchC ? schCProfit + farm : inputs.netProfit,
         // The premiums the partnership paid go with the guaranteed payments.
         sehiPaid: premiumsViaPartners ? (s.healthInsurance ? sehiPaid : null) : inputs.sehiPaid,
         // Over the threshold, Form 8995-A's QBI scales with the K-1 and the
@@ -3913,7 +4305,7 @@ function buildModel(
         ...inputs,
         scorp: scorpK1,
         partners: ps,
-        netProfit: schCProfit,
+        netProfit: schCProfit + farm,
         seWages: hasSchC ? box1 + employee + outsideWages + (officerComp > 0 ? (s.salary ? ssExtra : 0) : ssExtra) : 0,
         w2: box1 + employee + outsideWages,
         medicareWages: officerMed + employee + outsideWages,
@@ -3944,7 +4336,14 @@ function buildModel(
     // are the rents and there are no losses (earlier years' suspended
     // losses still come off on Form 8582).
     if (rental) {
-      const r = s.rentalExpenses || !rental.expensesRead ? rental : { ...rental, profits: rental.rents, losses: 0 };
+      let r = s.rentalExpenses || !rental.expensesRead ? rental : { ...rental, profits: rental.rents, losses: 0 };
+      // A self-rental: with the Schedule C's expenses gone the business pays
+      // no rent, so the property it rents from its owner receives none.
+      if (selfRent > 0 && !s.expenses && rental.expensesRead) {
+        const rents = Math.max(0, rental.rents - selfRent);
+        const net = rents - (s.rentalExpenses ? rental.expenses : 0);
+        r = { ...rental, profits: Math.max(0, net), losses: Math.max(0, -net) };
+      }
       fi = { ...fi, rental: { ...r, reps: rental.reps && s.reps } };
     }
     // Without the dependents: no child tax credit, no child-care credit, and
@@ -4380,7 +4779,12 @@ function fillNumbers(
   out.qualifyingChildren = s.noKids ? null : after.qualifyingChildren;
   out.otherDependents = s.noKids ? null : after.otherDependents;
   // A sole proprietor's Schedule C, or the side business beside an entity.
-  out.businessNetIncome = shape === "soleProp" ? fi.netProfit : fi.netProfit !== 0 ? fi.netProfit : null;
+  // The farm rides inside the self-employment profit (deriveBefore's `farm`); Schedule 1 line 3 is the Schedule C alone.
+  const farm = n(after.farmIncome);
+  out.businessNetIncome = shape === "soleProp" ? fi.netProfit - farm : fi.netProfit - farm !== 0 ? fi.netProfit - farm : null;
+  out.farmIncome = after.farmIncome;
+  out.schCReturns = after.schCReturns;
+  out.schCOtherIncome = after.schCOtherIncome;
   out.scorpIncome = kinds.scorp ? fi.scorp : null;
   out.partnershipIncome = kinds.partnership ? fi.partners.reduce((s, p) => s + p.ordinary + p.guaranteed, 0) : null;
   if (fi.rental) {

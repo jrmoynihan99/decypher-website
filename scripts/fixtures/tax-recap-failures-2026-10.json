@@ -1502,7 +1502,7 @@
  },
  {
   "name": "Case 25 · 2024 (Schedule C beside a partnership)",
-  "proves": "engine v13: a Schedule C beside a partnership on one person's Schedule SE, the W-2 the spouse's; engine v14: New York's tax benefit recapture",
+  "proves": "engine v13: a Schedule C beside a partnership on one person's Schedule SE, the W-2 the spouse's; engine v14: New York's tax benefit recapture; engine v17: a self-rental (the Schedule C's rent is Schedule E's rent, to the dollar) — neither is on the before; the v13 pin ($166,249 / $58,047) counted that rent twice",
   "meta": {
    "taxYear": 2024,
    "filingStatus": "Married filing jointly",
@@ -1578,12 +1578,13 @@
    "ownershipPct2": 40
   },
   "expect": null,
-  "federal": 166249,
-  "state": 58047,
+  "federal": 138588,
+  "state": 51161,
   "verified": true,
   "notes": [
    "Schedule C beside the partnership has its \\$287,102 of expenses zeroed",
-   "taken as the spouse's"
+   "taken as the spouse's",
+   "a self-rental"
   ]
  },
  {

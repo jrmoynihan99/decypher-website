@@ -10,6 +10,7 @@ import {
   videoTestimonial,
 } from "./collections";
 import { faqCategory, faqPage, faqQuestion } from "./faq";
+import { SECTION_TYPES, landingPage } from "./landing";
 import { legalPage } from "./legal";
 import {
   ctaBlock,
@@ -43,6 +44,8 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   seoBlock,
   faqItem,
   statItem,
+  // landing-page sections (the section library)
+  ...SECTION_TYPES,
   // pages
   homePage,
   servicesPage,
@@ -51,6 +54,7 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   schedulePage,
   careersPage,
   affiliatePage,
+  landingPage,
   thankYouPage,
   legalPage,
   leaderboardPage,

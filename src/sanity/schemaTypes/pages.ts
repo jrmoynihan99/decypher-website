@@ -1,5 +1,6 @@
 import { defineField, defineType } from "sanity";
 import { pageLinkField } from "./pageLink";
+import { notReserved, uniqueAcrossPages } from "./rootSlug";
 
 /**
  * One document type per page template. Section layout and order live in
@@ -425,9 +426,6 @@ export const careersPage = defineType({
  * the point: a new partner page should be a five-minute fill-in, not a rebuild.
  */
 
-/** Routes that aren't Sanity pages but would still shadow (or be shadowed by) one. */
-const RESERVED_SLUGS = ["studio", "portal", "api", "schedule-team", "leaderboard"];
-
 const AFFILIATE_GROUPS = [
   { name: "hero", title: "Hero" },
   { name: "value", title: "Value Stack" },
@@ -456,14 +454,7 @@ export const affiliatePage = defineType({
       title: "Route",
       type: "slug",
       group: "meta",
-      validation: (r) =>
-        r.required().custom((slug) => {
-          const value = slug?.current ?? "";
-          if (RESERVED_SLUGS.includes(value)) {
-            return `"${value}" is a reserved route and would shadow part of the site.`;
-          }
-          return true;
-        }),
+      validation: (r) => r.required().custom(notReserved),
       description:
         'URL path, e.g. "ugc-foundations" → wedecypher.co/ugc-foundations. Changing it breaks any link the partner has already shared.',
       options: {
@@ -471,16 +462,7 @@ export const affiliatePage = defineType({
         // Guards the collision the singleton pages can't have: this checks every
         // slugged document, so it catches both another affiliate page and a real
         // page like /services.
-        isUnique: async (slug, context) => {
-          const { document, getClient } = context;
-          if (!document) return true;
-          const id = document._id.replace(/^drafts\./, "");
-          const taken = await getClient({ apiVersion: "2024-10-01" }).fetch<boolean>(
-            `defined(*[!(_id in [$draft, $published]) && slug.current == $slug][0]._id)`,
-            { draft: `drafts.${id}`, published: id, slug },
-          );
-          return !taken;
-        },
+        isUnique: uniqueAcrossPages,
       },
     }),
     { ...seoField, group: "meta" },
@@ -661,4 +643,5 @@ export const PAGE_TYPES = [
   "schedulePage",
   "careersPage",
   "affiliatePage",
+  "landingPage",
 ] as const;

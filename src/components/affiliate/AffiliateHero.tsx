@@ -28,10 +28,19 @@ export default function AffiliateHero({
   content,
   partnerName,
   imageUrl,
+  imageAlt,
+  ctaHref = "#book",
+  titleAs: Title = "h1",
 }: {
   content: HeroContent;
   partnerName?: string;
   imageUrl?: string;
+  /** Defaults to the partner's name. */
+  imageAlt?: string;
+  /** Affiliate pages always jump to their booking panel; landing pages choose. */
+  ctaHref?: string;
+  /** h2 when a landing page places this hero below another section. */
+  titleAs?: "h1" | "h2";
 }) {
   const quote = content.quote;
 
@@ -54,20 +63,22 @@ export default function AffiliateHero({
               </SubheadingReveal>
             )}
 
-            <h1 className="mt-6 font-display text-[clamp(38px,5.4vw,62px)] font-bold leading-[1.04] tracking-[-0.03em]">
+            <Title className="mt-6 font-display text-[clamp(38px,5.4vw,62px)] font-bold leading-[1.04] tracking-[-0.03em]">
               <DecryptOnView
                 as="span"
                 text={content.headlineLine1 ?? ""}
                 threshold={0}
                 className="block text-fog"
               />
-              <DecryptOnView
-                as="span"
-                text={content.headlineLine2 ?? ""}
-                threshold={0}
-                className="text-grad block"
-              />
-            </h1>
+              {content.headlineLine2 && (
+                <DecryptOnView
+                  as="span"
+                  text={content.headlineLine2}
+                  threshold={0}
+                  className="text-grad block"
+                />
+              )}
+            </Title>
 
             {content.body && (
               <ParagraphReveal
@@ -82,7 +93,7 @@ export default function AffiliateHero({
               delay={0.55}
               className="mt-8 flex flex-col items-center gap-3 lg:items-start"
             >
-              <ConsultButton size="lg" href="#book">
+              <ConsultButton size="lg" href={ctaHref}>
                 {content.ctaLabel ?? "Book your free call"}
               </ConsultButton>
               {content.ctaNote && (
@@ -96,6 +107,7 @@ export default function AffiliateHero({
           <Reveal delay={0.4} className="relative mx-auto w-full max-w-[460px]">
             <PartnerFrame
               imageUrl={imageUrl}
+              imageAlt={imageAlt}
               partnerName={partnerName}
               hasQuote={!!quote?.text}
             />
@@ -136,10 +148,12 @@ export default function AffiliateHero({
  */
 function PartnerFrame({
   imageUrl,
+  imageAlt,
   partnerName,
   hasQuote,
 }: {
   imageUrl?: string;
+  imageAlt?: string;
   partnerName?: string;
   hasQuote: boolean;
 }) {
@@ -153,7 +167,7 @@ function PartnerFrame({
         <>
           <Image
             src={imageUrl}
-            alt={partnerName ? `${partnerName}` : ""}
+            alt={imageAlt ?? partnerName ?? ""}
             fill
             sizes="(max-width: 1024px) 90vw, 460px"
             className="object-cover"

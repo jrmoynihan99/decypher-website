@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TextInput } from "@/components/estimator/fields";
@@ -76,6 +76,7 @@ import {
   type StateNumbers,
 } from "@/lib/tax-recap/schema";
 import { analyzePdf, preparePdf, redactionBlock, type PdfAnalysis } from "./pdf-prepare";
+import { REREAD_DONE_HREF, nextInQueue, readRereadQueue, rereadHref, writeRereadQueue, type RereadResult } from "./reread-queue";
 import { VideoStatus, useVideoMaker } from "./VideoMaker";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 
@@ -291,7 +292,7 @@ const moreStateOf = (s: RecapOtherState, derived: boolean): MoreState => ({
 });
 
 /** What the engine is handed beyond the 1040 and the first entity, from the grid as it stands. */
-const moreFrom = (entities: MoreEntity[], states: MoreState[]): DeriveMore => ({
+const moreFrom = (entities: MoreEntity[], states: MoreState[], after: ReturnExtract | null = null): DeriveMore => ({
   // Every one, in order — one with nothing read is refused by name, so the
   // befores come back lined up with the grid's sections.
   entities: entities.map((x) => ({
@@ -301,6 +302,9 @@ const moreFrom = (entities: MoreEntity[], states: MoreState[]): DeriveMore => ({
     name: x.name,
   })),
   states: states.map((s) => ({ stateCode: s.stateCode, stateForm: s.stateForm, numbers: toStateNumbers(s.numbers.after) })),
+  // Each Schedule C and Schedule SE as the after return printed them (engine v17).
+  ...(after?.schedulesC?.length ? { schedulesC: after.schedulesC } : {}),
+  ...(after?.schedulesSE?.length ? { schedulesSE: after.schedulesSE } : {}),
 });
 
 /**
@@ -433,6 +437,7 @@ export default function TaxRecapBuilder({
   existing,
   tables,
   fromFailure = null,
+  rereadId,
 }: {
   initial: RecapDoc | null;
   /** Every saved recap: a client and year already among them isn't read again. */
@@ -441,6 +446,8 @@ export default function TaxRecapBuilder({
   tables: TableSet;
   /** Opened from a refused return that kept its files (Refused returns → "Open in builder"): they load with one click. */
   fromFailure?: { id: string; label: string; files: { index: number; name: string; size: number }[] } | null;
+  /** Part of "Re-read all" (Refused returns): this refusal's files load, are read and derived on their own, then on to the next. */
+  rereadId?: string;
 }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>(initial ? "review" : "upload");
@@ -571,6 +578,12 @@ export default function TaxRecapBuilder({
     entityExtract: EntityExtract | null,
     cityExtract: EntityExtract | null = null,
     more: DeriveMore = {},
+    /**
+     * The name the read just found. The first derivation runs in the same
+     * call that sets `clientName`, so the state still holds the PREVIOUS
+     * client's name there (refusals were filed under the last client).
+     */
+    nameNow?: string,
   ) => {
     setFailure(null);
     const info = readInfoRef.current;
@@ -582,7 +595,7 @@ export default function TaxRecapBuilder({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           stage,
-          clientName: clientName.trim() || displayName(afterExtract?.taxpayerName ?? ""),
+          clientName: (nameNow ?? clientName).trim() || displayName(afterExtract?.taxpayerName ?? ""),
           engineVersion: DERIVE_VERSION,
           meta,
           reasons: result.reasons,
@@ -599,10 +612,16 @@ export default function TaxRecapBuilder({
           },
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string };
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string; existing?: boolean; kept?: number };
       if (res.ok && data.ok && data.id) {
-        setFailure({ id: data.id, kept: {} });
-        void keepOriginals(data.id, originals);
+        // The same refusal already on the list (Create pressed again on the
+        // same reads): its files are there unless they never all arrived.
+        if (data.existing && (data.kept ?? 0) >= Math.min(originals.length, MAX_ORIGINALS)) {
+          setFailure({ id: data.id, kept: {}, originals: { count: data.kept ?? 0, state: "saved" } });
+        } else {
+          setFailure({ id: data.id, kept: {} });
+          void keepOriginals(data.id, originals);
+        }
       }
     } catch {
       /* recording a failure must never get in the reviewer's way */
@@ -1442,7 +1461,7 @@ export default function TaxRecapBuilder({
     }));
     setMoreEntities(extraEntities);
     setMoreStates(extraStates);
-    const more = moreFrom(extraEntities, extraStates);
+    const more = moreFrom(extraEntities, extraStates, a);
 
     const aNum = numbersFromExtract(a);
     let eNum: EntityNumbers | null = withCity(ent ? numbersFromEntityExtract(ent) : null, city);
@@ -1495,7 +1514,7 @@ export default function TaxRecapBuilder({
           problems: result.reasons,
         },
       }));
-      void recordFailure("derive", metaOf(a, entityForm, ent), aNum, eNum, result, a, ent, city, more);
+      void recordFailure("derive", metaOf(a, entityForm, ent), aNum, eNum, result, a, ent, city, more, displayName(a.taxpayerName || b?.taxpayerName || ""));
       return;
     }
     setMoreEntities(extraEntities.map((x, i) => ({ ...x, numbers: { ...x.numbers, before: toRawEntity(result.otherEntitiesBefore[i] ?? null) }, derived: result.otherEntitiesBefore[i] ?? null })));
@@ -1565,7 +1584,7 @@ export default function TaxRecapBuilder({
     };
     const aNum = toNumbers(afterRaw);
     const eNum = toEntityNumbers(entityNumbers.after);
-    const more = moreFrom(moreEntities, moreStates);
+    const more = moreFrom(moreEntities, moreStates, sides.after.extract);
     const result = deriveBefore(aNum, meta, tables, eNum, more);
     if (!result.ok) {
       setRederiveError(result.reasons);
@@ -1787,6 +1806,113 @@ export default function TaxRecapBuilder({
   };
 
   /* ─────────────────────────────── save ───────────────────────────────── */
+
+  /* ───────────────────── re-read all (Refused returns) ───────────────────── */
+
+  /**
+   * "Re-read all" on the Refused returns page queues the refusals that still
+   * refuse on their recorded reads and kept their files, and opens each here
+   * with `reread`: its files load, are redacted and read the usual way, and
+   * the engine runs — the same path as pressing the button by hand. What
+   * happened goes on the old record (fixed when it goes through; dismissed,
+   * with a note, when it's refused again — the new read is recorded as its
+   * own refusal, as any refusal is), then the next one opens. Nothing is
+   * saved as a recap.
+   */
+  const rereadStarted = useRef(false);
+  const rereadDone = useRef(false);
+  const [rereadPos, setRereadPos] = useState<{ at: number; of: number } | null>(null);
+  useEffect(() => {
+    if (!rereadId) return;
+    const q = readRereadQueue();
+    if (!q || !q.ids.includes(rereadId)) return;
+    if (!fromFailure) {
+      // Deleted, or its files are gone: said in the summary, and on to the next.
+      q.results[rereadId] = { kind: "error", detail: "the record or its kept files are gone", label: q.labels[rereadId] ?? rereadId };
+      writeRereadQueue(q);
+      const next = nextInQueue(q);
+      window.location.assign(next ? rereadHref(next) : REREAD_DONE_HREF);
+      return;
+    }
+    setRereadPos({ at: q.ids.indexOf(rereadId) + 1, of: q.ids.length });
+    if (failureLoad === "idle") void loadFailureFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rereadId, fromFailure]);
+  useEffect(() => {
+    if (!rereadPos || rereadStarted.current || failureLoad !== "loaded" || !picked.length) return;
+    if (picked.some((p) => p.status === "checking")) return;
+    rereadStarted.current = true;
+    void readReturns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rereadPos, failureLoad, picked]);
+
+  const finishReread = async (o: Omit<RereadResult, "label">, newRecord: string | null) => {
+    if (!fromFailure) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const said =
+      o.kind === "fixed"
+        ? `Re-read on engine v${DERIVE_VERSION} (${day}): goes through, ${o.detail}`
+        : o.kind === "refused"
+          ? `Re-read on engine v${DERIVE_VERSION} (${day}): still refused — ${o.detail}${newRecord ? " (the new read is the newer record)" : ""}`
+          : `Re-read on engine v${DERIVE_VERSION} (${day}) didn't finish: ${o.detail}`;
+    try {
+      // Added to whatever note the record has, never over it.
+      const cur = (await fetch(`/api/portal/tax-recap/failures/${fromFailure.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { note?: string } | null;
+      await fetch(`/api/portal/tax-recap/failures/${fromFailure.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          note: [cur?.note, said].filter(Boolean).join(" · "),
+          ...(o.kind === "fixed" ? { status: "fixed" } : o.kind === "refused" && newRecord ? { status: "dismissed" } : {}),
+        }),
+      });
+    } catch {
+      /* the summary still says what happened */
+    }
+    const q = readRereadQueue();
+    if (!q) return;
+    q.results[fromFailure.id] = { ...o, label: fromFailure.label };
+    writeRereadQueue(q);
+    const next = nextInQueue(q);
+    window.location.assign(next ? rereadHref(next) : REREAD_DONE_HREF);
+  };
+
+  // What the run came to: through to review, refused (once the new refusal
+  // is recorded, or after a wait if recording it failed), or a read that
+  // stopped on an error.
+  useEffect(() => {
+    if (!rereadPos || rereadDone.current) return;
+    const finish = (o: Omit<RereadResult, "label">, newRecord: string | null = null) => {
+      rereadDone.current = true;
+      void finishReread(o, newRecord);
+    };
+    if (failureLoad === "failed") return finish({ kind: "error", detail: "its kept files couldn't be fetched" });
+    if (!rereadStarted.current) {
+      if (pickError) finish({ kind: "error", detail: pickError });
+      return;
+    }
+    if (stage === "review") {
+      const p = sides.before.derived?.proof;
+      return finish({ kind: "fixed", detail: p?.verified ? "verified" : `projected (${p?.residuals.length ?? 0} lines carried)` });
+    }
+    if (sides.before.status === "error" && sides.before.problems.length) {
+      const detail = sides.before.problems[0];
+      if (failure?.id) return finish({ kind: "refused", detail }, failure.id);
+      const t = setTimeout(() => !rereadDone.current && finish({ kind: "refused", detail }), 20000);
+      return () => clearTimeout(t);
+    }
+    const broken = (["after", "entity", "city"] as const).find((k) => sides[k].status === "error") ?? null;
+    const brokenMore = moreEntities.find((x) => x.side.status === "error");
+    if (broken || brokenMore || pickError) {
+      finish({ kind: "error", detail: pickError ?? (broken ? sides[broken].message : brokenMore?.side.message) ?? "a read failed" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rereadPos, failureLoad, stage, sides, moreEntities, failure, pickError]);
+
+  const stopReread = () => {
+    writeRereadQueue(null);
+    window.location.assign("/portal/tax-recap/failures");
+  };
 
   const save = async () => {
     setSaving(true);
@@ -2035,6 +2161,16 @@ export default function TaxRecapBuilder({
       >
         {stage === "upload" ? (
           <>
+            {rereadPos && fromFailure ? (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-teal/30 bg-teal/[0.06] px-4 py-3 font-body text-[13px] text-fog">
+                <span>
+                  Re-reading refused returns: {rereadPos.at} of {rereadPos.of} — <span className="text-white">{fromFailure.label}</span>. It moves on by itself.
+                </span>
+                <button type="button" onClick={stopReread} className="ml-auto cursor-pointer rounded-full border border-white/15 px-3 py-1 text-[12px] text-mist hover:border-danger hover:text-danger">
+                  Stop
+                </button>
+              </div>
+            ) : null}
             {fromFailure && failureLoad !== "loaded" ? (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-teal/30 bg-teal/[0.05] px-4 py-3 text-[13px] text-mist">
                 <span>

@@ -55,6 +55,9 @@ const meta = doc.meta ?? {};
 const more = {
   entities: (doc.more?.entities ?? []).map((e) => ({ ...e, numbers: { ...emptyEntityNumbers(), ...e.numbers } })),
   states: (doc.more?.states ?? []).map((s) => ({ ...s, numbers: { ...emptyStateNumbers(), ...s.numbers } })),
+  // Each Schedule C and Schedule SE as read (engine v17 on).
+  ...(doc.more?.schedulesC ? { schedulesC: doc.more.schedulesC } : {}),
+  ...(doc.more?.schedulesSE ? { schedulesSE: doc.more.schedulesSE } : {}),
 };
 
 const money = (v) => (v === null || v === undefined ? "—" : `$${v.toLocaleString("en-US")}`);

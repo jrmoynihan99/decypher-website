@@ -15,7 +15,9 @@ import type {
   CmsTestimonial,
   CmsThankYouPage,
   CmsVideoTestimonial,
+  LandingPageDoc,
   PageDoc,
+  SectionHeroImage,
   SiteSettings,
   TestimonialAccent,
   ThankYouRouting,
@@ -32,6 +34,7 @@ export const PAGE_TYPES = [
   "schedulePage",
   "careersPage",
   "affiliatePage",
+  "landingPage",
 ] as const;
 
 /** "/" stays "/", "services" → "/services". */
@@ -42,30 +45,88 @@ export function slugToPath(slug: string): string {
 
 // ── pages ───────────────────────────────────────────────────────────
 
+/**
+ * Page docs come back with a blanket `...` spread — every template reads its
+ * own named fields. Landing pages are the exception: their sections hold
+ * references (FAQ picks, creator videos, the thank-you page), so those are
+ * dereferenced here, in the one query, rather than by a second round trip per
+ * section type. Unrenderable picks — a deleted question, a video with no URL —
+ * are dropped rather than handed to the section to trip over.
+ *
+ * freshClient, not the CDN: this read decides whether a route EXISTS, and the
+ * client creates landing and affiliate pages minutes before the link goes out.
+ * A stale CDN "no" there gets frozen into a 404 for a day (see client.ts and
+ * the affiliate-page notes). It only runs at build and revalidate time — the
+ * pages are static — so the CDN bought nothing anyway.
+ */
 export async function getPageBySlug(slug: string): Promise<PageDoc | null> {
-  return client.fetch(
+  const page: PageDoc | null = await freshClient.fetch(
     `*[_type in $types && slug.current == $slug][0]{
       ...,
-      "slug": slug.current
+      "slug": slug.current,
+      _type == "landingPage" => {
+        "sections": sections[]{
+          ...,
+          _type == "sectionVideoWall" => {
+            // parenthesised: after []-> a trailing filter maps over each item
+            // instead of filtering the list, and leaves nulls behind
+            "videos": (videos[]->{ name, "handle": coalesce(handle, ""), videoUrl })[defined(videoUrl)]
+          },
+          _type == "sectionFaq" => {
+            "questions": (questions[]->{
+              "slug": slug.current, question, shortAnswer
+            })[defined(slug) && defined(question)]
+          },
+          _type == "sectionBooking" => {
+            "thankYouSlug": thankYou->slug.current
+          },
+          _type == "sectionHeroImage" => {
+            "imageAlt": image.alt
+          }
+        }
+      }
     }`,
     { types: PAGE_TYPES, slug },
   );
+  return page?._type === "landingPage" ? withLandingImages(page) : page;
 }
 
 /**
- * Every routable page slug. `excludeTypes` narrows the set without changing
- * routing — the sitemap uses it to leave affiliate landing pages out of search
- * while generateStaticParams still prerenders them.
+ * Hero images arrive as raw asset refs; the section wants a URL. Cropped to the
+ * frame's 4:5 here so the hotspot the editor set decides what survives the crop
+ * — the frame's object-cover would otherwise centre it blindly.
+ */
+function withLandingImages(page: LandingPageDoc): LandingPageDoc {
+  return {
+    ...page,
+    sections: (page.sections ?? []).map((s) => {
+      if (s._type !== "sectionHeroImage") return s;
+      const raw = (s as SectionHeroImage & { image?: { asset?: unknown } }).image;
+      return {
+        ...s,
+        imageUrl: raw?.asset
+          ? urlFor(raw).width(920).height(1150).fit("crop").url()
+          : undefined,
+      };
+    }),
+  };
+}
+
+/**
+ * Every routable page slug. `excludeTypes` and `indexableOnly` narrow the set
+ * without changing routing — the sitemap uses them to leave affiliate pages and
+ * landing pages marked "Hide from search engines" out of search, while
+ * generateStaticParams still prerenders them.
  */
 export async function getAllPageSlugs(
-  opts: { excludeTypes?: readonly string[] } = {},
+  opts: { excludeTypes?: readonly string[]; indexableOnly?: boolean } = {},
 ): Promise<string[]> {
   const types = PAGE_TYPES.filter(
     (t) => !opts.excludeTypes?.includes(t),
   );
-  return client.fetch(
-    `*[_type in $types && defined(slug.current)].slug.current`,
-    { types },
+  return freshClient.fetch(
+    `*[_type in $types && defined(slug.current) && ($all || hideFromSearch != true)].slug.current`,
+    { types, all: !opts.indexableOnly },
   );
 }
 
@@ -430,6 +491,17 @@ export async function getAllJobSlugs(): Promise<string[]> {
   return client.fetch(
     `*[_type == "jobOpening" && defined(slug.current)].slug.current`,
   );
+}
+
+/**
+ * The creators picked for Home's roster carousel, in order — the fallback for
+ * a landing page's roster section that picks none of its own.
+ */
+export async function getHomeRosterRefs(): Promise<string[]> {
+  const refs: string[] | null = await client.fetch(
+    `*[_id == "homePage"][0].rosterCreators[]._ref`,
+  );
+  return refs ?? [];
 }
 
 export async function getVideoTestimonials(): Promise<CmsVideoTestimonial[]> {

@@ -12,6 +12,30 @@ The entire site is content-driven from Sanity (project `076c9ywj`, dataset
   page's `Route` (slug) field controls its URL via the catch-all route
   `src/app/(site)/[...slug]` (home is pinned to `/`). If you change a slug,
   update any links pointing at it in Site Settings.
+- **Landing Pages** — campaign and audience pages built from a **section
+  library**: the one page type whose sections the client picks, orders and
+  removes in Studio (Landing Pages → + New → Sections → "Add item"). Served
+  at the site root (`/tax-bill`) through the same catch-all, with the
+  affiliate pages' slug guards (unique across every page, reserved routes
+  refused — see `schemaTypes/rootSlug.ts`). The sections are the site's own
+  components, not copies: video hero (thank-you), image hero (affiliate),
+  stats, reviews carousel, video testimonials, creator roster, tax
+  estimator, video feature, services map, steps, value stack, booking form,
+  FAQ (per-page question picks) and closing CTA. Every optional field's
+  placeholder is exactly what renders when it's left empty
+  (`src/lib/landing-sections.ts` feeds both). `{n}` in an eyebrow is the
+  section's number on the page, so reordering never breaks the sequence.
+  Buttons with no link jump to the page's booking section if it has one.
+  The booking section can pick its own thank-you page (a `?ty=` on the ad
+  link still wins). "Hide from search engines" sets `noindex` and drops the
+  page from the sitemap. The backdrop meshes are fitted to whatever order
+  the sections are in by `LandingTemplate` — read its header before adding a
+  section with an animated background of its own. **Adding a section type:**
+  schema object in `schemaTypes/landing.ts` (+ `SECTION_TYPES` + an insert
+  group), its shape in `types.ts` (`LandingSection`), a case in
+  `LandingTemplate`, any references dereferenced in `getPageBySlug`, and a
+  640×360 thumbnail at `public/studio-sections/<type>.jpg` for the Add-item
+  grid.
 - **Collections** — Creators (111), Testimonials, Team, Services, Job
   Openings. Sorted by their `order` field; the first 16 creators feed the
   home hero strip and roster. Job Openings are the role cards on Careers —
@@ -75,7 +99,12 @@ Content conventions:
   `/sitemap.xml` are generated from Sanity, so new job posts and legal pages
   appear in the sitemap without a deploy. Affiliate pages are deliberately
   left out of it — see `src/app/sitemap.ts` — and thank-you pages are both
-  left out of it and marked `noindex`.
+  left out of it and marked `noindex`. Landing pages are in it unless their
+  "Hide from search engines" switch is on.
+- **Page existence reads skip the CDN.** `getPageBySlug` / `getAllPageSlugs`
+  use `freshClient`: landing and affiliate pages are created minutes before
+  a link goes out, and a stale CDN read there prerenders a 404 that ISR then
+  keeps for a day.
 
 ## Caching / revalidation (same pattern as aletheia-website)
 

@@ -392,9 +392,38 @@ export function digitClusterRuns(page: PageInfo, known: string[] = [], dataFonts
       cluster.push(r);
     }
     flush();
+    // Fields of digit boxes, each a few digits with spaces between them
+    // ("2 3 1", "9 7", "1 2 3 4" — Nebraska's 1040N sets both SSNs this
+    // way), joined across the gaps between the fields the way single-digit
+    // boxes are above. The fields are wider than a digit, so the pass above
+    // judged those gaps by the field's own spacing and never joined them.
+    // Kept separate so what it joins can't change what that pass painted.
+    let fields: Run[] = [];
+    const flushFields = () => {
+      const digits = fields.map((r) => r.str.replace(/\D/g, "")).join("");
+      const identity = digits.length >= 9 || known.some((k) => digits.includes(k)) || (digits.length >= 5 && known.some((k) => k.includes(digits)));
+      if (fields.length > 1 && identity) out.push(...fields);
+      fields = [];
+    };
+    for (const r of line) {
+      if (!SPACED_DIGITS.test(r.str.trim())) {
+        flushFields();
+        continue;
+      }
+      const prev = fields[fields.length - 1];
+      if (prev) {
+        const charW = prev.str.length ? prev.w / prev.str.length : prev.h * 0.6;
+        if (r.x - (prev.x + prev.w) > Math.max(30, charW * 8)) flushFields();
+      }
+      fields.push(r);
+    }
+    flushFields();
   }
   return out;
 }
+
+/** A field of digit boxes as one run: single digits with single spaces between them ("2 3 1"), or one digit. */
+const SPACED_DIGITS = /^\d(?: \d)*$/;
 
 /** The nine digits of every SSN and EIN printed in the given runs. */
 export function identityDigits(runs: Run[]): string[] {

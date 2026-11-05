@@ -12,11 +12,11 @@ export const metadata = { title: "Tax Recap — DeCypher Portal" };
 export default async function TaxRecapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ edit?: string; failure?: string }>;
+  searchParams: Promise<{ edit?: string; failure?: string; reread?: string }>;
 }) {
   // "receipts" is the Tax Recap tab's key — see lib/permissions for why.
   await requirePermission("receipts");
-  const { edit, failure } = await searchParams;
+  const { edit, failure, reread } = await searchParams;
   const [recaps, editing, tables, failures, refused] = await Promise.all([
     listRecaps(),
     edit && !edit.includes("/") ? getRecap(edit) : Promise.resolve(null),
@@ -87,6 +87,7 @@ export default async function TaxRecapPage({
           existing={recaps}
           tables={tables}
           fromFailure={fromFailure}
+          rereadId={reread === "1" && failure && !edit ? failure : undefined}
         />
       </div>
 

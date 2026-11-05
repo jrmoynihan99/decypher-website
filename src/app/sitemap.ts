@@ -26,7 +26,9 @@ const AFFILIATE_TYPE = "affiliatePage";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [pageSlugs, legalSlugs, jobSlugs, faqRows] = await Promise.all([
-    getAllPageSlugs({ excludeTypes: [AFFILIATE_TYPE] }),
+    // indexableOnly: landing pages marked "Hide from search engines" (ad-only
+    // pages that repeat copy from elsewhere) stay out for the same reason
+    getAllPageSlugs({ excludeTypes: [AFFILIATE_TYPE], indexableOnly: true }),
     getAllLegalPageSlugs(),
     getAllJobSlugs(),
     getFaqSitemapRows(),
