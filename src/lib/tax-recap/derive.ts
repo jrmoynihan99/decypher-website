@@ -2451,6 +2451,27 @@ function buildModel(
             ...(schC ? (["grossReceipts", "businessNetIncome"] as ReturnFieldKey[]) : []),
           ]
         : ["grossReceipts", "businessNetIncome", "totalIncome", "agi", "taxableIncome", "incomeTax", "seTax", "federalTotalTax"];
+  // A Schedule C total left out of the summed lines but read on each
+  // Schedule C (engine v17 reader): taken from the businesses, when their
+  // own arithmetic holds and their line 31s come to Schedule 1 line 3.
+  if (schC && more.schedulesC?.length) {
+    const checked = checkedSchedulesC(more.schedulesC, n(after.businessNetIncome));
+    if (checked) {
+      const t = (k: "receipts" | "returns" | "cogs" | "otherIncome" | "expenses" | "homeOffice") => checked.list.reduce((s, c) => s + c[k], 0);
+      const fills: Partial<ReturnNumbers> = {};
+      if (!has(after.grossReceipts)) fills.grossReceipts = t("receipts");
+      if (!has(after.totalExpenses)) fills.totalExpenses = t("expenses");
+      if (!has(after.homeOffice) && t("homeOffice")) fills.homeOffice = t("homeOffice");
+      if (!has(after.cogs) && t("cogs")) fills.cogs = t("cogs");
+      if (!has(after.schCReturns) && t("returns")) fills.schCReturns = t("returns");
+      if (!has(after.schCOtherIncome) && t("otherIncome")) fills.schCOtherIncome = t("otherIncome");
+      const filled = Object.entries(fills) as [ReturnFieldKey, number][];
+      if (filled.length) {
+        softNotes.push(`Read off each Schedule C, the totals left out: ${filled.map(([k, v]) => `${label(k)} ${fmt(v)}`).join(", ")}`);
+        after = { ...after, ...fills };
+      }
+    }
+  }
   // No Schedule SE tax at all: a Schedule C loss that wipes out the
   // partnership share on the same schedule, or a partnership that put
   // nothing on this 1040. Schedule 2 line 4 is then blank and the reader
@@ -2499,18 +2520,24 @@ function buildModel(
     // A partnership with no income at all this year (a holding company, one
     // that hasn't started): its receipts line is blank, not unread. Every
     // line the before is figured from is $0, so it changes nothing.
+    // (Some of its lines printed as 0, the rest blank — which ones varies
+    // read to read — and nothing anywhere that isn't 0.)
+    const emptyKeys: EntityFieldKey[] = ["grossReceipts", "totalIncome", "totalDeductions", "ordinaryIncome", "k1Ordinary", "k1Ordinary2", "k1Guaranteed", "otherIncome", "cogs", "guaranteedPayments"];
     if (
       ui.form === "1065" &&
-      !has(ui.e.grossReceipts) &&
-      has(ui.e.totalIncome) &&
-      ui.e.totalIncome === 0 &&
-      n(ui.e.ordinaryIncome) === 0 &&
-      n(ui.e.totalDeductions) === 0 &&
-      n(ui.e.k1Ordinary) === 0 &&
-      n(ui.e.k1Ordinary2) === 0
+      emptyKeys.every((k) => n(ui.e[k]) === 0) &&
+      emptyKeys.filter((k) => has(ui.e[k])).length >= 2 &&
+      (["grossReceipts", "totalIncome", "totalDeductions", "ordinaryIncome", "k1Ordinary"] as const).some((k) => !has(ui.e[k]))
     ) {
-      softNotes.push(`${ui.name} has no income, deductions or K-1 income this year (its receipts line is blank), so it adds nothing to either side`);
-      ui.e = { ...ui.e, grossReceipts: 0 };
+      softNotes.push(`${ui.name} has no income, deductions or K-1 income this year (its blank lines are $0), so it adds nothing to either side`);
+      ui.e = {
+        ...ui.e,
+        grossReceipts: n(ui.e.grossReceipts),
+        totalIncome: n(ui.e.totalIncome),
+        totalDeductions: n(ui.e.totalDeductions),
+        ordinaryIncome: n(ui.e.ordinaryIncome),
+        k1Ordinary: n(ui.e.k1Ordinary),
+      };
     }
     const need: EntityFieldKey[] = ["grossReceipts", "totalIncome", "totalDeductions", "ordinaryIncome", "k1Ordinary"];
     const miss = need.filter((k) => !has(ui.e[k]));
@@ -2654,15 +2681,28 @@ function buildModel(
     if (off(seReads[0].farm + seReads[1].farm, farm)) return null;
     const total = (f: (c: ScheduleCRead) => number) => of(1, f) + of(2, f);
     if (off(total(kept), schCKept) || off(total((c) => c.cogs), schCogs) || off(total((c) => c.expenses), expenses) || off(total((c) => c.homeOffice), homeOffice)) return null;
-    return [1, 2].map((j) => ({
+    // Each schedule's W-2 Social Security wages (line 8a): none at all with
+    // no W-2 on the return — line 7, the year's maximum, has been read for
+    // it — and whatever's taken has to give that schedule's own line 12 to
+    // the dollar, or the split isn't used.
+    const people = [1, 2].map((j) => ({
       person: (j - 1) as 0 | 1,
       kept: of(j, kept),
       cogs: of(j, (c) => c.cogs),
       expenses: of(j, (c) => c.expenses),
       homeOffice: of(j, (c) => c.homeOffice),
       farm: seReads[j - 1].farm,
-      wages: Math.max(0, seReads[j - 1].ssWages),
+      wages: 0,
     }));
+    for (const [i, p] of people.entries()) {
+      const read = seReads[i];
+      const profit = p.kept - p.cogs - p.expenses - p.homeOffice + p.farm;
+      const tries = w2 > 0 ? [Math.max(0, read.ssWages), 0] : [0];
+      const hit = tries.find((t) => read.tax <= 0 || !off(scheduleSe(fed, profit, t).tax, read.tax));
+      if (hit === undefined) return null;
+      p.wages = hit;
+    }
+    return people;
   })();
   /** Each spouse's Schedule SE profit in a scenario (null: one schedule). */
   const splitFor = (s: { expenses: boolean; homeOffice: boolean } | null) =>
