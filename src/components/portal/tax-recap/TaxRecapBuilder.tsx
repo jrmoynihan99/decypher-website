@@ -2005,8 +2005,14 @@ export default function TaxRecapBuilder({
     }
     if (sides.before.status === "error" && sides.before.problems.length) {
       const detail = sides.before.problems[0];
-      if (failure?.id) return finish({ kind: "refused", detail }, failure.id);
-      const t = setTimeout(() => !rereadDone.current && finish({ kind: "refused", detail }), 20000);
+      // The new record's files go up one by one after it's made, and moving
+      // on navigates this frame away: finished only once every file is up
+      // (or failed), else the record kept the first file alone and the next
+      // "Make the recaps" had no 1040 to build from. A stalled upload still
+      // lets the run go on after two minutes.
+      const filesDone = failure?.originals?.state === "saved" || failure?.originals?.state === "failed";
+      if (failure?.id && filesDone) return finish({ kind: "refused", detail }, failure.id);
+      const t = setTimeout(() => !rereadDone.current && finish({ kind: "refused", detail }, failure?.id ?? null), failure?.id ? 120000 : 20000);
       return () => clearTimeout(t);
     }
     const broken = (["after", "entity", "city"] as const).find((k) => sides[k].status === "error") ?? null;
