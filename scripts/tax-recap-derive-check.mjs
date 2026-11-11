@@ -2268,8 +2268,8 @@ for (const f of NOV) {
 /* ── Refused returns, 2026-11-11 (engine v18) ───────────────────────────────
    The last five refusals of the November triage, pinned the same way. Three
    are the reads as recorded; the other two carry what a v18 read adds — the
-   state lines a second, state-only read brings back (Case 36), and a
-   rental-only 1065's Form 8825 lines (Case 37) — each checked on the print. */
+   state lines a second, state-only read brings back (Case 56), and a
+   rental-only 1065's Form 8825 lines (Case 57) — each checked on the print. */
 const V18 = JSON.parse(readFileSync(new URL("./fixtures/tax-recap-failures-2026-11-v18.json", import.meta.url), "utf8"));
 console.log("\nRefused returns, 2026-11-11 (engine v18)");
 const moreOf = (f) =>
@@ -2299,7 +2299,7 @@ for (const f of V18) {
   // to read. A partnership K-1 with no 1065 and no Schedule C beside it is
   // the business, and its 1065 is still asked for. A K-1 PROFIT Schedule E
   // shows less of is no limit at all.
-  const passive = V18.find((f) => f.name.startsWith("Case 34"));
+  const passive = V18.find((f) => f.name.startsWith("Case 54"));
   const unread = deriveBefore(numbers({ ...passive.after, scorpIncome: null }), passive.meta, undefined, entityNumbers(passive.entity), moreOf(passive));
   const v18Check = (name, ok, detail) => {
     if (!ok) failed++;
@@ -2307,12 +2307,25 @@ for (const f of V18) {
     if (detail) console.log(`         → ${detail}`);
   };
   v18Check("a K-1 loss with Schedule E's line unread is still a line to read, not a suspended loss", !unread.ok && unread.reasons.some((s) => /weren't read.*S corporation income/.test(s)), unread.ok ? "derived" : unread.reasons[0]);
-  const salt = V18.find((f) => f.name.startsWith("Case 35"));
+  const salt = V18.find((f) => f.name.startsWith("Case 55"));
   const noSchC = numbers({ ...salt.after, businessNetIncome: null, grossReceipts: null, totalExpenses: null, homeOffice: null });
   const asked = deriveBefore(noSchC, salt.meta, undefined, null, {});
   v18Check("a partnership K-1 with no 1065 and no Schedule C still asks for the 1065", !asked.ok && asked.reasons.some((s) => /add the partnership's 1065/.test(s)), asked.ok ? "derived" : asked.reasons[0]);
   const profit = entityNumbers({ ...passive.entity, grossReceipts: 80000, totalIncome: 80000, totalDeductions: 30000, otherDeductions: 30000, ordinaryIncome: 50000, k1Ordinary: 50000 });
   const less = deriveBefore(numbers({ ...passive.after, scorpIncome: 20000, totalIncome: 35858, agi: 35858 }), passive.meta, undefined, profit, moreOf(passive));
+  // Case 58's misread lines with Schedule E line 32 read too: the line,
+  // not a guessed sign, settles the total — the same split, said so. And a
+  // read whose lines already hold together is never "repaired".
+  const misread = V18.find((f) => f.name.startsWith("Case 58"));
+  const withLine32 = deriveBefore(numbers({ ...misread.after, scheduleEK1Total: -164352 }), misread.meta, undefined, entityNumbers(misread.entity), moreOf(misread));
+  v18Check(
+    "Schedule E line 32 read: the K-1 lines that don't add up to it are split again from it",
+    withLine32.ok && withLine32.before.federalTotalTax === misread.federal && withLine32.derived.notes.some((s) => /Schedule E line 32 prints \$-164,352/.test(s)),
+    withLine32.ok ? `federal before ${withLine32.before.federalTotalTax}` : withLine32.reasons[0],
+  );
+  const caseA = V18.find((f) => f.name.startsWith("Case 57"));
+  const clean = deriveBefore(numbers(caseA.after), caseA.meta, undefined, entityNumbers(caseA.entity), moreOf(caseA));
+  v18Check("lines read right are left as read", clean.ok && !clean.derived.notes.some((s) => /don't hold together/.test(s)));
   // (It goes the way it always went — the 1040 wins, the team's call — never as a loss held back.)
   v18Check(
     "a K-1 profit Schedule E carries less of is never taken as a loss held back",

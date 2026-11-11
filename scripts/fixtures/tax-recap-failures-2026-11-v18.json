@@ -1,6 +1,6 @@
 [
  {
-  "name": "Case 33 · 2025 (joint, CA, both spouses 50% of one S corporation)",
+  "name": "Case 53 · 2025 (joint, CA, both spouses 50% of one S corporation)",
   "proves": "two K-1s on one joint return, each with its own section 179 deduction ($15,650 each): Schedule E nets both",
   "meta": {
    "taxYear": 2025,
@@ -82,7 +82,7 @@
   ]
  },
  {
-  "name": "Case 34 · 2025 (single, CA, passive S corporation loss)",
+  "name": "Case 54 · 2025 (single, CA, passive S corporation loss)",
   "proves": "an S corporation K-1 loss Form 8582 suspends in full: Schedule E printed $0, the K-1 −$58,283; the after as filed, the before's K-1 the receipts",
   "meta": {
    "taxYear": 2025,
@@ -150,7 +150,7 @@
   ]
  },
  {
-  "name": "Case 35 · 2025 (single, NY, Schedule C with an unattached partnership K-1)",
+  "name": "Case 55 · 2025 (single, NY, Schedule C with an unattached partnership K-1)",
   "proves": "a −$770 partnership K-1 with no 1065, beside the Schedule C: carried as filed, on Schedule SE as line 2 has it",
   "meta": {
    "taxYear": 2025,
@@ -232,7 +232,7 @@
   ]
  },
  {
-  "name": "Case 36 · 2025 (single, NY resident with a $0 Georgia nonresident return, S corporation)",
+  "name": "Case 56 · 2025 (single, NY resident with a $0 Georgia nonresident return, S corporation)",
   "proves": "Georgia's total unread on a return with $0 of Georgia income is $0; New York City's tax wiped out by its credit still makes the filer a city resident on the before",
   "meta": {
    "taxYear": 2025,
@@ -316,7 +316,7 @@
   ]
  },
  {
-  "name": "Case 37 · 2025 (joint, no state, an S corporation, a rental-only 1065 and a 1065 half owned by the S corporation)",
+  "name": "Case 57 · 2025 (joint, no state, an S corporation, a rental-only 1065 and a 1065 half owned by the S corporation)",
   "proves": "one 1065's K-1 inside the S corporation's other income (tiered); a basis-limited partnership loss (−$159,080 → −$8,094); a rental-only 1065 (Form 8825) whose passive loss Form 8582 suspends",
   "meta": {
    "taxYear": 2025,
@@ -401,6 +401,94 @@
   "notes": [
    "is Corporation D .1120-S.'s",
    "rental real estate only",
+   "held back this year"
+  ]
+ },
+ {
+  "name": "Case 58 · 2025 (Case 57 read again: the S corporation row read as partnership income, its loss without a sign)",
+  "proves": "one business's loss read as income among several: the read total with that loss put back, split again by the entity returns' own forms",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Married filing jointly",
+   "stateCode": null,
+   "stateForm": null,
+   "entityForm": "1120-S",
+   "entityStateCode": null,
+   "entityName": "Corporation D",
+   "unverified": []
+  },
+  "after": {
+   "w2Income": 37500,
+   "scorpIncome": 0,
+   "partnershipIncome": 148164,
+   "totalIncome": -126852,
+   "agi": -126852,
+   "qbiDeduction": 0,
+   "taxableIncome": 0,
+   "incomeTax": 0,
+   "federalTotalTax": 0,
+   "federalPayments": 14924,
+   "federalWithholding": 5105,
+   "federalRefund": 12424
+  },
+  "entity": {
+   "grossReceipts": 173009,
+   "otherIncome": -159080,
+   "totalIncome": 13929,
+   "officerComp": 37500,
+   "taxesLicenses": 5014,
+   "depreciation": 0,
+   "otherDeductions": 127673,
+   "totalDeductions": 170187,
+   "ordinaryIncome": -156258,
+   "k1Ordinary": -156258,
+   "ownershipPct": 100,
+   "distributions": 54042
+  },
+  "more": {
+   "entities": [
+    {
+     "numbers": {
+      "ownershipPct": 51,
+      "ownershipPct2": 49,
+      "rentalRents": 16200,
+      "rentalExpenses": 44795,
+      "k1Rental": -14583,
+      "k1Rental2": -14012
+     },
+     "form": "1065",
+     "stateCode": null,
+     "name": "Partnership E"
+    },
+    {
+     "numbers": {
+      "grossReceipts": 228570,
+      "cogs": 458974,
+      "otherIncome": 0,
+      "totalIncome": -230404,
+      "taxesLicenses": 1016,
+      "interest": 1113,
+      "otherDeductions": 85627,
+      "totalDeductions": 87756,
+      "ordinaryIncome": -318160,
+      "k1Ordinary": -159080,
+      "ownershipPct": 50,
+      "k1Ordinary2": -159080,
+      "ownershipPct2": 50
+     },
+     "form": "1065",
+     "stateCode": null,
+     "name": "Partnership F"
+    }
+   ],
+   "states": []
+  },
+  "expect": null,
+  "federal": 73173,
+  "state": null,
+  "verified": true,
+  "notes": [
+   "loss was read as .156,258 of income",
    "held back this year"
   ]
  }

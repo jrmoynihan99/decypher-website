@@ -126,6 +126,13 @@ export const RETURN_FIELDS = [
     optional: true,
   },
   {
+    key: "scheduleEK1Total",
+    label: "Schedule E K-1 total (line 32)",
+    source: "Schedule E page 2 line 32: total partnership and S corporation income or (loss), as printed — the check the two K-1 lines above add up to (engine v18)",
+    group: "income",
+    optional: true,
+  },
+  {
     key: "rentalIncome",
     label: "Rental real estate income or (loss)",
     source: "Schedule E line 26, as deducted after Form 8582",

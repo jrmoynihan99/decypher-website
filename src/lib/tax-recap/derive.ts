@@ -292,7 +292,7 @@ const isRentalUnit = (x: EntityNumbers) => has(x.rentalRents) || has(x.k1Rental)
 /**
  * An entity whose only activity is rental real estate (engine v18): Form
  * 8825 carries its rents and expenses, page 1 is blank, and its K-1s carry
- * box 2, not box 1 (Case 37's rental LLC: $16,200 of rents, $44,795 of
+ * box 2, not box 1 (Case 57's rental LLC: $16,200 of rents, $44,795 of
  * expenses, a $14,583 loss on the 51% K-1 that Form 8582 suspends). Laid
  * out on the lines the engine models an entity by — the rents as its
  * receipts, the expenses as its deductions, box 2 as the K-1 — and kept
@@ -2286,6 +2286,33 @@ function buildModel(
     after = { ...after, rentalIncome: null };
   }
 
+  // Schedule E line 32, read (engine v18): with one entity return and the
+  // two K-1 lines not adding up to it, the line is what Schedule E carries
+  // when it is the entity's K-1 — this 1040's own, or both spouses' — or a
+  // loss a limit held part of. The entity's line takes it; the other line
+  // was the misread.
+  if (!several && entity && has(after.scheduleEK1Total) && off(scorpIncome + partnershipIncome, after.scheduleEK1Total)) {
+    const line32 = after.scheduleEK1Total;
+    const isP = meta.entityForm === "1065";
+    const one = isP ? n(entity.k1Ordinary) + n(entity.k1Guaranteed) - upe : n(entity.k1Ordinary) - n(entity.k1Section179);
+    const both = has(entity.k1Ordinary2) && status === "mfj"
+      ? isP
+        ? one + entity.k1Ordinary2 + n(entity.k1Guaranteed2)
+        : n(entity.k1Ordinary) + entity.k1Ordinary2 - s179Household(entity)
+      : null;
+    if ([one, both].some((k) => k !== null && (!off(k, line32) || limitedLine(k, line32, true)))) {
+      softNotes.push(
+        `Schedule E's K-1 lines were read as ${fmt(scorpIncome)} of S corporation income and ${fmt(partnershipIncome)} of partnership income, which don't add up to its line 32 (${fmt(line32)}); line 32 is the ${isP ? "partnership's" : "corporation's"} K-1, so it's taken as the ${isP ? "partnership" : "S corporation"} line`,
+      );
+      if (isP) {
+        partnershipIncome = line32;
+        scorpIncome = 0;
+      } else {
+        scorpIncome = line32;
+        partnershipIncome = 0;
+      }
+    }
+  }
   if (!several) {
   // Misreads the numbers themselves give away (engine v12). Each is fixed
   // only when the return's own figures prove it, and says so.
@@ -2469,7 +2496,7 @@ function buildModel(
     // One entity return's K-1 to another on the same 1040 (engine v18): the
     // receiving return carries it in its own other income (1120-S lines
     // 4–5, 1065 lines 4–7), to the dollar, and only its own K-1 reaches the
-    // 1040. Counted on Schedule E as well, it was counted twice (Case 37:
+    // 1040. Counted on Schedule E as well, it was counted twice (Case 57:
     // a partnership's 50% K-1 to the client's S corporation, $159,080 in both). It's that
     // entity's income: off this 1040, and on every scenario the receiving
     // return's other income follows the paying one's ordinary income.
@@ -2578,13 +2605,13 @@ function buildModel(
       // then on the others in proportion to their losses. The after is
       // taken as filed; on the before the write-offs are gone, the K-1s are
       // income, and no limit holds income back.
-      const limited = (() => {
+      const tryLimits = (readS: number, readP: number, readS0: boolean, readP0: boolean) => {
         let trial = all;
         const floors: (number | null)[] = all.map(() => null);
         const notes: string[] = [];
         for (const f of ["1120-S", "1065"] as const) {
-          const read = f === "1120-S" ? scorpIncome : partnershipIncome;
-          const lineRead = f === "1120-S" ? scorpLineRead : partnershipLineRead;
+          const read = f === "1120-S" ? readS : readP;
+          const lineRead = f === "1120-S" ? readS0 : readP0;
           const members = trial.map((_, i) => i).filter((i) => forms[i] === f);
           const wantOf = () => members.reduce((s, i) => s + k1Of(trial[i], f), 0) - (f === "1065" ? upeOff : 0);
           if (!members.length) {
@@ -2637,7 +2664,54 @@ function buildModel(
           );
         }
         return { trial, floors, notes };
-      })();
+      };
+      let limited = tryLimits(scorpIncome, partnershipIncome, scorpLineRead, partnershipLineRead);
+      // The two lines themselves misread (engine v18). Schedule E prints a
+      // loss in column (i) without parentheses, and with several businesses
+      // the reader has taken one for income and put a row on the wrong line
+      // (Case 57 re-read: the S corporation's −$156,258 read as +$156,258
+      // among the partnerships, the lines adding up to +$148,164 where line
+      // 32 prints −$164,352). What Schedule E really carries is line 32 when
+      // it was read; otherwise the read total with one business's loss put
+      // back as a loss. Either way the lines are split again by the entity
+      // returns' own forms — the corporations' as their K-1s with the rest
+      // on the partnerships, or the other way — and checked like the lines
+      // as read. Taken only when exactly one reading fits, and a business
+      // whose sign was put back has to come out with no limit of its own
+      // (its printed row was its whole K-1).
+      if (!limited) {
+        const readTotal = scorpIncome + partnershipIncome;
+        const line32 = after.scheduleEK1Total;
+        const totals: { total: number; flipped: number | null; why: string }[] = [];
+        if (has(line32) && off(line32, readTotal)) {
+          totals.push({ total: line32, flipped: null, why: `Schedule E line 32 prints ${fmt(line32)}` });
+        } else if (!has(line32)) {
+          all.forEach((x, i) => {
+            const k = k1Of(x, forms[i]);
+            if (k < -TOL) totals.push({ total: readTotal + 2 * k, flipped: i, why: `${names[i]}'s ${fmt(k)} loss was read as ${fmt(-k)} of income` });
+          });
+        }
+        const fits: { s: number; p: number; why: string; r: NonNullable<ReturnType<typeof tryLimits>> }[] = [];
+        for (const t of totals) {
+          for (const split of [
+            { s: wantS, p: t.total - wantS },
+            { s: t.total - wantP, p: wantP },
+          ]) {
+            const r = tryLimits(split.s, split.p, true, true);
+            if (!r || (t.flipped !== null && r.floors[t.flipped] !== null)) continue;
+            if (!fits.some((f) => !off(f.s, split.s) && !off(f.p, split.p))) fits.push({ ...split, why: t.why, r });
+          }
+        }
+        if (fits.length === 1) {
+          const f = fits[0];
+          softNotes.push(
+            `Schedule E's K-1 lines were read as ${fmt(scorpIncome)} of S corporation income and ${fmt(partnershipIncome)} of partnership income, which don't hold together: ${f.why}. By the entity returns' own forms it's ${fmt(f.s)} on the S corporation rows and ${fmt(f.p)} on the partnership rows (${fmt(f.s + f.p)} in all)`,
+          );
+          scorpIncome = f.s;
+          partnershipIncome = f.p;
+          limited = f.r;
+        }
+      }
       if (limited) {
         all = limited.trial;
         lossFloors = limited.floors;
@@ -2653,7 +2727,7 @@ function buildModel(
   }
   // A partnership K-1 on Schedule E with no 1065 added, beside a Schedule
   // C of the client's own (engine v18): the Schedule C is the business, and
-  // the K-1 (Case 35's −$770 from another LLC) is carried as filed on
+  // the K-1 (Case 55's −$770 from another LLC) is carried as filed on
   // both sides — as the S corporation's shape already carries one — with
   // its self-employment earnings on Schedule SE when the return puts them
   // there. Its own write-offs aren't counted: the savings can come out
@@ -3149,7 +3223,7 @@ function buildModel(
     let lossFloor = u.lossFloor;
     if (!several && off(k1 - s179, scorpIncome)) {
       if (limitedLine(k1 - s179, scorpIncome, scorpLineRead)) {
-        // A loss Schedule E deducts less of (engine v18): Case 34's −$58,283
+        // A loss Schedule E deducts less of (engine v18): Case 54's −$58,283
         // K-1, a passive loss Form 8582 suspends in full, on Schedule E as $0.
         lossFloor = scorpIncome;
         softNotes.push(
@@ -4093,7 +4167,7 @@ function buildModel(
   // too (engine v18). The reader leaves it out when the city block is blank;
   // a $0 is the city's tax wiped out by its household credit, and on the
   // before, with the write-offs gone, the city taxes the same resident
-  // (Case 36: $15 of city tax less a $15 credit, $4,407 on the before).
+  // (Case 56: $15 of city tax less a $15 credit, $4,407 on the before).
   let localResident = has(after.stateLocalTax);
   const stateInputsFor = (
     f: Federal,
@@ -4395,7 +4469,7 @@ function buildModel(
     }
     // Its total line not read (engine v18): what the payments come to less
     // the refund plus what's owed, like the main state's; or $0 on a part-
-    // year or nonresident return that taxes no income at all — Case 36's
+    // year or nonresident return that taxes no income at all — Case 56's
     // Georgia Form 500, $0 of Georgia income on Schedule 3, whose tax page
     // the print selection had left out.
     if (!has(r.stateTotalTax)) {
