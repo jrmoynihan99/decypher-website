@@ -804,6 +804,23 @@ export const SCHEDULE_1_ADJUSTMENTS = [
 
 export const SCHEDULE_1_ADJUSTMENT_KEYS = SCHEDULE_1_ADJUSTMENTS.map((a) => a.key) as ReturnFieldKey[];
 
+/** The main state return's lines: what the second, state-only read brings back (engine v18). */
+export const STATE_FIELD_KEYS = RETURN_FIELDS.filter((f) => f.group === "state").map((f) => f.key) as ReturnFieldKey[];
+
+/**
+ * Whether a read named a state return but brought back nothing a state's
+ * total can be told from: no total line, and no payments with a refund or
+ * balance to settle it by (engine v18). The builder then reads the state
+ * pages once more on their own.
+ */
+export function stateLinesMissing(r: ReturnExtract): boolean {
+  if (!r.stateCode) return false;
+  const v = (k: ReturnFieldKey) => r.fields[k]?.value;
+  const has = (k: ReturnFieldKey) => typeof v(k) === "number";
+  if (has("stateTotalTax")) return false;
+  return !(has("statePayments") && (has("stateRefund") || has("stateAmountOwed")));
+}
+
 /** Forms round to the dollar; a line 10 within this of its lines adds up. */
 export const ADJUSTMENTS_TOLERANCE = 2;
 
@@ -933,6 +950,11 @@ export const ENTITY_FIELDS = [
   { key: "k1Guaranteed2", label: "Spouse's guaranteed payments (K-1)", source: "Schedule K-1 (Form 1065) box 4c for the spouse", group: "shareholder", optional: true },
   { key: "ownershipPct2", label: "Spouse's ownership %", source: "Schedule K-1 item G (1120-S) or item J, profit (1065) for the spouse", group: "shareholder", optional: true },
   { key: "distributions", label: "Distributions", source: "Schedule K-1 box 16 code D (1120-S) / box 19 code A (1065), all owners on this 1040", group: "shareholder", optional: true },
+  /* ── an entity whose only activity is rental real estate (Form 8825; page 1 blank): its K-1s carry box 2, not box 1 ── */
+  { key: "rentalRents", label: "Rental real estate income (Form 8825)", source: "Form 8825 line 20a (total rental real estate income) — an entity whose only activity is rental real estate", group: "income", optional: true },
+  { key: "rentalExpenses", label: "Rental real estate expenses (Form 8825)", source: "Form 8825 line 20b (total rental real estate expenses, depreciation included) — zeroed on the before, like Schedule E's", group: "deductions", optional: true },
+  { key: "k1Rental", label: "Owner's net rental real estate income (K-1)", source: "Schedule K-1 box 2 for the owner on this 1040", group: "shareholder", optional: true },
+  { key: "k1Rental2", label: "Spouse's net rental real estate income (K-1)", source: "Schedule K-1 box 2 for the second owner on the same 1040", group: "shareholder", optional: true },
   { key: "stateNetIncome", label: "State net income", source: "The state's S corporation net income for tax (CA 100S line 20)", group: "state", optional: true },
   { key: "stateGrossIncome", label: "State total income (LLC fee base)", source: "California Form 568 line 1 (total income from Schedule IW)", group: "state", optional: true },
   { key: "stateAddBack", label: "State taxes added back", source: "Taxes based on income deducted federally (CA 100S line 2)", group: "state", optional: true },
@@ -1189,7 +1211,87 @@ export type RecapInput = {
   /** Set when `before` was derived from the after return; `extraction.before` is then null. */
   derivedBefore: DerivedBefore | null;
   analysis: RecapAnalysis | null;
+  /**
+   * Next year's estimated tax payments as the returns set them up — the
+   * federal 1040-ES vouchers, each state's, each business's — read off the
+   * prints' filing instructions in the browser (lib/tax-recap/estimates).
+   * Null (and absent on recaps saved before) when there are none: the recap
+   * then has no estimated payments section.
+   */
+  estimates?: RecapEstimates | null;
 };
+
+/* ─────────────────────────── next year's estimated payments ─────────────────────────── */
+
+/** Who an estimated payment goes to: the IRS, a state for the household, or a state for one of the businesses. */
+export type EstimateKind = "federal" | "state" | "entity";
+
+/** One payment: which voucher or installment it is, when it's due (YYYY-MM-DD), how much, and whether it must be paid online. */
+export type EstimateInstallment = { n: number; due: string; amount: number; electronic: boolean };
+
+/**
+ * One payee's schedule for the year: the IRS's four 1040-ES vouchers, a
+ * state's (California's three: 30%, 40%, 0%, 30%), or an S corporation's or
+ * LLC's own state installments. `applied` is this year's overpayment
+ * credited toward next year's estimates.
+ */
+export type EstimateSchedule = {
+  kind: EstimateKind;
+  stateCode: string | null;
+  /** How the recap names the payee: "Federal (IRS)", "California", "IMAP LLC (California)". */
+  label: string;
+  installments: EstimateInstallment[];
+  applied: number;
+};
+
+export type RecapEstimates = {
+  /** The year the payments are for: the tax year after the recap's. */
+  year: number;
+  schedules: EstimateSchedule[];
+};
+
+const MAX_ESTIMATE_SCHEDULES = 10;
+const MAX_INSTALLMENTS = 6;
+
+/** Stored or typed estimates, cleaned; null when nothing is scheduled or applied. */
+export function sanitizeEstimates(raw: unknown): RecapEstimates | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const year = Number(r.year);
+  if (!Number.isInteger(year) || year < 2015 || year > 2045) return null;
+  const money = (v: unknown) => {
+    const x = typeof v === "number" ? v : Number(String(v ?? "").replace(/[$,\s]/g, ""));
+    return Number.isFinite(x) && x > 0 && x < 1e9 ? Math.round(x) : 0;
+  };
+  const schedules = (Array.isArray(r.schedules) ? r.schedules : [])
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+    .map((s): EstimateSchedule => {
+      const kind: EstimateKind = s.kind === "federal" || s.kind === "entity" ? s.kind : "state";
+      const code = typeof s.stateCode === "string" ? s.stateCode.trim().toUpperCase() : "";
+      const label = typeof s.label === "string" ? s.label.trim().slice(0, 80) : "";
+      const installments = (Array.isArray(s.installments) ? s.installments : [])
+        .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+        .map((x) => ({
+          n: Math.max(1, Math.min(9, Math.round(Number(x.n) || 1))),
+          due: typeof x.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.due) ? x.due : "",
+          amount: money(x.amount),
+          electronic: x.electronic === true,
+        }))
+        .filter((x) => x.due && x.amount > 0)
+        .sort((a, b) => a.due.localeCompare(b.due) || a.n - b.n)
+        .slice(0, MAX_INSTALLMENTS);
+      return {
+        kind,
+        stateCode: /^[A-Z]{2}$/.test(code) ? code : null,
+        label: label || (kind === "federal" ? "Federal (IRS)" : code || "State"),
+        installments,
+        applied: money(s.applied),
+      };
+    })
+    .filter((s) => s.installments.length || s.applied > 0)
+    .slice(0, MAX_ESTIMATE_SCHEDULES);
+  return schedules.length ? { year, schedules } : null;
+}
 
 /** The two cuts of the DeCyphered video: with dollar amounts, and percentages only. */
 export const VIDEO_VARIANTS = ["dollars", "percent"] as const;
@@ -1694,5 +1796,6 @@ export function sanitizeRecapInput(raw: unknown): RecapInput {
     },
     derivedBefore: sanitizeDerivedBefore(r.derivedBefore),
     analysis: sanitizeAnalysis(r.analysis),
+    estimates: sanitizeEstimates(r.estimates),
   };
 }

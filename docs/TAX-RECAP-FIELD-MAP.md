@@ -534,3 +534,28 @@ The engine's money doesn't change. What changed is that nothing on Schedule 1 ca
 - **The before names what it keeps.** The note lists each kept line by its line number ("student loan interest $2,500 (Schedule 1 line 21)") and calls anything unplaced exactly that, with what to do if it's a SEP, IRA or HSA. The before column shows the kept lines as filed and its own line 15.
 
 The team's rule (2026-10-26) is that Schedule 1 adjustments can be strategies; the plannable ones are, and are already left off the before (lines 13, 16, 20, and 17 for a sole proprietor; decided 2026-10-05). The rest — educator expenses, student loan interest, the early withdrawal penalty, alimony, jury duty pay — stay on the before, now by name. Archer MSA (line 23) and the retirement-type line 24 items are rare enough to keep on the before until one turns up.
+
+## The last five refusals: engine v18 (2026-11-11)
+
+Five returns still refused after v17, each for a reason the engine didn't model. They're pinned in `recap:check` from `scripts/fixtures/tax-recap-failures-2026-11-v18.json` as Cases 33–37, beside checks that what should still refuse does. Every recorded refusal (96) was replayed through the v17 and v18 engines. Only these returns changed, plus two dismissed ones that now derive through the K-1 rule below. Nothing that derived before moved by a dollar.
+
+**K-1 losses Schedule E deducts less of** (Cases 34, 37). A passive loss Form 8582 suspends, or a loss over basis or the amount at risk, is on the K-1 but not on the 1040. The engine used to refuse ("a basis limitation, or a passive loss"). Now, when Schedule E's line is a smaller loss than the K-1 (or $0 printed), each unit gets a floor (`Unit.lossFloor`): any scenario's K-1 loss is held to what the after deducted, and income passes. With several returns, each line (S corporations', partnerships') is checked against its own K-1s. The gap goes on the rental-only entities first, since their losses are passive, then on the rest in proportion. The after stays as filed. On the before the write-offs are gone, so the K-1s are income and no limit applies.
+
+- A $0 line counts only when it was printed. The reader is now told to report the S and P rows' whole contribution to line 32, passive columns included, and $0 when they contribute nothing. An unread line is still a line to read.
+- A K-1 *profit* that Schedule E shows less of is never taken as a limit. It goes the way it always went: the 1040 wins.
+- When the line can't say which of a partnership's two K-1s is this 1040's, the smaller is taken, so the savings can come out short, never long.
+
+**Both spouses' K-1s with section 179** (Case 33). Each K-1 carries its own box 11. An S corporation allocates by shares, so the second owner's is the first's at their share (`s179Household`). Subtracted once, two 50% K-1s with $15,650 each missed Schedule E by $15,650.
+
+**One entity's K-1 inside another's income** (Case 37). A K-1 equal, to the dollar, to another attached return's other income (1120-S lines 4–5, 1065 lines 4–7) belongs to that entity, not the household. It's taken off Schedule E's reconciliation, and on every scenario the receiving return's other income follows the paying one's ordinary income (`Unit.tierIn`). Units are run payer first.
+
+**Rental-only entities** (Case 37). An entity whose only activity is rental real estate files Form 8825; its page 1 is blank and its K-1s carry box 2. There are four new entity lines: `rentalRents` (8825 line 20a), `rentalExpenses` (line 20b), `k1Rental` and `k1Rental2` (box 2). The reader reads them, and the entity page selection now keeps Form 8825. The engine lays them out as the lines it models a business by and marks the unit rental. Its K-1 is passive rental income in other income, with no Schedule SE and no QBI. Its expenses are zeroed on the before (the 2026-10-02 rental convention). Earlier years' suspended passive losses (Form 8582 lines 1c + 2c) come off any income it earns on the before when no Schedule E rental is there to take them. An entity with business income and Form 8825 both isn't modeled: its rental lines are set aside, as before.
+
+**A partnership K-1 with no 1065, beside a Schedule C** (Case 35). The Schedule C is the business. The K-1 is carried as filed on both sides, as the S corporation's shape already carried one (`flatK1`). Its earnings ride on Schedule SE with the Schedule C when the return puts them there: Schedule SE line 2 decides when read, otherwise the SE tax as printed. With no Schedule C, the K-1 is the business and its 1065 is still asked for.
+
+**States** (Case 36).
+
+- A state form's pages travel together in the page selection. A state page next to a kept one, under the same form title, is kept too. A $0 nonresident Georgia Form 500 lost pages 1–4, whose amounts are all zeros, and kept only its refund page.
+- Another state's total, when unread, is settled from its payments, refund and amount owed, or taken as $0 on a return that taxes no income of that state.
+- When a read names the state return but brings back nothing its total can be told from (`stateLinesMissing`), the builder reads the state pages once more on their own (`focus: "state"` on the extract route, `statePageNumbers`, a state-only prompt sharing `STATE_LINES` with the 1040 reader). Its state lines and other states replace the first read's when they settle the total.
+- New York City residency is taken from the city's line being printed, $0 included (`localResident = has(stateLocalTax)`). A city tax wiped out by the household credit left a city resident's before without any city tax: $4,407 on Case 36. Saved NYC recaps with a $0 city line on the after are understated until re-saved.

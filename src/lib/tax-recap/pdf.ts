@@ -4,13 +4,15 @@ import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { videoIsCurrent } from "@/lib/decyphered/fromRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
 import { computeRecap, taxRows, type EntityKind, type RecapSide } from "./compute";
-import type { RecapDoc } from "./schema";
+import { estimateNotes, estimateTimeline, estimateTotals, formatDue, hasEstimates } from "./estimates";
+import type { RecapDoc, RecapEstimates } from "./schema";
 import { US_STATES } from "./tables";
 
 /**
  * The recap as a PDF: the same beats as the page in the same order (cover,
- * before, savings, after, by strategy, at filing, strategy, next steps),
- * set in the site's palette on five Letter pages, with every link live. Built from the recap's numbers
+ * before, savings, after, by strategy, at filing, strategy, next year's
+ * estimated payments when the recap has them, next steps), set in the
+ * site's palette on five or six Letter pages, with every link live. Built from the recap's numbers
  * with pdf-lib, so it's the same on every machine and needs no browser —
  * the email attachment next to the link.
  *
@@ -321,7 +323,6 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
   const stateLabel = recap.stateCode ? (US_STATES[recap.stateCode] ?? recap.stateCode) : "State";
   const rows = taxRows(c, (code) => (code ? (US_STATES[code] ?? code) : "State"));
   const header = { left: "DeCypher Financials", right: `TAX RECAP  ·  ${recap.taxYear}` };
-  const TOTAL = 5;
   // An S corporation's SE-tax saving is in the before, on its own row, as
   // the page shows it: the savings are the before less the after.
   const scorpSavings = c.before.scorpSeTax;
@@ -370,7 +371,6 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     };
     if (c.priorYearIncome !== null) pill(`${recap.taxYear - 1} income`, money(c.priorYearIncome));
     pill(`${recap.taxYear} income`, money(c.currentYearIncome));
-    footer(ctx, page, recapUrl, 1, TOTAL);
   }
 
   /* ── 2 · before, then the savings ── */
@@ -412,7 +412,6 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         { x: M + 18, y: y - sh + 18, size: 9.5, font: ctx.reg, color: C.mist },
       );
     }
-    footer(ctx, page, recapUrl, 2, TOTAL);
   }
 
   /* ── 3 · after, then where the savings came from ── */
@@ -471,7 +470,6 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         );
       }
     }
-    footer(ctx, page, recapUrl, 3, TOTAL);
   }
 
   /* ── 4 · at filing (owed − paid = due) + strategy ── */
@@ -527,8 +525,10 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
         y -= 8;
       });
     }
-    footer(ctx, page, recapUrl, 4, TOTAL);
   }
+
+  /* ── next year's estimated payments, on recaps saved with them ── */
+  if (hasEstimates(recap.estimates)) estimatesPage(ctx, header, recap.estimates, recap.taxYear);
 
   /* ── 5 · next steps ── */
   {
@@ -604,11 +604,112 @@ export async function buildRecapPdf(recap: RecapDoc, recapUrl: string): Promise<
     page.drawText("Your recap online", { x: M + 18, y: y - 24, size: 12, font: ctx.bold, color: C.fog });
     page.drawText(recapUrl, { x: M + 18, y: y - 44, size: 10, font: ctx.reg, color: C.teal });
     link(ctx, page, M, y - 70, W, 70, recapUrl);
-    footer(ctx, page, recapUrl, 5, TOTAL);
   }
 
+  // Numbered once every page exists: the estimated payments page, when
+  // there is one, can run to a second.
+  const all = doc.getPages();
+  all.forEach((page, i) => footer(ctx, page, recapUrl, i + 1, all.length));
   flushLinks(ctx);
   return doc.save();
+}
+
+/**
+ * Next year's estimated payments, as the page shows them: each payee's
+ * total and the year's, the payments by due date (everything due on a date
+ * together, with its total), and the notes. Runs onto a second page when a
+ * client pays several states and businesses.
+ */
+function estimatesPage(ctx: Ctx, header: { left: string; right: string }, e: RecapEstimates, taxYear: number) {
+  let page = newPage(ctx, header);
+  let y = PAGE.h - 96;
+  const BOTTOM = 72;
+  const room = (h: number) => {
+    if (y - h >= BOTTOM) return;
+    page = newPage(ctx, header);
+    y = PAGE.h - 96;
+    eyebrow(ctx, page, `Estimated payments for ${e.year}, continued`, M, y);
+    y -= 26;
+  };
+  eyebrow(ctx, page, "Next year", M, y);
+  y -= 26;
+  page.drawText(`Estimated payments for ${e.year}`, { x: M, y, size: 22, font: ctx.bold, color: C.fog });
+  y -= 22;
+  y = paragraph(
+    page,
+    ctx.reg,
+    `${e.year}'s tax, paid as the year goes, the way your ${taxYear} returns set it up. Put these dates in your calendar: each payment is due on its date, and each one goes to its own place.`,
+    M,
+    y,
+    9.5,
+    W,
+    C.muted,
+  );
+  y -= 8;
+
+  // Each payee's year, and the year's total when there's more than one.
+  const totals = estimateTotals(e).filter((t) => t.total > 0);
+  const tiles = [
+    ...totals.map((t) => ({ label: t.label, value: money(t.total), sub: `${t.count} ${t.count === 1 ? "payment" : "payments"}`, color: C.fog })),
+    ...(totals.length > 1
+      ? [{ label: `Total for ${e.year}`, value: money(totals.reduce((s, t) => s + t.total, 0)), sub: "", color: C.teal }]
+      : []),
+  ];
+  const perRow = Math.min(4, Math.max(1, tiles.length));
+  const gap = 10;
+  const tw = (W - gap * (perRow - 1)) / perRow;
+  const th = 62;
+  tiles.forEach((t, i) => {
+    const col = i % perRow;
+    if (col === 0 && i > 0) y -= th + gap;
+    const x = M + col * (tw + gap);
+    page.drawRectangle({ x, y: y - th, width: tw, height: th, color: C.panel2, borderColor: C.edge, borderWidth: 0.6 });
+    // The label shrinks to fit the tile rather than running into the next one.
+    const label = t.label.toUpperCase();
+    let size = 7.5;
+    while (size > 5 && ctx.bold.widthOfTextAtSize(label, size) > tw - 24) size -= 0.25;
+    page.drawText(label, { x: x + 12, y: y - 20, size, font: ctx.bold, color: t.color === C.teal ? C.teal : C.muted });
+    page.drawText(t.value, { x: x + 12, y: y - 41, size: 17, font: ctx.bold, color: t.color });
+    if (t.sub) page.drawText(t.sub, { x: x + 12, y: y - 54, size: 7.5, font: ctx.reg, color: C.dusk });
+  });
+  if (tiles.length) y -= th + 14;
+
+  // The payments by due date.
+  const dates = estimateTimeline(e);
+  for (const d of dates) {
+    const multi = d.items.length > 1;
+    // Tall enough for the date and its year, however few payments are due on it.
+    const h = Math.max(42, 12 + d.items.length * 15 + (multi ? 17 : 0));
+    room(h + 4);
+    page.drawRectangle({ x: M, y: y - h, width: W, height: h, color: C.panel, borderColor: C.edge, borderWidth: 0.6 });
+    page.drawText(formatDue(d.due, true), { x: M + 14, y: y - 22, size: 13, font: ctx.bold, color: C.fog });
+    page.drawText(d.due.slice(0, 4), { x: M + 14, y: y - 35, size: 8, font: ctx.reg, color: C.dusk });
+    let ry = y - 21;
+    for (const it of d.items) {
+      page.drawText(it.label, { x: M + 110, y: ry, size: 10.5, font: ctx.reg, color: C.mist });
+      if (it.electronic) {
+        const lx = M + 110 + ctx.reg.widthOfTextAtSize(it.label, 10.5) + 8;
+        page.drawText("ONLINE", { x: lx, y: ry + 0.5, size: 7, font: ctx.bold, color: C.magenta });
+      }
+      rightText(page, ctx.bold, money(it.amount), M + W - 14, ry, 10.5, C.fog);
+      ry -= 15;
+    }
+    if (multi) {
+      page.drawLine({ start: { x: M + 110, y: ry + 10 }, end: { x: M + W - 14, y: ry + 10 }, thickness: 0.6, color: C.edge });
+      page.drawText(`DUE ${formatDue(d.due, true).toUpperCase()}`, { x: M + 110, y: ry - 2, size: 7.5, font: ctx.bold, color: C.muted });
+      rightText(page, ctx.bold, money(d.total), M + W - 14, ry - 3, 11, C.teal);
+    }
+    y -= h + 4;
+  }
+
+  // What makes the schedule read plainly.
+  y -= 12;
+  for (const n of estimateNotes(e, taxYear)) {
+    const lines = wrap(ctx.reg, n, 8, W - 14);
+    room(lines.length * 11 + 3);
+    page.drawCircle({ x: M + 3, y: y + 3, size: 1.6, color: C.magenta });
+    y = paragraph(page, ctx.reg, n, M + 12, y, 8, W - 14, C.dusk, 1.35) - 3;
+  }
 }
 
 /** The download name: "Client A - 2025 Tax Recap.pdf". */

@@ -163,6 +163,10 @@ const STRONG_ENTITY: RegExp[] = [
   /partners.? distributive share items/i,
   /guaranteed payments/i,
   /e-?file (return )?authorization for/i,
+  // Form 8825: a rental-only entity's rents and expenses (lines 20a, 20b),
+  // which its blank page 1 doesn't carry (engine v18)
+  /rental real estate income and expenses of a/i,
+  /total rental real estate (income|expenses)/i,
 ];
 
 /**
@@ -341,6 +345,50 @@ export function isGarbledText(text: string): boolean {
   if (body.length < 200) return false;
   const garbage = body.match(GARBLED_CHARS)?.length ?? 0;
   return garbage / body.length >= GARBLED_SHARE;
+}
+
+/** How far either side of a kept state page its form's other pages are looked for: a state return runs to five or six pages. */
+const STATE_FORM_SPAN = 6;
+/** How many characters open a page — its form title and running head. */
+const STATE_HEAD_CHARS = 120;
+
+/**
+ * The words a page's head is made of: its first characters, letters only,
+ * three letters or more. Form numbers, page numbers and the barcode digits
+ * every state page carries differ page to page and are left out.
+ */
+function headWords(text: string): Set<string> {
+  const head = text.slice(0, STATE_HEAD_CHARS).toLowerCase().replace(/[^a-z]+/g, " ");
+  return new Set(head.split(" ").filter((w) => w.length >= 3));
+}
+
+/** Two heads under the same form title: most of the shorter one's words are in the other. */
+function sameForm(a: Set<string>, b: Set<string>): boolean {
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  if (small.size < 3) return false;
+  let shared = 0;
+  for (const w of small) if (big.has(w)) shared++;
+  return shared / small.size >= 0.5;
+}
+
+/**
+ * The print's state pages, 1-indexed: every page with text on it that isn't
+ * a federal form or a voucher or letter — what the builder sends for the
+ * second, state-only read (engine v18). Garbled pages count: New York's
+ * IT-201 is one, and its amounts are what the read is after.
+ */
+export function statePageNumbers(pageTexts: string[]): number[] {
+  const out: number[] = [];
+  pageTexts.forEach((raw, i) => {
+    const text = normalize(raw ?? "");
+    if (text.trim().length < 40) return;
+    if (!isGarbledText(text)) {
+      if (isFederalPage(text) || /internal revenue service/i.test(text.slice(0, HEAD_CHARS))) return;
+      if (EXCLUDE.some((re) => re.test(text.slice(0, EXCLUDE_HEAD_CHARS)))) return;
+    }
+    out.push(i + 1);
+  });
+  return out;
 }
 
 export type PageSelection = {
@@ -531,6 +579,46 @@ export function selectPages(
       kept.push(i + 1);
       seen.add(text);
     }
+  }
+
+  // A state form's pages travel together. The rules above judge each state
+  // page on its own, and a page whose amounts are all zeros (a nonresident
+  // return that owes nothing) carries no filled-in amount `valueCounts` can
+  // see and few of the closing-total words: Georgia's Form 500 kept its
+  // page 5 (the refund line) and lost pages 1 to 4 with the tax on them, so
+  // the reader couldn't give its total. A state page next to a kept one,
+  // under the same form title, goes too (engine v18). Federal pages are a
+  // fixed set judged on their own lines and are left as they were.
+  if (kind === "individual") {
+    const keptSet = new Set(kept);
+    const stateHead = (i: number): Set<string> | null => {
+      const raw = pageTexts[i] ?? "";
+      const text = normalize(raw);
+      if (text.trim().length < 40 || isFederalPage(text) || isGarbledText(text)) return null;
+      if (exclude.some((re) => re.test(text.slice(0, EXCLUDE_HEAD_CHARS)))) return null;
+      return headWords(text);
+    };
+    for (const p of [...kept]) {
+      const own = stateHead(p - 1);
+      if (!own) continue;
+      for (const step of [-1, 1]) {
+        let prev = own;
+        for (let i = p - 1 + step; i >= 0 && i < n && Math.abs(i - (p - 1)) <= STATE_FORM_SPAN; i += step) {
+          if (keptSet.has(i + 1)) {
+            const h = stateHead(i);
+            if (!h) break;
+            prev = h;
+            continue;
+          }
+          const h = stateHead(i);
+          if (!h || !sameForm(prev, h) || seen.has(normalize(pageTexts[i] ?? ""))) break;
+          keptSet.add(i + 1);
+          seen.add(normalize(pageTexts[i] ?? ""));
+          prev = h;
+        }
+      }
+    }
+    kept.splice(0, kept.length, ...[...keptSet].sort((a, b) => a - b));
   }
 
   // The one line the recap cannot be built without: the 1040's total tax,

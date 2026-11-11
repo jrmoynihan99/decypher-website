@@ -5,6 +5,7 @@ import {
   RecapInputError,
   asMoney,
   sanitizeAnalysis,
+  sanitizeEstimates,
   sanitizeDerivedBefore,
   sanitizeEntityExtract,
   sanitizeEntityExtracts,
@@ -90,6 +91,7 @@ export async function PATCH(
     }
     if ("derivedBefore" in r) edits.derivedBefore = sanitizeDerivedBefore(r.derivedBefore);
     if ("analysis" in r) edits.analysis = sanitizeAnalysis(r.analysis);
+    if ("estimates" in r) edits.estimates = sanitizeEstimates(r.estimates);
     if ("revoked" in r) edits.revoked = Boolean(r.revoked);
   } catch (e) {
     if (e instanceof RecapInputError) {

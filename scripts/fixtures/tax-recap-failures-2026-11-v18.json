@@ -1,0 +1,407 @@
+[
+ {
+  "name": "Case 33 · 2025 (joint, CA, both spouses 50% of one S corporation)",
+  "proves": "two K-1s on one joint return, each with its own section 179 deduction ($15,650 each): Schedule E nets both",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Married filing jointly",
+   "stateCode": "CA",
+   "stateForm": "540",
+   "entityForm": "1120-S",
+   "entityStateCode": "CA",
+   "entityName": "Corporation A",
+   "unverified": []
+  },
+  "after": {
+   "w2Income": 100000,
+   "scorpIncome": 218461,
+   "totalIncome": 342700,
+   "agi": 342700,
+   "dependentCount": 1,
+   "qualifyingChildren": 1,
+   "otherDependents": 0,
+   "qbiDeduction": 43692,
+   "taxableIncome": 267508,
+   "incomeTax": 49896,
+   "otherTaxes": 921,
+   "federalTotalTax": 48617,
+   "federalPayments": 22389,
+   "federalWithholding": 5255,
+   "federalAmountOwed": 26909,
+   "federalPenalty": 681,
+   "childTaxCredit": 2200,
+   "niit": 921,
+   "stateTotalTax": 21856,
+   "statePayments": 3171,
+   "stateWithholding": 3171,
+   "stateAmountOwed": 23209,
+   "statePenalty": 745,
+   "stateTotalDue": 23954,
+   "stateAdjustments": -11290,
+   "stateDeduction": 11412,
+   "stateTaxOnIncome": 22637,
+   "stateSharedResponsibility": 4524,
+   "stateExemptionCredits": 781
+  },
+  "entity": {
+   "grossReceipts": 513139,
+   "otherIncome": 33254,
+   "totalIncome": 546393,
+   "officerComp": 99999,
+   "repairs": 107,
+   "taxesLicenses": 8224,
+   "depreciation": 19023,
+   "advertising": 25,
+   "pension": 25000,
+   "otherDeductions": 144254,
+   "totalDeductions": 296632,
+   "ordinaryIncome": 249761,
+   "k1Ordinary": 124880,
+   "k1Section179": 15650,
+   "ownershipPct": 50,
+   "k1Ordinary2": 124881,
+   "ownershipPct2": 50,
+   "distributions": 526918,
+   "stateNetIncome": 231410,
+   "stateTax": 3471,
+   "stateTotalTax": 3471,
+   "statePayments": 4345,
+   "stateAmountDue": 0,
+   "stateRefund": 874
+  },
+  "more": {
+   "entities": [],
+   "states": []
+  },
+  "expect": null,
+  "federal": 128712,
+  "state": 43522,
+  "verified": false,
+  "notes": [
+   "each less its own section 179 deduction"
+  ]
+ },
+ {
+  "name": "Case 34 · 2025 (single, CA, passive S corporation loss)",
+  "proves": "an S corporation K-1 loss Form 8582 suspends in full: Schedule E printed $0, the K-1 −$58,283; the after as filed, the before's K-1 the receipts",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Single",
+   "stateCode": "CA",
+   "stateForm": "540",
+   "entityForm": "1120-S",
+   "entityStateCode": "CA",
+   "entityName": "Corporation B",
+   "unverified": []
+  },
+  "after": {
+   "w2Income": 15858,
+   "scorpIncome": 0,
+   "rentalIncome": 0,
+   "passiveOtherIncome": 0,
+   "totalIncome": 15858,
+   "agi": 15858,
+   "qbiDeduction": 0,
+   "itemizedDeductions": 0,
+   "taxableIncome": 108,
+   "incomeTax": 11,
+   "federalTotalTax": 0,
+   "federalPayments": 3776,
+   "federalWithholding": 3529,
+   "federalRefundableCredits": 247,
+   "federalRefund": 3776,
+   "nonrefundableCredits": 11,
+   "stateTotalTax": 0,
+   "statePayments": 1449,
+   "stateWithholding": 1292,
+   "stateRefund": 1449,
+   "stateAdjustments": 0,
+   "stateDeduction": 5706,
+   "stateTaxOnIncome": 102,
+   "stateExemptionCredits": 153
+  },
+  "entity": {
+   "grossReceipts": 7637,
+   "totalIncome": 7637,
+   "depreciation": 1857,
+   "advertising": 765,
+   "otherDeductions": 63298,
+   "totalDeductions": 65920,
+   "ordinaryIncome": -58283,
+   "k1Ordinary": -58283,
+   "ownershipPct": 100,
+   "stateNetIncome": -60479,
+   "stateAddBack": 0,
+   "stateTax": 800,
+   "stateTotalTax": 800,
+   "statePayments": 800,
+   "stateAmountDue": 0
+  },
+  "more": {
+   "entities": [],
+   "states": []
+  },
+  "expect": null,
+  "federal": 612,
+  "state": 92,
+  "verified": false,
+  "notes": [
+   "isn't all on Schedule E"
+  ]
+ },
+ {
+  "name": "Case 35 · 2025 (single, NY, Schedule C with an unattached partnership K-1)",
+  "proves": "a −$770 partnership K-1 with no 1065, beside the Schedule C: carried as filed, on Schedule SE as line 2 has it",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Single",
+   "stateCode": "NY",
+   "stateForm": "IT-201",
+   "entityForm": null,
+   "entityStateCode": null,
+   "entityName": null,
+   "unverified": []
+  },
+  "after": {
+   "businessNetIncome": 20597,
+   "partnershipIncome": -770,
+   "totalIncome": 19827,
+   "agi": 14208,
+   "qbiDeduction": 0,
+   "seTaxDeduction": 1401,
+   "sepDeduction": 3685,
+   "taxableIncome": 0,
+   "incomeTax": 0,
+   "seTax": 2801,
+   "otherTaxes": 2801,
+   "federalTotalTax": 2801,
+   "federalPayments": 52,
+   "federalRefundableCredits": 52,
+   "federalAmountOwed": 2749,
+   "grossReceipts": 33539,
+   "totalExpenses": 8968,
+   "homeOffice": 3974,
+   "schCAdvertising": 287,
+   "schCContractLabor": 500,
+   "schCLegalProfessional": 5253,
+   "schCOfficeExpense": 1309,
+   "schCTravel": 1500,
+   "schCMeals": 119,
+   "stateTotalTax": 396,
+   "statePayments": 87,
+   "stateAmountOwed": 309,
+   "stateDeduction": 8000,
+   "sehiDeduction": 533,
+   "sehiPaid": 533,
+   "stateTaxOnIncome": 249,
+   "stateLocalTax": 192
+  },
+  "entity": null,
+  "more": {
+   "entities": [],
+   "states": [],
+   "schedulesC": [
+    {
+     "se": 1,
+     "receipts": 33539,
+     "returns": 0,
+     "cogs": 0,
+     "otherIncome": 0,
+     "expenses": 8968,
+     "tentative": 24571,
+     "homeOffice": 3974,
+     "net": 20597
+    }
+   ],
+   "schedulesSE": [
+    {
+     "farm": 0,
+     "schC": 19827,
+     "ssWages": 0,
+     "tax": 2801
+    }
+   ]
+  },
+  "expect": null,
+  "federal": 5808,
+  "state": 1790,
+  "verified": false,
+  "notes": [
+   "carried as filed on both sides",
+   "on Schedule SE on both sides"
+  ]
+ },
+ {
+  "name": "Case 36 · 2025 (single, NY resident with a $0 Georgia nonresident return, S corporation)",
+  "proves": "Georgia's total unread on a return with $0 of Georgia income is $0; New York City's tax wiped out by its credit still makes the filer a city resident on the before",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Single",
+   "stateCode": "NY",
+   "stateForm": "IT-201",
+   "entityForm": "1120-S",
+   "entityStateCode": "NY",
+   "entityName": "Corporation C",
+   "unverified": []
+  },
+  "after": {
+   "w2Income": 7200,
+   "w2Taxpayer": 7200,
+   "scorpIncome": -3507,
+   "rentalIncome": 0,
+   "rentalLosses": 19021,
+   "rentalRents": 78045,
+   "rentalExpenses": 97066,
+   "passivePriorUnallowed": 0,
+   "totalIncome": 8467,
+   "qualifiedDividends": 537,
+   "capitalGain": 1896,
+   "capitalGainLongTerm": 1897,
+   "agi": 8467,
+   "qbiDeduction": 0,
+   "taxableIncome": 0,
+   "incomeTax": 0,
+   "otherTaxes": 0,
+   "federalTotalTax": 0,
+   "federalPayments": 813,
+   "federalWithholding": 260,
+   "federalRefundableCredits": 553,
+   "federalRefund": 813,
+   "nonrefundableCredits": 0,
+   "stateTotalTax": 0,
+   "statePayments": 695,
+   "stateWithholding": 346,
+   "stateRefund": 695,
+   "stateDeduction": 8000,
+   "stateTaxOnIncome": 19,
+   "stateLocalTax": 0
+  },
+  "entity": {
+   "grossReceipts": 42095,
+   "totalIncome": 42095,
+   "officerComp": 7200,
+   "taxesLicenses": 841,
+   "otherDeductions": 37561,
+   "totalDeductions": 45602,
+   "ordinaryIncome": -3507,
+   "k1Ordinary": -3507,
+   "ownershipPct": 100,
+   "distributions": 34303,
+   "stateNetIncome": -3507,
+   "stateTax": 25,
+   "stateTotalTax": 25,
+   "statePayments": 25
+  },
+  "more": {
+   "entities": [],
+   "states": [
+    {
+     "stateCode": "GA",
+     "stateForm": "500",
+     "numbers": {
+      "stateSourceIncome": 0,
+      "stateDeduction": 12000,
+      "stateRefund": 0
+     }
+    }
+   ]
+  },
+  "expect": null,
+  "federal": 14062,
+  "state": 11017,
+  "verified": false,
+  "notes": [
+   "taxes no Georgia income",
+   "IT-201: .14 on the after, .4,407 on the before"
+  ]
+ },
+ {
+  "name": "Case 37 · 2025 (joint, no state, an S corporation, a rental-only 1065 and a 1065 half owned by the S corporation)",
+  "proves": "one 1065's K-1 inside the S corporation's other income (tiered); a basis-limited partnership loss (−$159,080 → −$8,094); a rental-only 1065 (Form 8825) whose passive loss Form 8582 suspends",
+  "meta": {
+   "taxYear": 2025,
+   "filingStatus": "Married filing jointly",
+   "stateCode": null,
+   "stateForm": null,
+   "entityForm": "1120-S",
+   "entityStateCode": "NH",
+   "entityName": "Corporation D",
+   "unverified": []
+  },
+  "after": {
+   "w2Income": 37500,
+   "scorpIncome": -156258,
+   "partnershipIncome": -8094,
+   "passivePriorUnallowed": 33956,
+   "totalIncome": -126852,
+   "agi": -126852,
+   "qbiDeduction": 0,
+   "taxableIncome": 0,
+   "incomeTax": 0,
+   "federalTotalTax": 0,
+   "federalPayments": 14924,
+   "federalWithholding": 5105,
+   "federalRefund": 12424
+  },
+  "entity": {
+   "grossReceipts": 173009,
+   "otherIncome": -159080,
+   "totalIncome": 13929,
+   "officerComp": 37500,
+   "taxesLicenses": 5014,
+   "depreciation": 0,
+   "otherDeductions": 127673,
+   "totalDeductions": 170187,
+   "ordinaryIncome": -156258,
+   "k1Ordinary": -156258,
+   "ownershipPct": 100,
+   "distributions": 54042
+  },
+  "more": {
+   "entities": [
+    {
+     "numbers": {
+      "ownershipPct": 51,
+      "ownershipPct2": 49,
+      "rentalRents": 16200,
+      "rentalExpenses": 44795,
+      "k1Rental": -14583,
+      "k1Rental2": -14012
+     },
+     "form": "1065",
+     "stateCode": null,
+     "name": "Partnership E"
+    },
+    {
+     "numbers": {
+      "grossReceipts": 228570,
+      "cogs": 458974,
+      "totalIncome": -230404,
+      "taxesLicenses": 1016,
+      "interest": 1113,
+      "otherDeductions": 85627,
+      "totalDeductions": 87756,
+      "ordinaryIncome": -318160,
+      "k1Ordinary": -159080,
+      "ownershipPct": 50,
+      "k1Ordinary2": -159080,
+      "ownershipPct2": 50
+     },
+     "form": "1065",
+     "stateCode": null,
+     "name": "Partnership F"
+    }
+   ],
+   "states": []
+  },
+  "expect": null,
+  "federal": 71347,
+  "state": null,
+  "verified": true,
+  "notes": [
+   "is Corporation D .1120-S.'s",
+   "rental real estate only",
+   "held back this year"
+  ]
+ }
+]

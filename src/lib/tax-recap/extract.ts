@@ -8,6 +8,7 @@ import {
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
   SCHEDULE_1_ADJUSTMENT_KEYS,
+  STATE_FIELD_KEYS,
   sanitizeEntityExtract,
   sanitizeExtract,
   type EntityExtract,
@@ -251,6 +252,15 @@ const ADJUSTMENTS_OUTPUT_SCHEMA = {
   },
 };
 
+/** The state-only read: the 1040's schema with `lines` limited to the state return's own. */
+const STATE_OUTPUT_SCHEMA = {
+  ...OUTPUT_SCHEMA,
+  properties: {
+    ...OUTPUT_SCHEMA.properties,
+    lines: { ...OUTPUT_SCHEMA.properties.lines, items: lineSchema(STATE_FIELD_KEYS) },
+  },
+};
+
 /** The entity schema, with `lines` limited to the given keys (the city reader asks for its six lines only). */
 const entityOutputSchema = (keys: readonly string[]) => ({
   type: "object",
@@ -365,6 +375,46 @@ const SCHEDULE_1_LINES = `- Schedule 1 Part II (Adjustments to Income): report e
 - archerMsaDeduction: Schedule 1 line 23 (Archer MSA deduction). Omit when blank.
 - otherAdjustments: Schedule 1 line 25 (total other adjustments: lines 24a through 24z added up). Omit when blank.`;
 
+/**
+ * The state return's lines, every state: shared by the 1040 reader and the
+ * second, state-only read the builder asks for when the first read names a
+ * state but brings back none of its lines (a 2025 IT-201 read with every
+ * line left out, its pages in front of the reader).
+ */
+const STATE_LINES = `State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field.
+More than one state return (a move during the year, income earned in another state): report the state the taxpayer lived in on December 31 as stateCode and stateForm (its resident or part-year return); if that state has no income tax return in the print, the state whose return shows the most total tax. Read every state line in "lines" from that state's return ONLY — never add another state's figures into it. Report every other state return as its own entry in "otherStates": its two-letter code, its form (e.g. "540NR", "IT-203", "1040ME", "PA-40"), and its own lines under the same keys, read from that state's return only, the same way (a part-year or nonresident return's stateSourceIncome and stateSourceBusinessIncome included). One entry per state; "otherStates" is empty when there is only one state return. A nonresident return that owes nothing (no income from that state, a $0 tax) is still a state return: it goes in "otherStates" with its lines as printed.
+- stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
+- statePayments: total withholding, estimated payments and refundable credits. California 540: line 93 (or line 78 if 93 is absent). California 540NR: line 88.
+- stateWithholding: state income tax withheld. California 540: line 71. California 540NR: line 81. Omit when blank.
+- stateRefund: refund amount; omit when there is a balance due. California 540: line 99. California 540NR: line 125.
+- stateAmountOwed: balance due before penalties and interest. California 540: line 100. California 540NR: line 121.
+- statePenalty: underpayment penalty plus interest and late penalties. California 540: line 112 plus line 113. California 540NR: line 122 plus line 123. Omit when none.
+- stateTotalDue: total amount due including penalties. California 540: line 114. California 540NR: line 124.
+- stateSourceIncome: ONLY on a nonresident or part-year state return. California Form 540NR: the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Maryland Form 505: Form 505NR line 8 (Maryland income, after the non-Maryland income comes out). New York Form IT-203: line 17, the "New York State amount" column (NOT line 31). Virginia Form 760PY: the Schedule of Income, Part 1, Section A line 4 ("Gross income"), column A2 "While VA Resident" — on filing status 4, plus Section B line 4, column B2. Arizona Form 140PY: line 23, the Arizona column. A part-year or nonresident schedule filed with the state's resident form — South Carolina SC1040 with Schedule NR, North Carolina D-400 with Schedule PN, Colorado 104 with Form 104PN, Georgia Form 500 Schedule 3, and the like: the schedule's state column (the income taxed by that state) on its total income line, before adjustments. Omit on a full-year resident return.
+- stateSourceBusinessIncome: ONLY on a nonresident or part-year state return: the business income inside stateSourceIncome — the same state column's business income line (Schedule C) plus its partnership and S corporation income. California Form 540NR: Schedule CA (540NR) Part II column E, line 3, plus the partnership and S corporation part of line 17. New York Form IT-203: line 6 in the New York State amount column, plus the partnership and S corporation part of line 11. On a part-year schedule (South Carolina Schedule NR and the like), the same lines in the schedule's state column. Rents, wages, interest and gains are not business income. Omit when the column has no business income, and on a resident return.
+- stateOtherStateCredit: on a RESIDENT return only, the credit it claims for income tax paid to another state, as printed — California Schedule S (Form 540 credit code 187), New York IT-201 line 41 (resident credit, Form IT-112-R), New Jersey NJ-1040 line 44, Massachusetts Form 1 line 31, Virginia Form 760 line 24 (Schedule OSC), Pennsylvania PA-40 line 22 (resident credit). Report stateTotalTax and statePayments as printed whichever section the credit sits in. Omit when blank and on a part-year or nonresident return.
+- New York Form IT-203 (nonresident / part-year; the same lines on an amended IT-203-X): stateTaxOnIncome is line 46 (the allocated New York State tax: line 44 times the income percentage on line 45); stateTotalTax is line 58; stateLocalTax is line 51 (New York City part-year resident tax) when printed; stateDeduction is line 33.
+- Virginia Form 760PY (part-year): stateTaxOnIncome and stateTotalTax are both line 18; stateDeduction is line 12 (or line 11 when itemized); stateExemptions is line 13. On filing status 4 (spouses filing separately on one combined return, column A for you and column B for the spouse), add the two columns together on every line.
+- Arizona Form 140PY (part-year / nonresident): stateTaxOnIncome is line 56; stateTotalTax is line 62 (balance of tax); stateDeduction is line 53.
+- Nebraska Form 1040N: stateTotalTax is line 35 (Nebraska tax after nonrefundable credits) — NOT line 17 (before the credits) and never line 18, which is the personal exemption credit itself; report 0 when line 35 is printed as 0.
+- Maryland Form 505 (nonresident) with Form 505NR: stateTaxOnIncome is Form 505 line 32a (the Maryland tax from 505NR line 16, before the special nonresident tax); stateTotalTax is Form 505 line 37 (Maryland tax after credits, which includes the special nonresident tax on line 32b); statePayments is line 47; stateWithholding is line 43; stateAmountOwed is line 48; statePenalty is line 52; stateTotalDue is line 53; stateExemptions is Form 505 line 28 (the total exemption amount before any proration); stateDeduction is line 26a or 26d. Maryland Form 502 (resident): stateTotalTax is line 34 plus the local tax on line 28 is NOT modeled — report line 34 as printed; stateTaxOnIncome is line 22; stateExemptions is line 19; stateDeduction is line 17.
+- stateAdjustments: the state's net adjustment to federal AGI before its own deductions, additions less subtractions. California Form 540: line 16 minus line 14 (Schedule CA (540) Part I line 27, column C less column B). Form 540NR: Schedule CA (540NR) Part II line 27, column C less column B. Negative when the subtractions are larger. Omit when both columns are blank, and for a state that starts from its own gross income (New Jersey).
+- stateDeduction: the deduction the state return took — its standard deduction or its own itemized deductions, whichever line 18 of California Form 540 shows (= Schedule CA (540) Part II line 30). Omit for states without such a line.
+- stateBusinessIncome: the state's own business profit line when the state return has one (New Jersey NJ-1040 line 18, "Net profits from business"; for an S corporation shareholder, NJ-1040 line 22, "Net pro rata share of S corporation income"). Omit for California.
+- stateExemptions: the state's total exemption amount when it is a deduction from income (NJ-1040 line 13; Massachusetts Form 1 line 2g, repeated on line 18). Omit for California.
+- stateWageDeduction: Massachusetts Form 1 lines 11a + 11b (amount paid to Social Security, Medicare, railroad, U.S. or Massachusetts retirement, up to $2,000 per person), added up. Omit for other states.
+- Massachusetts Form 1: stateTaxOnIncome is line 22 (tax on 5.0% income); stateTotalTax is line 32 (income tax after credits — NOT line 37 if it differs, and never line 51); statePayments is line 51 (withholding plus the refundable credits on line 48, as the form totals them); stateWithholding is line 38; stateAmountOwed is line 55 as printed; statePenalty is the M-2210 amount, interest and penalty printed beside line 55; stateTotalDue is line 55 plus those; stateBusinessIncome is line 6a plus line 7 (business income plus the S corporation / partnership income). Report stateAdjustments only when Schedule Y or line 15 carries something beyond lines 11a/11b.
+- stateExemptionCredits: the state's exemption credits after any phase-out, when they are a credit off the tax (California 540 line 32). Omit for other states.
+- stateMedical: the state's medical expense deduction (NJ-1040 line 31). Omit when blank.
+- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31 — the tax line itself, NOT line 33, which is line 31 less the exemption credits on line 32; 540NR line 37; New York IT-201 line 39). Omit when blank.
+- stateLocalTax: a city income tax the state return carries for a city resident — New York IT-201 line 54 (NYC resident tax after NYC credits, the city taxes block on page 3). Omit when the filer isn't a city resident (lines 47–54 blank) and for every other state.
+- New York IT-201: stateTotalTax is line 61 (New York State, New York City, Yonkers and sales taxes together — line 46 alone is NOT it); stateTaxOnIncome is line 39; stateLocalTax is line 54; stateDeduction is line 34; stateAdjustments is (line 24 − line 19) − line 32, omitted when there are no additions or subtractions; statePayments is line 76; stateWithholding is lines 72, 73 and 74 added up; stateRefund is line 78; stateAmountOwed is line 80; statePenalty is lines 81 + 82; stateTotalDue is line 80. The IT-201's labels print as scrambled letters on these PDFs — go by the line numbers and the page layout.
+- statePteCreditAvailable: FTB 3804-CR Part II line 3, the pass-through entity elective tax credit available. Omit when there is no such form.
+- statePteCredit: FTB 3804-CR Part II line 4, the credit claimed on this return (it also appears on Form 540 line 43 or 44 with code 242). Omit when there is no such form.
+- statePteCreditRefundable: a refundable pass-through entity tax credit claimed in the payments section of the state return, AFTER the total tax line — New Jersey NJ-1040 line 63, "Pass-Through Business Alternative Income Tax Credit". Report stateTotalTax (NJ-1040 line 54) and statePayments (line 66) as printed; this credit is taken out afterwards. Omit when there is none.
+- stateSharedResponsibility: a state shared responsibility (health coverage) payment (NJ-1040 line 53c). Omit when blank.
+- uninsuredMonths: on Schedule NJ-HCC, the number of months of the year with NO box checked for the taxpayer (0 if every month is checked or Part I says Yes). Omit when there is no such schedule.`;
+
 const SYSTEM = `You read US individual income tax returns printed from Intuit ProSeries and report specific line values as JSON.
 
 ${CONVENTIONS}
@@ -383,8 +433,8 @@ Federal lines (2025 Form 1040 layout; on an older layout use the line with the s
 - capitalGain: Form 1040 line 7 (capital gain or loss; a loss as a negative number). Omit when blank.
 - capitalGainLongTerm: Schedule D line 15 (net long-term capital gain or loss) when the print has a Schedule D — and when the print has a Schedule D whose line 15 is blank (every gain short-term), report 0: an exception to omitting blanks, because without it the whole of line 7 is taken as long-term. Omit only when there is no Schedule D.
 - businessNetIncome: Schedule 1 line 3, which equals Schedule C line 31 (net profit or loss). If Schedule 1 is absent, use Schedule C line 31. Omit when there is no Schedule C. A Schedule C whose only purpose is to pass income through — its receipts are described as "income issued to SSN picked up on the partnership (or S corporation) return" and the same amount is deducted as other expenses, so line 31 is 0 — is NOT a business: omit every Schedule C field for it and say so in notes.
-- scorpIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked S (an S corporation's K-1, Form 1120-S), added up, LESS any section 179 deduction in column (j) for those rows — i.e. what those rows contribute to line 32 and Schedule 1 line 5 (column (k) less column (j) — never the column (j) amount itself). A nonpassive LOSS sits in column (i), printed without parentheses: report it as a negative number. Omit when there is no S corporation row.
-- partnershipIncome: Schedule E page 2, Part II: the nonpassive income (column k) of the rows marked P (a partnership's K-1, Form 1065), added up — that figure is the partner's ordinary income plus guaranteed payments; a nonpassive loss in column (i) as a negative number. Every P row counts, a UPE row (below) included: the figure is what the P rows contribute to line 32 together. Omit when there is no partnership row.
+- scorpIncome: Schedule E page 2, Part II: what the rows marked S (an S corporation's K-1, Form 1120-S) contribute to line 32 and Schedule 1 line 5, added up: nonpassive income (column k) LESS any section 179 deduction in column (j) for those rows (never the column (j) amount itself), and the passive columns too — passive income (column h) less passive loss allowed (column g). A LOSS sits in column (i) or (g), printed without parentheses: report it as a negative number. When the S rows are there but contribute nothing — a passive loss Form 8582 suspends in full prints column (g) as 0 or leaves it blank — report 0. Omit only when there is no S corporation row.
+- partnershipIncome: Schedule E page 2, Part II: what the rows marked P (a partnership's K-1, Form 1065) contribute to line 32, added up — nonpassive income (column k) less nonpassive loss allowed (column i), plus passive income (column h) less passive loss allowed (column g); the nonpassive figure is the partner's ordinary income plus guaranteed payments, and a loss is a negative number. Every P row counts, a UPE row (below) included: the figure is what the P rows contribute to line 32 together. When the P rows are there but contribute nothing (a passive loss suspended in full, a loss limited to zero by basis), report 0. Omit only when there is no partnership row.
 - partnershipUpe: Schedule E page 2, Part II: a partner's unreimbursed partnership expenses — a row of its own under the partnership's name, labeled "UPE", "Unreimbursed partnership expenses" or "Unreimbursed expenses", with its amount in column (i). Report the amount as a POSITIVE number (several such rows added up). Omit when there is no such row.
 - Each Schedule E Part II row goes in exactly ONE of scorpIncome and partnershipIncome, by the letter in its column (b) — S or P. Never report the same row, or the same total, under both. Columns (g) and (h) are the passive loss and income; columns (i) and (k) the nonpassive loss and income — read which column the amount is printed in.
 - rentalIncome: Schedule E line 26 (total rental real estate and royalty income or loss, as deducted after Form 8582; a loss as a negative number), read on Schedule E page 1 itself. Omit when there is no Schedule E page 1. Part I only: a Part II row (a partnership or S corporation) is never rental income, passive or not. Never take it from Schedule 1 line 5 or Schedule E line 41: those add the partnership and S corporation rows (line 32) to line 26.
@@ -438,39 +488,7 @@ ${SCHEDULE_1_LINES}
 - schedulesSE: every Schedule SE in the print, in print order: line 1a, line 2, line 8a, line 12, a blank line as 0. Empty when there is none.
 - The rest of Schedule C Part II, each omitted when blank (with several Schedules C, add each line up across them): schCAdvertising line 8; schCCarTruck line 9; schCCommissions line 10; schCContractLabor line 11; schCEmployeeBenefits line 14; schCInsurance line 15; schCInterest lines 16a + 16b; schCLegalProfessional line 17; schCOfficeExpense line 18; schCPension line 19; schCRent lines 20a + 20b; schCRepairs line 21; schCSupplies line 22; schCTaxesLicenses line 23; schCTravel line 24a; schCMeals line 24b (the deductible amount as printed); schCUtilities line 25; schCOtherExpenses line 27a.
 
-State lines. The state return can be for any state; identify the main individual income tax form and report its equivalents. If there is no state return, set stateCode and stateForm to empty strings and omit every state field.
-More than one state return (a move during the year, income earned in another state): report the state the taxpayer lived in on December 31 as stateCode and stateForm (its resident or part-year return); if that state has no income tax return in the print, the state whose return shows the most total tax. Read every state line in "lines" from that state's return ONLY — never add another state's figures into it. Report every other state return as its own entry in "otherStates": its two-letter code, its form (e.g. "540NR", "IT-203", "1040ME", "PA-40"), and its own lines under the same keys, read from that state's return only, the same way (a part-year or nonresident return's stateSourceIncome and stateSourceBusinessIncome included). One entry per state; "otherStates" is empty when there is only one state return.
-- stateTotalTax: the state's total tax after nonrefundable credits and before payments, including add-on taxes the state bundles in (a shared responsibility payment, use tax). Report the printed total line as printed, even where that line also bundles in the underpayment penalty (New Jersey NJ-1040 "Total Tax Due" does) — the penalty is reported separately below and unbundled afterwards. California Form 540: line 64. California Form 540NR: line 74. Report 0 when the line is printed as 0.
-- statePayments: total withholding, estimated payments and refundable credits. California 540: line 93 (or line 78 if 93 is absent). California 540NR: line 88.
-- stateWithholding: state income tax withheld. California 540: line 71. California 540NR: line 81. Omit when blank.
-- stateRefund: refund amount; omit when there is a balance due. California 540: line 99. California 540NR: line 125.
-- stateAmountOwed: balance due before penalties and interest. California 540: line 100. California 540NR: line 121.
-- statePenalty: underpayment penalty plus interest and late penalties. California 540: line 112 plus line 113. California 540NR: line 122 plus line 123. Omit when none.
-- stateTotalDue: total amount due including penalties. California 540: line 114. California 540NR: line 124.
-- stateSourceIncome: ONLY on a nonresident or part-year state return. California Form 540NR: the state-source total income before adjustments — Schedule CA (540NR) Part II, line 10, column E ("CA Amounts"). Maryland Form 505: Form 505NR line 8 (Maryland income, after the non-Maryland income comes out). New York Form IT-203: line 17, the "New York State amount" column (NOT line 31). Virginia Form 760PY: the Schedule of Income, Part 1, Section A line 4 ("Gross income"), column A2 "While VA Resident" — on filing status 4, plus Section B line 4, column B2. Arizona Form 140PY: line 23, the Arizona column. A part-year or nonresident schedule filed with the state's resident form — South Carolina SC1040 with Schedule NR, North Carolina D-400 with Schedule PN, Colorado 104 with Form 104PN, Georgia Form 500 Schedule 3, and the like: the schedule's state column (the income taxed by that state) on its total income line, before adjustments. Omit on a full-year resident return.
-- stateSourceBusinessIncome: ONLY on a nonresident or part-year state return: the business income inside stateSourceIncome — the same state column's business income line (Schedule C) plus its partnership and S corporation income. California Form 540NR: Schedule CA (540NR) Part II column E, line 3, plus the partnership and S corporation part of line 17. New York Form IT-203: line 6 in the New York State amount column, plus the partnership and S corporation part of line 11. On a part-year schedule (South Carolina Schedule NR and the like), the same lines in the schedule's state column. Rents, wages, interest and gains are not business income. Omit when the column has no business income, and on a resident return.
-- stateOtherStateCredit: on a RESIDENT return only, the credit it claims for income tax paid to another state, as printed — California Schedule S (Form 540 credit code 187), New York IT-201 line 41 (resident credit, Form IT-112-R), New Jersey NJ-1040 line 44, Massachusetts Form 1 line 31, Virginia Form 760 line 24 (Schedule OSC), Pennsylvania PA-40 line 22 (resident credit). Report stateTotalTax and statePayments as printed whichever section the credit sits in. Omit when blank and on a part-year or nonresident return.
-- New York Form IT-203 (nonresident / part-year; the same lines on an amended IT-203-X): stateTaxOnIncome is line 46 (the allocated New York State tax: line 44 times the income percentage on line 45); stateTotalTax is line 58; stateLocalTax is line 51 (New York City part-year resident tax) when printed; stateDeduction is line 33.
-- Virginia Form 760PY (part-year): stateTaxOnIncome and stateTotalTax are both line 18; stateDeduction is line 12 (or line 11 when itemized); stateExemptions is line 13. On filing status 4 (spouses filing separately on one combined return, column A for you and column B for the spouse), add the two columns together on every line.
-- Arizona Form 140PY (part-year / nonresident): stateTaxOnIncome is line 56; stateTotalTax is line 62 (balance of tax); stateDeduction is line 53.
-- Nebraska Form 1040N: stateTotalTax is line 35 (Nebraska tax after nonrefundable credits) — NOT line 17 (before the credits) and never line 18, which is the personal exemption credit itself; report 0 when line 35 is printed as 0.
-- Maryland Form 505 (nonresident) with Form 505NR: stateTaxOnIncome is Form 505 line 32a (the Maryland tax from 505NR line 16, before the special nonresident tax); stateTotalTax is Form 505 line 37 (Maryland tax after credits, which includes the special nonresident tax on line 32b); statePayments is line 47; stateWithholding is line 43; stateAmountOwed is line 48; statePenalty is line 52; stateTotalDue is line 53; stateExemptions is Form 505 line 28 (the total exemption amount before any proration); stateDeduction is line 26a or 26d. Maryland Form 502 (resident): stateTotalTax is line 34 plus the local tax on line 28 is NOT modeled — report line 34 as printed; stateTaxOnIncome is line 22; stateExemptions is line 19; stateDeduction is line 17.
-- stateAdjustments: the state's net adjustment to federal AGI before its own deductions, additions less subtractions. California Form 540: line 16 minus line 14 (Schedule CA (540) Part I line 27, column C less column B). Form 540NR: Schedule CA (540NR) Part II line 27, column C less column B. Negative when the subtractions are larger. Omit when both columns are blank, and for a state that starts from its own gross income (New Jersey).
-- stateDeduction: the deduction the state return took — its standard deduction or its own itemized deductions, whichever line 18 of California Form 540 shows (= Schedule CA (540) Part II line 30). Omit for states without such a line.
-- stateBusinessIncome: the state's own business profit line when the state return has one (New Jersey NJ-1040 line 18, "Net profits from business"; for an S corporation shareholder, NJ-1040 line 22, "Net pro rata share of S corporation income"). Omit for California.
-- stateExemptions: the state's total exemption amount when it is a deduction from income (NJ-1040 line 13; Massachusetts Form 1 line 2g, repeated on line 18). Omit for California.
-- stateWageDeduction: Massachusetts Form 1 lines 11a + 11b (amount paid to Social Security, Medicare, railroad, U.S. or Massachusetts retirement, up to $2,000 per person), added up. Omit for other states.
-- Massachusetts Form 1: stateTaxOnIncome is line 22 (tax on 5.0% income); stateTotalTax is line 32 (income tax after credits — NOT line 37 if it differs, and never line 51); statePayments is line 51 (withholding plus the refundable credits on line 48, as the form totals them); stateWithholding is line 38; stateAmountOwed is line 55 as printed; statePenalty is the M-2210 amount, interest and penalty printed beside line 55; stateTotalDue is line 55 plus those; stateBusinessIncome is line 6a plus line 7 (business income plus the S corporation / partnership income). Report stateAdjustments only when Schedule Y or line 15 carries something beyond lines 11a/11b.
-- stateExemptionCredits: the state's exemption credits after any phase-out, when they are a credit off the tax (California 540 line 32). Omit for other states.
-- stateMedical: the state's medical expense deduction (NJ-1040 line 31). Omit when blank.
-- stateTaxOnIncome: the state's tax on taxable income before credits and add-ons (NJ-1040 line 43; California 540 line 31 — the tax line itself, NOT line 33, which is line 31 less the exemption credits on line 32; 540NR line 37; New York IT-201 line 39). Omit when blank.
-- stateLocalTax: a city income tax the state return carries for a city resident — New York IT-201 line 54 (NYC resident tax after NYC credits, the city taxes block on page 3). Omit when the filer isn't a city resident (lines 47–54 blank) and for every other state.
-- New York IT-201: stateTotalTax is line 61 (New York State, New York City, Yonkers and sales taxes together — line 46 alone is NOT it); stateTaxOnIncome is line 39; stateLocalTax is line 54; stateDeduction is line 34; stateAdjustments is (line 24 − line 19) − line 32, omitted when there are no additions or subtractions; statePayments is line 76; stateWithholding is lines 72, 73 and 74 added up; stateRefund is line 78; stateAmountOwed is line 80; statePenalty is lines 81 + 82; stateTotalDue is line 80. The IT-201's labels print as scrambled letters on these PDFs — go by the line numbers and the page layout.
-- statePteCreditAvailable: FTB 3804-CR Part II line 3, the pass-through entity elective tax credit available. Omit when there is no such form.
-- statePteCredit: FTB 3804-CR Part II line 4, the credit claimed on this return (it also appears on Form 540 line 43 or 44 with code 242). Omit when there is no such form.
-- statePteCreditRefundable: a refundable pass-through entity tax credit claimed in the payments section of the state return, AFTER the total tax line — New Jersey NJ-1040 line 63, "Pass-Through Business Alternative Income Tax Credit". Report stateTotalTax (NJ-1040 line 54) and statePayments (line 66) as printed; this credit is taken out afterwards. Omit when there is none.
-- stateSharedResponsibility: a state shared responsibility (health coverage) payment (NJ-1040 line 53c). Omit when blank.
-- uninsuredMonths: on Schedule NJ-HCC, the number of months of the year with NO box checked for the taxpayer (0 if every month is checked or Part I says Yes). Omit when there is no such schedule.
+${STATE_LINES}
 
 Health coverage lines (sehiDeduction and sehiPaid whenever the return has them; the Form 8962 lines only when Form 8962 is in the print — omit those otherwise):
 - additionalTaxes: Form 1040 line 17 (Schedule 2 line 3), the excess advance premium tax credit repayment. Omit when blank.
@@ -501,6 +519,16 @@ Lines:
 ${SCHEDULE_1_LINES}
 
 Also report the tax year and the filing status. The taxpayer's name, the state code, the state form, otherStates, schedulesC and schedulesSE aren't needed here: empty strings and empty lists.`;
+
+const STATE_SYSTEM = `You read the state individual income tax returns in a US tax return printed from Intuit ProSeries, and report every state line as JSON.
+
+${CONVENTIONS}
+- The pages sent are the print's state pages. A first read of the whole return named a state return but brought back none of its lines, so read each state form line by line, by its line numbers and layout — on some prints the labels come out as scrambled letters while the amounts are clear.
+- The state return's total tax line always exists. When it is printed blank, its value is 0 — report 0.
+
+${STATE_LINES}
+
+Also report the tax year, the filing status, the two-letter state code and the state form. The taxpayer's name, schedulesC and schedulesSE aren't needed here: an empty string and empty lists.`;
 
 const ENTITY_SYSTEM = `You read US pass-through entity income tax returns printed from Intuit ProSeries — an S corporation's Form 1120-S or a partnership's Form 1065, with the state's own return for the entity — and report specific line values as JSON.
 
@@ -558,6 +586,13 @@ Federal lines — Form 1065 (2025 layout):
 - distributions: Schedule K-1 (Form 1065) box 19 code A, every partner on this 1040 added up. Omit when blank.
 - officerComp: omit for a partnership.
 
+Rental real estate — an entity (1065 or 1120-S) whose only activity is renting real estate files Form 8825, and page 1 lines 1 through 23 (or 1 through 22 on the 1120-S) are blank; its K-1s carry box 2 (net rental real estate income), not box 1. For such an entity omit grossReceipts, totalIncome, totalDeductions, ordinaryIncome and k1Ordinary (they are blank), and report instead:
+- rentalRents: Form 8825 line 20a (total rental real estate income), added across every Form 8825 page.
+- rentalExpenses: Form 8825 line 20b (total rental real estate expenses, depreciation included), as a POSITIVE number.
+- k1Rental: Schedule K-1 box 2 (net rental real estate income or loss) for the first owner; a loss as a negative number. ownershipPct is that K-1's item J (1065) or item G (1120-S).
+- k1Rental2, ownershipPct2: the same from the second owner's K-1, when there is one.
+An entity with business income on page 1 AND a Form 8825: report the page 1 lines as usual and the rental lines as well.
+
 State lines: the state's own entity return — California Form 100S for an S corporation, California Form 568 for an LLC or Form 565 for a partnership, New Jersey CBT-100S with Form PTE-100; other states have an equivalent. If more than one state return is in the print, report the state where the entity's address is and list the others in notes. If there is none, set stateCode and stateForm to empty strings and omit every state field.
 - stateNetIncome: the entity's net income for state tax (California 100S line 20; New Jersey: the entire net income on CBT-100S, or the total distributive proceeds on Form PTE-100 when the CBT-100S has none; Massachusetts Form 355S line 5, income taxable in Massachusetts — 0 when printed as 0, which it is under $6 million of receipts). For Form 568, Schedule B line 23 (ordinary income).
 - Massachusetts Form 355S: stateTax is line 14 (excise due before voluntary contribution, which is the $456 minimum when nothing else applies); stateTotalTax is line 16; statePayments is line 23; stateAmountDue is line 30 (0 when printed as 0); stateRefund is line 26. Omit pteTax unless line 23 of Schedule S says the entity elected the chapter 63D excise and a Form 63D-ELT is in the print.
@@ -596,13 +631,15 @@ Also report the corporation's name as printed and the tax year. Use an empty str
  */
 export const HINTS_MAX = 2000;
 
-/** `adjustments` is the second, Schedule 1-only read of the after return. */
-type ReadKind = "before" | "after" | "entity" | "city" | "adjustments";
+/** `adjustments` is the second, Schedule 1-only read of the after return; `state` the second, state-only one. */
+type ReadKind = "before" | "after" | "entity" | "city" | "adjustments" | "state";
 
 function userPrompt(kind: ReadKind, hints: string | null): string {
   const base =
     kind === "adjustments"
       ? `These are the Schedule 1 and Form 1040 page 1 of the client's final return. A first read's Schedule 1 lines didn't add up to Form 1040 line 10, so a line was missed or misread. Read every line of Schedule 1 Part II as your instructions describe and return the JSON.`
+      : kind === "state"
+      ? `These are the state return pages of the client's final return. A first read named a state return but brought back none of its lines. Read every state return in these pages as your instructions describe and return the JSON.`
       : kind === "entity"
       ? `This is the entity's return (Form 1120-S or Form 1065, with its state return) for the client's business, as filed. Read the lines described in your instructions from this PDF and return the JSON.`
       : kind === "city"
@@ -675,7 +712,16 @@ async function readPdf(
   schema: Record<string, unknown>,
   hints: string | null,
 ): Promise<{ parsed: unknown; usage: ReadUsage }> {
-  const label = kind === "entity" ? "entity return" : kind === "city" ? "city return" : kind === "adjustments" ? "after return, Schedule 1" : `${kind} return`;
+  const label =
+    kind === "entity"
+      ? "entity return"
+      : kind === "city"
+        ? "city return"
+        : kind === "adjustments"
+          ? "after return, Schedule 1"
+          : kind === "state"
+            ? "after return, state pages"
+            : `${kind} return`;
   // Streamed so a long read (a 40-page client copy takes a while) can't trip
   // an idle-connection timeout somewhere between here and the API.
   const model = modelName();
@@ -800,14 +846,19 @@ export async function extractReturn(
    * "adjustments": the second read of the after return's Schedule 1 alone,
    * for when the first read's Part II lines didn't add up to line 10. Only
    * those lines and lines 9 and 11a come back.
+   * "state": the second read of the after return's state pages alone, for
+   * when the first named a state return but brought back none of its lines
+   * (engine v18). Only the state lines and the other states come back.
    */
-  focus: "adjustments" | null = null,
+  focus: "adjustments" | "state" | null = null,
 ): Promise<ExtractResult> {
   checkPdf(pdf);
   const { parsed, usage } =
     focus === "adjustments"
       ? await readPdf(pdf, "adjustments", ADJUSTMENTS_SYSTEM, ADJUSTMENTS_OUTPUT_SCHEMA, null)
-      : await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA, hints);
+      : focus === "state"
+        ? await readPdf(pdf, "state", STATE_SYSTEM, STATE_OUTPUT_SCHEMA, null)
+        : await readPdf(pdf, kind, SYSTEM, OUTPUT_SCHEMA, hints);
   const raw = sanitizeExtract(parsed);
   if (!raw) throw new TaxRecapExtractError("The model's answer didn't match the schema");
 

@@ -13,7 +13,8 @@ import ShareVideo from "@/components/recap/ShareVideo";
 import { centsPerDollar } from "@/lib/decyphered/buildRecap";
 import { recapSurveyHref } from "@/lib/feedback/links";
 import { computeRecap, taxRows, type EntityKind, type FilingLine, type RecapSide } from "@/lib/tax-recap/compute";
-import type { RecapDoc, VideoVariant } from "@/lib/tax-recap/schema";
+import { estimateNotes, estimateTimeline, estimateTotals, formatDue, hasEstimates } from "@/lib/tax-recap/estimates";
+import type { RecapDoc, RecapEstimates, VideoVariant } from "@/lib/tax-recap/schema";
 import { money } from "@/lib/widget-format";
 
 /**
@@ -88,6 +89,9 @@ export default function RecapView({
   // Survey links open the in-house feedback survey with this client's name,
   // year and recap already filled in — old recaps' Airtable links included.
   const stepHref = (href: string) => recapSurveyHref(href, recap);
+
+  // Next year's estimated payments, on recaps saved with them.
+  const estimates = hasEstimates(recap.estimates) ? recap.estimates : null;
 
   const filingLines = [c.filing.federal, c.filing.state, ...c.filing.otherStates, c.filing.entity, ...c.filing.otherEntities];
   const owed = filingLines.reduce((s, l) => s + (l?.owed ?? 0), 0);
@@ -222,6 +226,16 @@ export default function RecapView({
         </>
       ),
     },
+    ...(estimates
+      ? [
+          {
+            label: "next year",
+            title: `Estimated payments for ${estimates.year}`,
+            sub: `${estimates.year}’s tax, paid as the year goes, the way your ${recap.taxYear} returns set it up. Put these dates in your calendar: each payment is due on its date, and each one goes to its own place.`,
+            body: <Estimates e={estimates} taxYear={recap.taxYear} />,
+          },
+        ]
+      : []),
     ...(recap.strategies.length
       ? [
           {
@@ -379,7 +393,9 @@ export default function RecapView({
                     <Panel className="h-full !px-6 !py-6">
                       <span className="font-mono text-[12px] text-magenta">0{i + 1}</span>
                       <div className="mt-3 font-display text-[19px] font-semibold leading-tight text-fog">{item.title}</div>
-                      <p className="mb-0 mt-2 text-[14px] leading-relaxed text-mist">{item.note}</p>
+                      <p className="mb-0 mt-2 text-[14px] leading-relaxed text-mist">
+                        {estimates && item.title === "Housekeeping items" ? HOUSEKEEPING_WITH_ESTIMATES : item.note}
+                      </p>
                     </Panel>
                   </li>
                 ))}
@@ -664,8 +680,103 @@ const AGENDA = [
   { title: "Housekeeping items", note: "What's due at filing, the strategy going forward, and your next steps." },
 ] as const;
 
+/** The housekeeping note on a recap that has next year's estimated payments. */
+const HOUSEKEEPING_WITH_ESTIMATES = "What's due at filing, next year's estimated payments, the strategy going forward, and your next steps.";
+
 /** The alert under the agenda, before the numbers start. */
 const AGENDA_ALERT = "Don’t shoot the messenger.";
+
+/**
+ * Next year's estimated payments, plainly: what each payee gets in all
+ * (the IRS, each state, each business) and the year's total; then the
+ * payments in date order, everything due on a date together with that
+ * date's total; then the notes — a schedule that skips a payment
+ * (California's has no third), payments that must go online, an
+ * overpayment already credited, and how to pay.
+ */
+function Estimates({ e, taxYear }: { e: RecapEstimates; taxYear: number }) {
+  const totals = estimateTotals(e).filter((t) => t.total > 0);
+  const all = totals.reduce((s, t) => s + t.total, 0);
+  const dates = estimateTimeline(e);
+  const notes = estimateNotes(e, taxYear);
+  return (
+    <>
+      {totals.length ? (
+        <Reveal className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:justify-center">
+          {totals.map((t) => (
+            <div
+              key={t.label}
+              className="min-w-0 rounded-[18px] border border-white/10 bg-panel/85 px-4 py-4 text-center md:min-w-[200px] md:max-w-[300px] md:flex-1 md:bg-white/[0.045] md:px-5 md:py-5 md:backdrop-blur-xl"
+            >
+              <div className="font-display text-[22px] font-bold leading-none tracking-[-0.02em] tabular-nums text-fog md:text-[26px]">{money(t.total)}</div>
+              <div className="mt-2.5 break-words font-mono text-[10px] uppercase tracking-[0.14em] text-muted md:text-[10.5px]">{t.label}</div>
+              <div className="mt-1 text-[12.5px] text-dusk">
+                {t.count} {t.count === 1 ? "payment" : "payments"}
+              </div>
+            </div>
+          ))}
+          {totals.length > 1 ? (
+            <div className="min-w-0 rounded-[18px] border border-magenta/50 bg-panel/85 px-4 py-4 text-center shadow-[0_0_48px_-14px_rgba(255,45,120,.55)] md:min-w-[200px] md:max-w-[300px] md:flex-1 md:bg-white/[0.045] md:px-5 md:py-5 md:backdrop-blur-xl">
+              <div className="font-display text-[22px] font-bold leading-none tracking-[-0.02em] tabular-nums text-fog md:text-[26px]">{money(all)}</div>
+              <div className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-magenta md:text-[10.5px]">Total for {e.year}</div>
+              <div className="mt-1 text-[12.5px] text-dusk">
+                {dates.length} due {dates.length === 1 ? "date" : "dates"}
+              </div>
+            </div>
+          ) : null}
+        </Reveal>
+      ) : null}
+      {dates.length ? (
+        <Reveal delay={0.1} className="mt-6">
+          <Panel className="!py-4">
+            {dates.map((d) => (
+              <div
+                key={d.due}
+                className="grid grid-cols-[88px_1fr] gap-x-5 border-t border-white/[0.07] py-3.5 first:border-t-0 sm:grid-cols-[120px_1fr]"
+              >
+                <div>
+                  <div className="font-display text-[19px] font-semibold leading-tight text-fog">{formatDue(d.due, true)}</div>
+                  <div className="font-mono text-[11px] text-dusk">{d.due.slice(0, 4)}</div>
+                </div>
+                <div className="space-y-1.5">
+                  {d.items.map((it, k) => (
+                    <div key={k} className="flex items-baseline justify-between gap-3 text-[15px]">
+                      <span className="min-w-0 text-mist">
+                        {it.label}
+                        {it.electronic ? (
+                          <span className="ml-2 rounded-full border border-magenta/40 px-2 py-0.5 align-middle font-mono text-[9.5px] uppercase tracking-[1px] text-magenta">
+                            online
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="flex-none font-mono tabular-nums text-fog">{money(it.amount)}</span>
+                    </div>
+                  ))}
+                  {d.items.length > 1 ? (
+                    <div className="flex items-baseline justify-between gap-3 border-t border-white/[0.07] pt-1.5">
+                      <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted">Due {formatDue(d.due, true)}</span>
+                      <span className="font-mono text-[15px] font-semibold tabular-nums text-teal">{money(d.total)}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </Panel>
+        </Reveal>
+      ) : null}
+      <Reveal delay={0.15} className="mt-5">
+        <ul className="m-0 list-none space-y-2 p-0">
+          {notes.map((n, i) => (
+            <li key={i} className="flex gap-3 text-[13.5px] leading-relaxed text-dusk">
+              <span aria-hidden className="mt-[9px] h-[5px] w-[5px] flex-none rounded-full bg-magenta/70" />
+              <span>{n}</span>
+            </li>
+          ))}
+        </ul>
+      </Reveal>
+    </>
+  );
+}
 
 /**
  * A headline figure on the agenda slide: the year's income, the year before,

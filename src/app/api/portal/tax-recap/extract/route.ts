@@ -30,7 +30,9 @@ import {
  *              show
  *   focus      optional, "adjustments" with kind "after": a second read of
  *              the return's Schedule 1 pages alone, when the first read's
- *              Part II lines didn't add up to Form 1040 line 10
+ *              Part II lines didn't add up to Form 1040 line 10; or "state":
+ *              a second read of the state pages alone, when the first read
+ *              named a state return but brought back none of its lines
  *
  * One PDF per request rather than both at once: Vercel caps a request body
  * at ~4.5MB and even a text-based client copy can be a couple of MB. The
@@ -101,7 +103,8 @@ export async function POST(req: Request) {
 
   const rawHints = form.get("hints");
   const hints = typeof rawHints === "string" && rawHints.trim() ? rawHints.trim().slice(0, HINTS_MAX) : null;
-  const focus = kind === "after" && form.get("focus") === "adjustments" ? "adjustments" : null;
+  const focusRaw = form.get("focus");
+  const focus = kind === "after" && (focusRaw === "adjustments" || focusRaw === "state") ? focusRaw : null;
 
   // Either the bytes came in this request, or they were staged in pieces.
   let bytes: Buffer;

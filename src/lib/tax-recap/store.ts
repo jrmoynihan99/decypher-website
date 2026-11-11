@@ -4,6 +4,7 @@ import { adminDb, isConfigured } from "@/lib/firebase/admin";
 import {
   clientKey,
   sanitizeAnalysis,
+  sanitizeEstimates,
   sanitizeDerivedBefore,
   sanitizeEntityExtract,
   sanitizeEntityExtracts,
@@ -85,6 +86,7 @@ function toDoc(id: string, d: FirebaseFirestore.DocumentData): RecapDoc {
     },
     derivedBefore: sanitizeDerivedBefore(d.derivedBefore),
     analysis: sanitizeAnalysis(d.analysis),
+    estimates: sanitizeEstimates(d.estimates),
     video: sanitizeVideo(d.video),
     createdAt: iso(d.createdAt),
     createdBy: typeof d.createdBy === "string" ? d.createdBy : "",
@@ -171,6 +173,7 @@ export async function updateRecap(
     derivedBefore:
       edits.derivedBefore !== undefined ? edits.derivedBefore : current.derivedBefore,
     analysis: edits.analysis !== undefined ? edits.analysis : current.analysis,
+    estimates: edits.estimates !== undefined ? edits.estimates : (current.estimates ?? null),
   };
   // only a rename or a change of year can make a new clash
   if (clientKey(merged.clientName) !== clientKey(current.clientName) || merged.taxYear !== current.taxYear) {

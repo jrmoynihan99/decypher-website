@@ -30,12 +30,14 @@ import {
   entityEins,
   entityFormFromFileName,
   entityW2Pages,
+  statePageNumbers,
   yearFromFileName,
   type EntityW2Page,
   type ReturnKind,
 } from "@/lib/tax-recap/pages";
 import type { RecapSummary } from "@/lib/tax-recap/store";
 import { US_STATES, type TableSet } from "@/lib/tax-recap/tables";
+import { formatDue, mergeEstimates, parseEntityEstimates, parseIndividualEstimates } from "@/lib/tax-recap/estimates";
 import {
   ADJUSTMENTS_TOLERANCE,
   CITY_FIELD_KEYS,
@@ -48,6 +50,7 @@ import {
   RETURN_FIELDS,
   RETURN_FIELD_KEYS,
   SCHEDULE_1_ADJUSTMENT_KEYS,
+  STATE_FIELD_KEYS,
   asMoney,
   clientKey,
   displayName,
@@ -55,6 +58,7 @@ import {
   emptyNumbers,
   numbersFromEntityExtract,
   numbersFromExtract,
+  stateLinesMissing,
   stateNumbersFromExtract,
   unplacedAdjustments,
   type DerivedBefore,
@@ -65,8 +69,10 @@ import {
   type EntityNumbers,
   type FieldGroup,
   type OtherStateFieldKey,
+  type EstimateSchedule,
   type RecapAnalysis,
   type RecapDoc,
+  type RecapEstimates,
   type RecapNextStep,
   type RecapOtherEntity,
   type RecapOtherState,
@@ -513,6 +519,8 @@ export default function TaxRecapBuilder({
   const [nextSteps, setNextSteps] = useState<RecapNextStep[]>(
     initial?.nextSteps.length ? initial.nextSteps : DEFAULT_NEXT_STEPS,
   );
+  /** Next year's estimated payments, read off the prints when they're read (a recap saved before has none). */
+  const [estimates, setEstimates] = useState<RecapEstimates | null>(initial?.estimates ?? null);
 
   // The client's video: remade in this tab after every save whose numbers changed.
   const video = useVideoMaker(!!initial && videoIsCurrent(initial));
@@ -885,12 +893,13 @@ export default function TaxRecapBuilder({
     /** An entity return beyond the first: which of `moreEntities` it fills. */
     slot?: number,
     /**
-     * The second, Schedule 1-only read of the after return (see
-     * `placeAdjustments`): just these pages, or the usual selection when
+     * A second read of the after return on some of its pages alone: the
+     * Schedule 1-only read (see `placeAdjustments`) or the state-only one
+     * (see `placeState`) — just these pages, or the usual selection when
      * none could be found. It leaves the side's page counts, preview and
      * kept copy as the first read set them.
      */
-    focus?: { pages: number[] },
+    focus?: { pages: number[]; what: "adjustments" | "state" },
   ) => {
     const patch = (p: Partial<SideState>) =>
       slot === undefined
@@ -916,7 +925,7 @@ export default function TaxRecapBuilder({
       };
       w.__taxRecapPrepared = {
         ...(w.__taxRecapPrepared ?? {}),
-        [focus ? `${kind}:adjustments` : kind]: prepared,
+        [focus ? `${kind}:${focus.what}` : kind]: prepared,
       };
     }
     if (!focus) {
@@ -937,14 +946,16 @@ export default function TaxRecapBuilder({
     const what =
       kind === "entity" ? `the ${source.analysis?.entityForm ?? "entity return"}` : kind === "city" ? "the city return" : "the return";
     const readingMsg = focus
-      ? `Schedule 1's adjustments didn't add up to Form 1040 line 10 — reading ${prepared.sentPages === 1 ? "that page" : `those ${prepared.sentPages} pages`} again…`
+      ? focus.what === "state"
+        ? `The state return's lines didn't come back — reading its ${prepared.sentPages === 1 ? "page" : `${prepared.sentPages} pages`} again on their own…`
+        : `Schedule 1's adjustments didn't add up to Form 1040 line 10 — reading ${prepared.sentPages === 1 ? "that page" : `those ${prepared.sentPages} pages`} again…`
       : prepared.trimmed
         ? `Reading the ${prepared.sentPages} pages of ${what} that hold the numbers, out of ${prepared.totalPages}…`
         : `Reading all ${prepared.totalPages} pages of ${what} — this takes a minute or two…`;
 
     const fd = new FormData();
     fd.append("kind", kind);
-    if (focus) fd.append("focus", "adjustments");
+    if (focus) fd.append("focus", focus.what);
     fd.append("pageTexts", JSON.stringify(prepared.pageTexts));
     // Page numbers the model cites are positions in the trimmed copy; this
     // maps them back so the reviewer sees the page of the real return.
@@ -1087,7 +1098,7 @@ export default function TaxRecapBuilder({
     const gap = (u: number) => (u > 0 ? `${money(u)} of line 10 on no line read` : `the lines read ${money(-u)} more than line 10`);
     let second: ReturnExtract;
     try {
-      second = (await readOne("after", source, shared, null, undefined, { pages: [...pages] })).extract as ReturnExtract;
+      second = (await readOne("after", source, shared, null, undefined, { pages: [...pages], what: "adjustments" })).extract as ReturnExtract;
     } catch (e) {
       return {
         extract: first,
@@ -1116,6 +1127,57 @@ export default function TaxRecapBuilder({
         `Schedule 1 didn't add up to Form 1040 line 10 on the first read (${gap(was)}); a second read of the Schedule 1 page ${
           Math.abs(now) <= ADJUSTMENTS_TOLERANCE ? "put it right" : `got it closer (${gap(now)}, asked about above the numbers)`
         }: ${changed.join(", ")}. Check against the page`,
+      ],
+    };
+  };
+
+  /**
+   * A read that names a state return but brings back nothing its total can
+   * be told from — no total line, no payments with a refund or balance —
+   * is a slip, not a print without the lines (a 2025 IT-201 came back with
+   * every line left out, its pages sent and legible; the same pages read
+   * again gave every one). One more read of the state pages alone; its
+   * state lines and other states replace the first read's when they settle
+   * the total, and the first read stands otherwise (engine v18).
+   */
+  const placeState = async (
+    first: ReturnExtract,
+    source: { file: File; analysis: PdfAnalysis | null },
+    shared: { tokens: string[]; short: string[] },
+  ): Promise<{ extract: ReturnExtract; warnings: string[] }> => {
+    if (!stateLinesMissing(first)) return { extract: first, warnings: [] };
+    const pages = statePageNumbers(source.analysis?.texts ?? []);
+    const form = `${first.stateCode}${first.stateForm ? ` ${first.stateForm}` : ""}`;
+    let second: ReturnExtract;
+    try {
+      second = (await readOne("after", source, shared, null, undefined, { pages, what: "state" })).extract as ReturnExtract;
+    } catch (e) {
+      return {
+        extract: first,
+        warnings: [`The ${form} return's lines didn't come back from the read, and a second read of its pages couldn't be made: ${e instanceof Error ? e.message : "it failed"}`],
+      };
+    }
+    if (stateLinesMissing({ ...second, stateCode: second.stateCode || first.stateCode })) {
+      return {
+        extract: first,
+        warnings: [`The ${form} return's lines didn't come back from the read, and a second read of its pages didn't find its total either — type them from the print`],
+      };
+    }
+    const merged: ReturnExtract = {
+      ...first,
+      stateCode: second.stateCode || first.stateCode,
+      stateForm: second.stateForm || first.stateForm,
+      fields: { ...first.fields },
+      otherStates: second.otherStates?.length ? second.otherStates : first.otherStates,
+    };
+    for (const k of STATE_FIELD_KEYS) merged.fields[k] = second.fields[k];
+    const got = STATE_FIELD_KEYS.filter((k) => typeof second.fields[k]?.value === "number").length;
+    return {
+      extract: merged,
+      warnings: [
+        `The ${form} return's lines didn't come back from the first read; a second read of the state pages alone found ${got} of them${
+          merged.otherStates?.length ? ` and ${merged.otherStates.map((o) => o.stateCode).join(", ")}` : ""
+        }. Check them against the print`,
       ],
     };
   };
@@ -1241,8 +1303,10 @@ export default function TaxRecapBuilder({
         // The Schedule 1 lines checked against line 10, read again if they
         // don't add up.
         const placed = await placeAdjustments(read, sorted.after, tokens);
-        const ex = placed.extract;
-        const warnings = [...r.warnings, ...placed.warnings];
+        // A state return named with none of its lines read, read again.
+        const stated = await placeState(placed.extract, sorted.after, tokens);
+        const ex = stated.extract;
+        const warnings = [...r.warnings, ...placed.warnings, ...stated.warnings];
         const info = readInfoRef.current.after;
         if (info) info.warnings = warnings;
         // The name is painted out before the model sees the page, so the
@@ -1433,6 +1497,21 @@ export default function TaxRecapBuilder({
       fail("after", new Error(duplicateMessage(dup)));
       return;
     }
+
+    // Next year's estimated payments, off the 1040's filing instructions
+    // and each business's cover letter (lib/tax-recap/estimates). Read here
+    // from the unredacted text the browser already has: nothing is sent.
+    setEstimates(
+      mergeEstimates(
+        [
+          parseIndividualEstimates(sorted.after.analysis?.texts ?? []),
+          ...[sorted.entity, ...sorted.more].flatMap((p) =>
+            p ? [parseEntityEstimates(p.analysis?.texts ?? [], businessName(p.analysis?.entityName ?? null))] : [],
+          ),
+        ],
+        a.taxYear ? a.taxYear + 1 : null,
+      ),
+    );
 
     // Everything else on the 1040: each other entity return with its own
     // form and state, and each other state return the reader found.
@@ -1633,6 +1712,7 @@ export default function TaxRecapBuilder({
     setAnalysis(null);
     setStrategies(DEFAULT_STRATEGIES.join("\n"));
     setNextSteps(DEFAULT_NEXT_STEPS);
+    setEstimates(null);
     setSaved(null);
     setSaveError(null);
     setRederiveError(null);
@@ -1970,6 +2050,7 @@ export default function TaxRecapBuilder({
       },
       derivedBefore: sides.before.derived,
       analysis,
+      estimates,
     };
     try {
       const res = await fetch(
@@ -3198,6 +3279,13 @@ export default function TaxRecapBuilder({
               </div>
             </div>
 
+            <EstimatesEditor
+              value={estimates}
+              onChange={setEstimates}
+              year={estimates?.year ?? (Number(taxYear) ? Number(taxYear) + 1 : new Date().getFullYear())}
+              stateCode={stateCode.trim().toUpperCase() || null}
+            />
+
             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-edge pt-5">
               <button
                 type="button"
@@ -3280,6 +3368,179 @@ export default function TaxRecapBuilder({
 
 const smallInput =
   "w-full rounded-[10px] border border-edge-mid bg-panel-2 px-3 py-2 font-body text-[13px] text-fog outline-none transition-[border-color,box-shadow] duration-150 focus:border-magenta focus:shadow-[0_0_0_3px_rgba(255,45,120,0.18)]";
+
+/**
+ * A business's name as its print has it, for the client to read: an
+ * all-capitals name in title case, its suffix (LLC, Inc.) kept as written.
+ */
+function businessName(name: string | null): string | null {
+  const n = name?.trim();
+  if (!n) return null;
+  if (n !== n.toUpperCase()) return n;
+  const keep = new Set(["LLC", "LLP", "LP", "PC", "PLLC", "PA", "INC", "CO", "DBA", "USA", "NYC", "LA", "II", "III", "IV"]);
+  return n
+    .split(/\s+/)
+    .map((w) => {
+      const bare = w.replace(/[^A-Z]/g, "");
+      if (keep.has(bare)) return bare === "INC" ? w.replace("INC", "Inc") : w;
+      return w.charAt(0) + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+/**
+ * Next year's estimated payments on review: each payee — the IRS, each
+ * state, each business — with its payments (the voucher or installment
+ * number, the due date, the amount, whether it must be paid online) and any
+ * overpayment already credited to the year. Read off the prints when the
+ * returns are read; staff check them against the vouchers, correct or add
+ * to them, and they print as their own section on the recap. Empty, the
+ * recap has no such section.
+ */
+function EstimatesEditor({
+  value,
+  onChange,
+  year,
+  stateCode,
+}: {
+  value: RecapEstimates | null;
+  onChange: (next: RecapEstimates | null) => void;
+  year: number;
+  stateCode: string | null;
+}) {
+  const schedules = value?.schedules ?? [];
+  const set = (next: EstimateSchedule[]) => onChange(next.length ? { year: value?.year ?? year, schedules: next } : null);
+  const edit = (i: number, patch: Partial<EstimateSchedule>) => set(schedules.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const dollars = (raw: string) => Math.max(0, Math.round(Number(raw.replace(/[^\d.]/g, "")) || 0));
+  const shown = (v: number) => (v ? v.toLocaleString("en-US") : "");
+  const add = (kind: EstimateSchedule["kind"]) => {
+    const code = kind === "federal" ? null : stateCode;
+    const label = kind === "federal" ? "Federal (IRS)" : kind === "state" ? (code ? (US_STATES[code] ?? code) : "State") : "Business";
+    set([...schedules, { kind, stateCode: code, label, installments: [], applied: 0 }]);
+  };
+  const total = schedules.reduce((t, s) => t + s.installments.reduce((u, x) => u + x.amount, 0), 0);
+  return (
+    <div className="mt-6 border-t border-edge pt-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-mono text-[10.5px] font-bold uppercase tracking-[1.2px] text-mist">
+          Estimated payments for {value?.year ?? year}
+        </span>
+        {total > 0 ? <span className="font-mono text-[12px] tabular-nums text-dusk">{money(total)} in all</span> : null}
+      </div>
+      <span className="mb-3 mt-1 block text-[11.5px] leading-relaxed text-dusk">
+        {schedules.length
+          ? "Read off the returns’ filing instructions and the businesses’ cover letters. Check them against the vouchers — they print as their own page on the recap, by due date."
+          : "None were found on the returns (no voucher schedule in the filing instructions or cover letters). Add them here if the client has any; with none, the recap has no estimated payments section."}
+      </span>
+      <div className="space-y-3">
+        {schedules.map((s, i) => (
+          <div key={i} className="rounded-[12px] border border-edge-mid bg-panel-2/40 p-3">
+            <div className="grid grid-cols-[1fr_160px_auto] items-center gap-2">
+              <input
+                value={s.label}
+                onChange={(e) => edit(i, { label: e.target.value })}
+                placeholder="Who it's paid to"
+                aria-label="Who it's paid to"
+                className={smallInput}
+              />
+              <NumInput
+                value={shown(s.applied)}
+                onChange={(raw) => edit(i, { applied: dollars(raw) })}
+                prefix="$"
+                ariaLabel="Overpayment credited to next year"
+              />
+              <button
+                type="button"
+                aria-label="Remove payee"
+                onClick={() => set(schedules.filter((_, j) => j !== i))}
+                className="cursor-pointer rounded-[10px] border border-edge-mid px-2.5 py-1.5 text-[14px] text-dusk hover:text-danger"
+              >
+                ×
+              </button>
+            </div>
+            <span className="mt-1 block text-right text-[10.5px] text-dusk">overpayment credited to {value?.year ?? year}</span>
+            <div className="mt-2 space-y-1.5">
+              {s.installments.map((x, k) => (
+                <div key={k} className="grid grid-cols-[44px_1fr_1fr_auto_auto] items-center gap-2">
+                  <span className="font-mono text-[11px] text-dusk">#{x.n}</span>
+                  <input
+                    type="date"
+                    value={x.due}
+                    onChange={(e) =>
+                      edit(i, { installments: s.installments.map((y, m) => (m === k ? { ...y, due: e.target.value } : y)) })
+                    }
+                    aria-label={`Payment ${x.n} due date`}
+                    className={`${smallInput} font-mono`}
+                  />
+                  <NumInput
+                    value={shown(x.amount)}
+                    onChange={(raw) =>
+                      edit(i, { installments: s.installments.map((y, m) => (m === k ? { ...y, amount: dollars(raw) } : y)) })
+                    }
+                    prefix="$"
+                    ariaLabel={`Payment ${x.n} amount`}
+                  />
+                  <label className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[1px] text-dusk">
+                    <input
+                      type="checkbox"
+                      checked={x.electronic}
+                      onChange={(e) =>
+                        edit(i, { installments: s.installments.map((y, m) => (m === k ? { ...y, electronic: e.target.checked } : y)) })
+                      }
+                    />
+                    online only
+                  </label>
+                  <button
+                    type="button"
+                    aria-label={`Remove payment ${x.n}`}
+                    onClick={() => edit(i, { installments: s.installments.filter((_, m) => m !== k) })}
+                    className="cursor-pointer rounded-[10px] border border-edge-mid px-2.5 py-1.5 text-[14px] text-dusk hover:text-danger"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {s.installments.length < 6 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const last = s.installments[s.installments.length - 1];
+                    edit(i, {
+                      installments: [
+                        ...s.installments,
+                        { n: (last?.n ?? 0) + 1, due: last?.due ?? `${value?.year ?? year}-04-15`, amount: 0, electronic: false },
+                      ],
+                    });
+                  }}
+                  className="cursor-pointer font-mono text-[10px] uppercase tracking-[1.2px] text-dusk hover:text-fog"
+                >
+                  + Add a payment
+                </button>
+              ) : null}
+            </div>
+            {s.installments.length ? (
+              <span className="mt-2 block text-[11px] text-dusk">
+                {s.installments.map((x) => `${formatDue(x.due || `${year}-01-01`, true)} ${money(x.amount)}`).join(" · ")}
+              </span>
+            ) : null}
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-4">
+          {(["federal", "state", "entity"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => add(k)}
+              className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1.2px] text-muted hover:text-fog"
+            >
+              + {k === "federal" ? "IRS" : k === "state" ? "A state" : "A business"}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function dueLabel(due: number): string {
   if (due < 0) return `${money(-due)} refund`;

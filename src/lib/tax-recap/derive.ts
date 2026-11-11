@@ -112,7 +112,7 @@ import {
 } from "./tables";
 
 /** Bump when a formula changes, so a stored recap says which engine made it. */
-export const DERIVE_VERSION = "17";
+export const DERIVE_VERSION = "18";
 
 export type DeriveMeta = {
   taxYear: number | null;
@@ -268,6 +268,119 @@ const formOfEntity = (form: "1120-S" | "1065" | null, e: EntityNumbers): "1120-S
 
 /** How the reasons and notes name one of several entity returns. */
 const entityName = (name: string | null, form: "1120-S" | "1065", i: number) => (name ? `${name} (${form})` : `entity return ${i + 1} (${form})`);
+
+/**
+ * The section 179 deduction on every K-1 the household holds from one S
+ * corporation (engine v18). The reader takes box 11 off the first K-1; an
+ * S corporation allocates every item by shares, so a spouse's K-1 carries
+ * the same deduction at their share. Subtracted once, two 50% K-1s with
+ * $15,650 each (the 1120-S's $31,300) missed Schedule E by $15,650.
+ */
+function s179Household(x: EntityNumbers): number {
+  const s = n(x.k1Section179);
+  if (!s || !has(x.k1Ordinary2)) return s;
+  const p1 = n(x.ownershipPct);
+  const p2 = n(x.ownershipPct2);
+  if (p1 > 0 && p2 > 0) return Math.round((s * (p1 + p2)) / p1);
+  const k1 = n(x.k1Ordinary);
+  return k1 !== 0 ? Math.round((s * (k1 + x.k1Ordinary2)) / k1) : s;
+}
+
+/** An entity return that is rental real estate only (Form 8825), as `asRentalOnly` set it up: its K-1 is box 2. */
+const isRentalUnit = (x: EntityNumbers) => has(x.rentalRents) || has(x.k1Rental);
+
+/**
+ * An entity whose only activity is rental real estate (engine v18): Form
+ * 8825 carries its rents and expenses, page 1 is blank, and its K-1s carry
+ * box 2, not box 1 (Moynihan's LUXE LIVING: $16,200 of rents, $44,795 of
+ * expenses, a $14,583 loss on the 51% K-1 that Form 8582 suspends). Laid
+ * out on the lines the engine models an entity by — the rents as its
+ * receipts, the expenses as its deductions, box 2 as the K-1 — and kept
+ * marked as rental (`isRentalUnit`), so it runs like Schedule E's rentals:
+ * passive, outside self-employment tax, the expenses zeroed on the before
+ * (the team's rental convention, 2026-10-02). One with business income on
+ * page 1 as well isn't modeled: its rental lines are set aside, as they
+ * always were, and the K-1 check says if that matters.
+ */
+function asRentalOnly(x: EntityNumbers): { numbers: EntityNumbers; mixed: boolean } | null {
+  if (!has(x.rentalRents) && !has(x.rentalExpenses) && !has(x.k1Rental)) return null;
+  const business = n(x.grossReceipts) !== 0 || n(x.ordinaryIncome) !== 0 || n(x.k1Ordinary) !== 0 || n(x.totalDeductions) !== 0;
+  if (business) return { numbers: { ...x, rentalRents: null, rentalExpenses: null, k1Rental: null, k1Rental2: null }, mixed: true };
+  const rents = n(x.rentalRents);
+  const expenses = Math.abs(n(x.rentalExpenses));
+  const total = rents + n(x.otherIncome);
+  return {
+    numbers: {
+      ...x,
+      grossReceipts: rents,
+      cogs: null,
+      totalIncome: total,
+      totalDeductions: expenses,
+      otherDeductions: expenses,
+      ordinaryIncome: total - expenses,
+      k1Ordinary: has(x.k1Rental) ? x.k1Rental : null,
+      k1Ordinary2: has(x.k1Rental2) ? x.k1Rental2 : null,
+      k1Guaranteed: null,
+      k1Guaranteed2: null,
+      rentalRents: rents,
+      rentalExpenses: expenses,
+    },
+    mixed: false,
+  };
+}
+
+/**
+ * A K-1 loss Schedule E deducts only part of (engine v18): the line read is
+ * a smaller loss than the K-1, or nothing — a passive loss Form 8582
+ * suspends, a loss over the owner's basis or amount at risk. Only a loss,
+ * only less of it, and a line read as $0 only when it was printed.
+ */
+const limitedLine = (k1: number, line: number, lineRead: boolean) => k1 < -TOL && line > k1 + TOL && line <= TOL && (line !== 0 || lineRead);
+
+/**
+ * A rental-only entity's lines in a scenario (engine v18): Form 8825's rents
+ * and expenses and each K-1's box 2, as the after was read — the business
+ * lines it was modeled on cleared.
+ */
+function rentalLines(x: EntityNumbers, u: { gross: number; writeOffs: number }, s: { writeOffs: boolean }, k1s: number[]): EntityNumbers {
+  return {
+    ...x,
+    grossReceipts: null,
+    cogs: null,
+    totalIncome: null,
+    totalDeductions: null,
+    otherDeductions: null,
+    ordinaryIncome: null,
+    k1Ordinary: null,
+    k1Ordinary2: null,
+    k1Guaranteed: null,
+    k1Guaranteed2: null,
+    rentalRents: u.gross,
+    rentalExpenses: s.writeOffs && u.writeOffs > 0 ? u.writeOffs : null,
+    k1Rental: k1s[0] ?? null,
+    k1Rental2: k1s.length > 1 ? k1s[1] : null,
+  };
+}
+
+/**
+ * The partners' K-1s held to what Schedule E deducts: the shortfall comes
+ * back off each partner's loss in proportion, so they add up to the floor.
+ * Guaranteed payments aren't touched. Income passes as it is.
+ */
+function limitPartners(ps: Partner[], floor: number): Partner[] {
+  const total = ps.reduce((s, p) => s + p.ordinary + p.guaranteed, 0);
+  if (total >= floor) return ps;
+  const losses = ps.map((p) => Math.max(0, -p.ordinary));
+  const lossTotal = losses.reduce((s, v) => s + v, 0);
+  if (lossTotal <= 0) return ps;
+  let left = floor - total;
+  return ps.map((p, k) => {
+    const last = k === ps.length - 1 || losses.slice(k + 1).every((v) => v === 0);
+    const back = losses[k] === 0 ? 0 : last ? left : Math.round(((floor - total) * losses[k]) / lossTotal);
+    left -= back;
+    return back ? { ...p, ordinary: p.ordinary + back } : p;
+  });
+}
 
 /** Where a nonresident form prints the state-source income the proration uses, for a refusal that names the line. */
 function sourceLine(stateCode: string, sc: StateCard): string {
@@ -1701,6 +1814,22 @@ type Unit = {
   /** What Schedule E carries for it on the after. */
   k1After: number;
   ordinaryAfter: number;
+  /**
+   * The most loss Schedule E deducts from it, when a limit held its K-1
+   * loss back on the after (engine v18): a passive loss Form 8582
+   * suspends, a loss over basis or at risk. Any scenario's K-1 loss is held
+   * to it; income passes. Null when nothing was held back.
+   */
+  lossFloor: number | null;
+  /** Rental real estate only (Form 8825): its K-1 is box 2, passive and outside self-employment tax (engine v18). */
+  rental: boolean;
+  /**
+   * Another entity return's K-1 to this one, inside its other income
+   * (engine v18): which unit, at what share of its ordinary income, and the
+   * amount on the after. On every scenario the other income moves with
+   * that unit's income.
+   */
+  tierIn: { from: number; share: number; after: number } | null;
   /* The state side, set once the card is known. */
   card: StateCard | null;
   electing: boolean;
@@ -2080,10 +2209,35 @@ function buildModel(
   // one was read, settles which it is.
   let scorpIncome = n(after.scorpIncome);
   let partnershipIncome = n(after.partnershipIncome);
+  /** Schedule E's two K-1 lines as printed — a $0 among them (engine v18): a line printed as $0 is a K-1 the return deducted nothing of, not a line left unread. */
+  const scorpLineRead = has(after.scorpIncome);
+  const partnershipLineRead = has(after.partnershipIncome);
   let k1Note: string | null = null;
   let s179Note: string | null = null;
   /** The entity returns beyond the first, as reconciled below. */
   let otherNumbers = moreEntities.map((x) => x.numbers);
+  /** Each entity return's floor on the K-1 loss Schedule E deducts, by input order (several returns; one return sets its unit's own). */
+  let lossFloors: (number | null)[] = [];
+  /** Entity returns whose K-1 is another one's income (engine v18): from, to, the share, the amount. */
+  const tierLinks: { from: number; to: number; share: number; after: number }[] = [];
+  /** A partnership K-1 on Schedule E whose 1065 wasn't added, carried as filed on both sides. */
+  let flatK1 = 0;
+  // Rental real estate only (Form 8825): laid out as the entity lines the
+  // engine models a business by, and marked as rental (engine v18).
+  {
+    const rentalNamed = (x: EntityNumbers, name: string) => {
+      const r = asRentalOnly(x);
+      if (!r) return x;
+      softNotes.push(
+        r.mixed
+          ? `${name} has business income on page 1 and rental real estate on Form 8825; only the business is modeled — its rental K-1 (box 2) isn't, so if Schedule E carries it the K-1 check below says so`
+          : `${name} is rental real estate only (Form 8825, its K-1s in box 2): its ${fmt(n(r.numbers.rentalRents))} of rents and ${fmt(n(r.numbers.rentalExpenses))} of expenses run like Schedule E's rentals — passive, outside self-employment tax, the expenses zeroed on the before`,
+      );
+      return r.numbers;
+    };
+    if (entity) entity = rentalNamed(entity, meta.entityName ? `${meta.entityName} (${meta.entityForm ?? "entity return"})` : `The ${meta.entityForm ?? "entity return"}`);
+    otherNumbers = otherNumbers.map((x, i) => rentalNamed(x, entityName(moreEntities[i].name ?? null, formOfEntity(moreEntities[i].form, x), i + 1)));
+  }
   /**
    * A partner's own unreimbursed partnership expenses (UPE: a car, a home
    * office the partnership doesn't pay back), on a Schedule E Part II row
@@ -2178,29 +2332,41 @@ function buildModel(
     softNotes.push(
       `Schedule E also carries ${fmt(partnershipIncome)} from a partnership K-1 whose 1065 wasn't added — not the corporation's (its K-1s are the ${fmt(scorpIncome)} on the S corporation rows). It's carried as filed on both sides; add the 1065 to have its own write-offs counted`,
     );
+    flatK1 = partnershipIncome;
     partnershipIncome = 0;
   }
   // Both spouses own the corporation: two K-1s from it on a joint return,
   // which Schedule E carries together. The household's share is the two
   // shares together (the partnership path below already adds a spouse's).
+  // Each K-1 carries its own section 179 deduction, and Schedule E nets
+  // each row by its own (engine v18): the second K-1's at its share, as an
+  // S corporation allocates it, else the first's alone (as a reader that
+  // took the total off Schedule K would have it).
+  const s179One = n(entity?.k1Section179);
+  const s179Both = entity ? s179Household(entity) : 0;
+  const k1Two = n(entity?.k1Ordinary2);
+  const s179Fit = [s179Both, s179One].find((s) => !off(k1One + k1Two - s, scorpIncome + partnershipIncome));
   if (
     entity &&
     meta.entityForm !== "1065" &&
     status === "mfj" &&
     has(entity.k1Ordinary2) &&
     k1One > 0 &&
-    off(k1One - n(entity.k1Section179), scorpIncome + partnershipIncome) &&
-    !off(k1One + entity.k1Ordinary2 - n(entity.k1Section179), scorpIncome + partnershipIncome)
+    off(k1One - s179One, scorpIncome + partnershipIncome) &&
+    s179Fit !== undefined
   ) {
     const both = k1One + entity.k1Ordinary2;
     softNotes.push(
-      `Both spouses hold K-1s from the corporation (${fmt(k1One)} and ${fmt(entity.k1Ordinary2)}); Schedule E carries the two together, so the household's share is ${fmt(both)}${
+      `Both spouses hold K-1s from the corporation (${fmt(k1One)} and ${fmt(entity.k1Ordinary2)}); Schedule E carries the two together${
+        s179Fit > s179One ? `, each less its own section 179 deduction (${fmt(s179Fit)} together)` : ""
+      }, so the household's share is ${fmt(both)}${
         has(entity.ownershipPct) && has(entity.ownershipPct2) ? ` (${entity.ownershipPct + entity.ownershipPct2}%)` : ""
       }`,
     );
     entity = {
       ...entity,
       k1Ordinary: both,
+      k1Section179: s179Fit > 0 ? s179Fit : entity.k1Section179,
       ownershipPct: has(entity.ownershipPct) && has(entity.ownershipPct2) ? entity.ownershipPct + entity.ownershipPct2 : entity.ownershipPct,
       k1Ordinary2: null,
       ownershipPct2: null,
@@ -2248,6 +2414,9 @@ function buildModel(
   // 1120-S printed before the payroll was final — Case 26's $42,280 of pay
   // against a $40,000 W-2, the $2,280 on the K-1 instead), and in the
   // write-offs otherwise.
+  // Not for a loss Schedule E deducts less of (engine v18): that's a basis,
+  // at-risk or passive-loss limit on the 1040, not the 1120-S's figures —
+  // the K-1 stays as printed and the limit is modeled (`limitedLine`).
   if (
     entity &&
     meta.entityForm === "1120-S" &&
@@ -2255,7 +2424,8 @@ function buildModel(
     !has(entity.k1Ordinary2) &&
     has(entity.k1Ordinary) &&
     has(entity.ordinaryIncome) &&
-    !off(entity.k1Ordinary, entity.ordinaryIncome)
+    !off(entity.k1Ordinary, entity.ordinaryIncome) &&
+    !limitedLine(entity.k1Ordinary - n(entity.k1Section179), scorpIncome, scorpLineRead)
   ) {
     const s179 = n(entity.k1Section179);
     const implied = scorpIncome + s179;
@@ -2296,15 +2466,56 @@ function buildModel(
         return { ...x, k1Ordinary2: null, k1Guaranteed2: null, ownershipPct2: null };
       });
     }
+    // One entity return's K-1 to another on the same 1040 (engine v18): the
+    // receiving return carries it in its own other income (1120-S lines
+    // 4–5, 1065 lines 4–7), to the dollar, and only its own K-1 reaches the
+    // 1040. Counted on Schedule E as well, it was counted twice (Moynihan:
+    // RAYN's 50% K-1 to VIVACIOUS HONEY, $159,080 in both). It's that
+    // entity's income: off this 1040, and on every scenario the receiving
+    // return's other income follows the paying one's ordinary income.
+    {
+      const received = new Set<number>();
+      for (let i = 0; i < all.length; i++) {
+        for (const slot of [2, 1] as const) {
+          const x = all[i];
+          const v = slot === 2 ? x.k1Ordinary2 : x.k1Ordinary;
+          if (!has(v) || v === 0) continue;
+          const to = all.findIndex((y, k) => k !== i && !received.has(k) && has(y.otherIncome) && !off(y.otherIncome, v));
+          if (to < 0) continue;
+          const pct = slot === 2 ? x.ownershipPct2 : x.ownershipPct;
+          const ordinary = n(x.ordinaryIncome);
+          const share = has(pct) && pct > 0 ? pct / 100 : ordinary !== 0 ? round4(v / ordinary) : 0;
+          received.add(to);
+          tierLinks.push({ from: i, to, share, after: v });
+          softNotes.push(
+            `${names[i]}'s K-1 of ${fmt(v)}${has(pct) ? ` (${pct}%)` : ""} is ${names[to]}'s: the same ${fmt(v)} is in that return's other income, so it's the entity's income, not on this 1040. On the before it follows ${names[i]}'s income with its write-offs gone`,
+          );
+          const second = has(x.k1Ordinary2);
+          all[i] =
+            slot === 2
+              ? { ...x, k1Ordinary2: null, k1Guaranteed2: null, ownershipPct2: null }
+              : {
+                  ...x,
+                  k1Ordinary: second ? x.k1Ordinary2 : 0,
+                  k1Guaranteed: second ? x.k1Guaranteed2 : null,
+                  ownershipPct: second ? x.ownershipPct2 : 0,
+                  k1Ordinary2: null,
+                  k1Guaranteed2: null,
+                  ownershipPct2: null,
+                };
+          break;
+        }
+      }
+    }
     const k1Of = (x: EntityNumbers, form: "1120-S" | "1065") =>
       form === "1120-S"
-        ? n(x.k1Ordinary) + n(x.k1Ordinary2) - n(x.k1Section179)
+        ? n(x.k1Ordinary) + n(x.k1Ordinary2) - s179Household(x)
         : n(x.k1Ordinary) + n(x.k1Guaranteed) + n(x.k1Ordinary2) + n(x.k1Guaranteed2);
     const want = (form: "1120-S" | "1065") => all.reduce((s, x, i) => s + (forms[i] === form ? k1Of(x, form) : 0), 0);
     // Column (j) itself — the corporations' section 179 deduction — taken for
     // their income: the S corporation rows are the K-1s less it (engine v17;
     // one 2025 return's $48,650 for $47,470).
-    const s179All = all.reduce((s, x, i) => s + (forms[i] === "1120-S" ? n(x.k1Section179) : 0), 0);
+    const s179All = all.reduce((s, x, i) => s + (forms[i] === "1120-S" ? s179Household(x) : 0), 0);
     if (s179All > 0 && scorpIncome !== 0 && !off(scorpIncome, s179All) && off(scorpIncome, want("1120-S"))) {
       softNotes.push(
         `Schedule E's S corporation income was read as ${fmt(scorpIncome)}, the section 179 deduction in column (j); the rows are the K-1s less it: ${fmt(want("1120-S"))}`,
@@ -2342,6 +2553,7 @@ function buildModel(
         ? {
             ...x,
             k1Ordinary: n(x.k1Ordinary) + x.k1Ordinary2,
+            k1Section179: has(x.k1Section179) ? s179Household(x) : x.k1Section179,
             ownershipPct: has(x.ownershipPct) && has(x.ownershipPct2) ? x.ownershipPct + x.ownershipPct2 : x.ownershipPct,
             k1Ordinary2: null,
             ownershipPct2: null,
@@ -2357,14 +2569,111 @@ function buildModel(
       scorpIncome = wantS;
       partnershipIncome = wantP;
     } else {
-      reasons.push(
-        `The K-1s on the ${all.length} entity returns (${all.map((x, i) => `${names[i]} ${fmt(k1Of(x, forms[i]))}`).join(", ")}) add up to ${fmt(wantS + wantP)}, but Schedule E carries ${fmt(scorpIncome + partnershipIncome)} — another K-1 whose return wasn't added, a basis limitation, or a passive loss`,
-      );
+      // Losses Schedule E deducts less of (engine v18): each line — the S
+      // corporations', the partnerships' — against its own K-1s. Where a
+      // line is a smaller loss than its K-1s, the gap is held back by a
+      // limit (a passive loss Form 8582 suspends, a loss over basis or at
+      // risk) and carried to next year. It's put on the rental-only
+      // entities first, whose losses are passive (Form 8582's own reason),
+      // then on the others in proportion to their losses. The after is
+      // taken as filed; on the before the write-offs are gone, the K-1s are
+      // income, and no limit holds income back.
+      const limited = (() => {
+        let trial = all;
+        const floors: (number | null)[] = all.map(() => null);
+        const notes: string[] = [];
+        for (const f of ["1120-S", "1065"] as const) {
+          const read = f === "1120-S" ? scorpIncome : partnershipIncome;
+          const lineRead = f === "1120-S" ? scorpLineRead : partnershipLineRead;
+          const members = trial.map((_, i) => i).filter((i) => forms[i] === f);
+          const wantOf = () => members.reduce((s, i) => s + k1Of(trial[i], f), 0) - (f === "1065" ? upeOff : 0);
+          if (!members.length) {
+            if (off(read, 0)) return null;
+            continue;
+          }
+          if (!off(wantOf(), read)) continue;
+          // A partnership with two K-1s whose loss is held back: Schedule E
+          // can't say which is this 1040's. The smaller is taken, so the
+          // savings can come out short, never long.
+          if (f === "1065" && status === "mfj") {
+            trial = trial.map((x, i) => {
+              if (!members.includes(i) || !has(x.k1Ordinary2) || n(x.k1Ordinary) + n(x.k1Guaranteed) + x.k1Ordinary2 + n(x.k1Guaranteed2) >= 0) return x;
+              const keepSecond = Math.abs(x.k1Ordinary2) < Math.abs(n(x.k1Ordinary));
+              notes.push(
+                `${names[i]}'s two K-1s (${fmt(n(x.k1Ordinary))} and ${fmt(x.k1Ordinary2)}) can't be told apart on Schedule E, which deducts less of their loss; the smaller, ${fmt(keepSecond ? x.k1Ordinary2 : n(x.k1Ordinary))}, is taken as this 1040's, so the savings can come out short, never long`,
+              );
+              return keepSecond
+                ? { ...x, k1Ordinary: x.k1Ordinary2, k1Guaranteed: x.k1Guaranteed2, ownershipPct: x.ownershipPct2, k1Ordinary2: null, k1Guaranteed2: null, ownershipPct2: null }
+                : { ...x, k1Ordinary2: null, k1Guaranteed2: null, ownershipPct2: null };
+            });
+            if (!off(wantOf(), read)) continue;
+          }
+          const wantF = wantOf();
+          // Less loss than the K-1s, never more than their losses, and a $0
+          // line only when it was printed.
+          const gap = read - wantF;
+          const losers = members.filter((i) => k1Of(trial[i], f) < 0);
+          const capacity = losers.reduce((s, i) => s - k1Of(trial[i], f), 0);
+          if (!losers.length || gap <= TOL || gap > capacity + TOL || (read === 0 && !lineRead)) return null;
+          let left = gap;
+          for (const i of losers.filter((k) => isRentalUnit(trial[k]))) {
+            const take = Math.min(left, -k1Of(trial[i], f));
+            floors[i] = k1Of(trial[i], f) + take;
+            left -= take;
+          }
+          const rest = losers.filter((k) => !isRentalUnit(trial[k]));
+          const restLoss = rest.reduce((s, i) => s - k1Of(trial[i], f), 0);
+          let share = left;
+          rest.forEach((i, k) => {
+            const take = k === rest.length - 1 ? share : Math.round((left * -k1Of(trial[i], f)) / Math.max(1, restLoss));
+            floors[i] = k1Of(trial[i], f) + take;
+            share -= take;
+          });
+          const kind = f === "1120-S" ? "S corporation" : "partnership";
+          notes.push(
+            `Schedule E deducts ${fmt(read)} of the ${kind} K-1s' ${fmt(wantF)}: the other ${fmt(gap)} of loss is held back this year by a basis, at-risk or passive-loss limit (Form 8582, 7203 or 6198) and carried forward — ${losers
+              .map((i) => `${names[i]} ${fmt(k1Of(trial[i], f))} → ${fmt(floors[i] as number)}`)
+              .join(", ")}. The after is taken as filed; on the before the write-offs are gone and the K-1s are income, which no limit holds back`,
+          );
+        }
+        return { trial, floors, notes };
+      })();
+      if (limited) {
+        all = limited.trial;
+        lossFloors = limited.floors;
+        softNotes.push(...limited.notes);
+      } else {
+        reasons.push(
+          `The K-1s on the ${all.length} entity returns (${all.map((x, i) => `${names[i]} ${fmt(k1Of(x, forms[i]))}`).join(", ")}) add up to ${fmt(wantS + wantP)}, but Schedule E carries ${fmt(scorpIncome + partnershipIncome)} — another K-1 whose return wasn't added, a basis limitation, or a passive loss`,
+        );
+      }
     }
     entity = all[0];
     otherNumbers = all.slice(1);
   }
-  after = { ...after, scorpIncome: scorpIncome !== 0 ? scorpIncome : null, partnershipIncome: partnershipIncome !== 0 ? partnershipIncome : null };
+  // A partnership K-1 on Schedule E with no 1065 added, beside a Schedule
+  // C of the client's own (engine v18): the Schedule C is the business, and
+  // the K-1 (Muslim-Ali's −$770 from another LLC) is carried as filed on
+  // both sides — as the S corporation's shape already carries one — with
+  // its self-employment earnings on Schedule SE when the return puts them
+  // there. Its own write-offs aren't counted: the savings can come out
+  // short, never long. With no Schedule C the K-1 is the business, and its
+  // 1065 is still asked for.
+  if (!entity && partnershipIncome !== 0 && scorpIncome === 0 && n(after.businessNetIncome) !== 0) {
+    flatK1 = partnershipIncome;
+    partnershipIncome = 0;
+    softNotes.push(
+      `Schedule E carries ${fmt(flatK1)} from a partnership K-1 whose 1065 wasn't added, beside the Schedule C. It's carried as filed on both sides; add the 1065 to have its own write-offs counted`,
+    );
+  }
+  // A line printed as $0 stays read (engine v18): an S corporation K-1 the
+  // return deducted none of (a passive loss Form 8582 suspends in full) is
+  // the K-1 check's to judge, not a line left unread.
+  after = {
+    ...after,
+    scorpIncome: scorpIncome !== 0 || (scorpLineRead && !!entity && !several && meta.entityForm !== "1065") ? scorpIncome : null,
+    partnershipIncome: partnershipIncome !== 0 || (partnershipLineRead && !!entity && !several && meta.entityForm === "1065") ? partnershipIncome : null,
+  };
   if (!several && scorpIncome !== 0 && partnershipIncome !== 0) {
     reasons.push(
       "The return carries both an S corporation K-1 and a partnership K-1, and only one entity return was added — add the other entity's return (1120-S or 1065) so each business gets its own before",
@@ -2422,7 +2731,10 @@ function buildModel(
           : "soleProp";
   const kinds: Model["kinds"] = {
     scorp: several ? unitForms.includes("1120-S") : shape === "scorp",
-    partnership: several ? unitForms.includes("1065") : shape === "partnership",
+    // A rental-only partnership (Form 8825) is rental income, not a partner's business: no Schedule SE (engine v18).
+    partnership: several
+      ? unitForms.some((f, i) => f === "1065" && !isRentalUnit(i === 0 ? (entity as EntityNumbers) : otherNumbers[i - 1]))
+      : shape === "partnership",
     schC: false,
   };
   kinds.schC = shape === "soleProp" || (schC && (kinds.scorp || kinds.partnership));
@@ -2506,15 +2818,16 @@ function buildModel(
     );
   }
   /** The entity returns the before is figured from, each with how the reasons name it. */
-  const unitInputs: { e: EntityNumbers; form: "1120-S" | "1065"; name: string; stateCode: string | null }[] = several
+  const unitInputs: { e: EntityNumbers; form: "1120-S" | "1065"; name: string; stateCode: string | null; idx: number }[] = several
     ? [entity as EntityNumbers, ...otherNumbers].map((x, i) => ({
         e: x,
         form: unitForms[i],
         name: entityName(i === 0 ? (meta.entityName ?? null) : (moreEntities[i - 1].name ?? null), unitForms[i], i),
         stateCode: i === 0 ? (meta.entityStateCode ?? null) : (moreEntities[i - 1].stateCode ?? null),
+        idx: i,
       }))
     : shape !== "soleProp" && entity
-      ? [{ e: entity, form: shape === "partnership" ? "1065" : "1120-S", name: shape === "partnership" ? "1065" : "1120-S", stateCode: meta.entityStateCode ?? null }]
+      ? [{ e: entity, form: shape === "partnership" ? "1065" : "1120-S", name: shape === "partnership" ? "1065" : "1120-S", stateCode: meta.entityStateCode ?? null, idx: 0 }]
       : [];
   for (const ui of unitInputs) {
     // A partnership with no income at all this year (a holding company, one
@@ -2565,7 +2878,33 @@ function buildModel(
    * DeCypher's): the savings can come out short, never long.
    */
   const farm = n(after.farmIncome);
-  const otherIncome = (after.totalIncome as number) - w2 - n(after.businessNetIncome) - k1Income - rentalReadNet - farm;
+  /**
+   * The partnership K-1 carried as filed (`flatK1`), when the return puts
+   * its earnings on Schedule SE (engine v18): there with the Schedule C,
+   * like the farm, on every scenario. Schedule SE line 2 says so when it
+   * was read — the Schedule C's net profit with the K-1, or without it —
+   * and otherwise the SE tax as printed, when only one of the two gives it.
+   */
+  const flatSe = (() => {
+    if (flatK1 === 0) return 0;
+    const schCNet = n(after.businessNetIncome);
+    const seRead = more.schedulesSE ?? [];
+    if (seRead.length) {
+      const line2 = seRead.reduce((s, r) => s + r.schC, 0);
+      return !off(line2, schCNet + flatK1) ? flatK1 : 0;
+    }
+    if (!has(after.seTax)) return 0;
+    const se = (profit: number) => scheduleSe(fed, profit, w2).tax;
+    return !off(se(schCNet + farm + flatK1), after.seTax) && off(se(schCNet + farm), after.seTax) ? flatK1 : 0;
+  })();
+  if (flatK1 !== 0) {
+    softNotes.push(
+      flatSe !== 0
+        ? `The ${fmt(flatK1)} partnership K-1 carried as filed is self-employment income on the return (Schedule SE line 2 has it with the Schedule C), so it's on Schedule SE on both sides`
+        : `The ${fmt(flatK1)} partnership K-1 carried as filed isn't on Schedule SE (a limited partner's share, or an investment), so it's income on both sides and nothing more`,
+    );
+  }
+  const otherIncome = (after.totalIncome as number) - w2 - n(after.businessNetIncome) - k1Income - rentalReadNet - farm - flatSe;
 
   /* 2 · shape: is this a return the engine models? */
 
@@ -2758,6 +3097,10 @@ function buildModel(
       cityRules: null,
       cityIn: null,
       extra: { franchise: 0, pte: 0, city: 0 },
+      // Several returns: the floor the K-1 reconciliation set; one return sets its own below.
+      lossFloor: several ? (lossFloors[ui.idx] ?? null) : null,
+      rental: isRentalUnit(e),
+      tierIn: null,
     };
   };
   /** A reason about one unit: as it always read with one entity return, named with several. */
@@ -2803,10 +3146,20 @@ function buildModel(
     // deduction (box 11, column (j)); a read of column (k) alone was
     // reconciled above.
     const s179 = n(e.k1Section179);
+    let lossFloor = u.lossFloor;
     if (!several && off(k1 - s179, scorpIncome)) {
-      reasons.push(
-        `The 1040's S corporation income (${fmt(scorpIncome)}) doesn't match the K-1's ordinary income (${fmt(k1)})${s179 > 0 ? ` less its ${fmt(s179)} section 179 deduction (${fmt(k1 - s179)})` : ""} — a second K-1, a basis limitation, or a passive loss`,
-      );
+      if (limitedLine(k1 - s179, scorpIncome, scorpLineRead)) {
+        // A loss Schedule E deducts less of (engine v18): Kumar's −$58,283
+        // K-1, a passive loss Form 8582 suspends in full, on Schedule E as $0.
+        lossFloor = scorpIncome;
+        softNotes.push(
+          `The K-1's ${fmt(k1 - s179)} loss isn't all on Schedule E: the 1040 deducts ${fmt(scorpIncome)} of it this year, and the other ${fmt(scorpIncome - (k1 - s179))} is held back by a basis, at-risk or passive-loss limit (Form 8582, 7203 or 6198) and carried forward. The after is taken as filed; on the before the write-offs are gone and the K-1 is income, which no limit holds back`,
+        );
+      } else {
+        reasons.push(
+          `The 1040's S corporation income (${fmt(scorpIncome)}) doesn't match the K-1's ordinary income (${fmt(k1)})${s179 > 0 ? ` less its ${fmt(s179)} section 179 deduction (${fmt(k1 - s179)})` : ""} — a second K-1, a basis limitation, or a passive loss`,
+        );
+      }
     }
     if (totalDeductions - officerComp - pension - stateAddBack < -TOL) {
       unitReason(
@@ -2821,7 +3174,8 @@ function buildModel(
       ownershipPct,
       shares: [],
       partners: [],
-      k1After: k1 - s179,
+      k1After: lossFloor !== null ? Math.max(k1 - s179, lossFloor) : k1 - s179,
+      lossFloor,
     };
   };
 
@@ -2879,12 +3233,32 @@ function buildModel(
         k1Sum = k1s[0].ordinary + k1s[0].guaranteed;
       }
     }
+    let lossFloor = u.lossFloor;
     if (!several && off(k1Sum - unitUpe, partnershipIncome)) {
-      reasons.push(
-        `The 1040's partnership income (${fmt(partnershipIncome)}) doesn't match the K-1s' ordinary income and guaranteed payments (${fmt(k1Sum)})${
-          unitUpe > 0 ? ` less the ${fmt(unitUpe)} of unreimbursed partnership expenses` : ""
-        } — another K-1, a basis limitation, or a passive loss`,
-      );
+      // A loss Schedule E deducts less of (engine v18). With two K-1s the
+      // line can't say which is this 1040's: the smaller is taken, so the
+      // savings can come out short, never long.
+      const pick = k1s.length > 1 && k1Sum < 0 ? [Math.abs(k1s[1].ordinary) < Math.abs(k1s[0].ordinary) ? k1s[1] : k1s[0]] : k1s;
+      const pickSum = pick.reduce((s, k) => s + k.ordinary + k.guaranteed, 0);
+      if (limitedLine(pickSum - unitUpe, partnershipIncome, partnershipLineRead)) {
+        if (pick.length < k1s.length) {
+          softNotes.push(
+            `The 1065's two K-1s (${fmt(k1s[0].ordinary)} and ${fmt(k1s[1].ordinary)}) can't be told apart on Schedule E, which deducts less of their loss; the smaller, ${fmt(pick[0].ordinary)}, is taken as this 1040's, so the savings can come out short, never long`,
+          );
+          k1s = pick;
+          k1Sum = pickSum;
+        }
+        lossFloor = partnershipIncome;
+        softNotes.push(
+          `The K-1's ${fmt(k1Sum - unitUpe)} loss isn't all on Schedule E: the 1040 deducts ${fmt(partnershipIncome)} of it this year, and the other ${fmt(partnershipIncome - (k1Sum - unitUpe))} is held back by a basis, at-risk or passive-loss limit (Form 8582 or 6198) and carried forward. The after is taken as filed; on the before the write-offs are gone and the K-1 is income, which no limit holds back`,
+        );
+      } else {
+        reasons.push(
+          `The 1040's partnership income (${fmt(partnershipIncome)}) doesn't match the K-1s' ordinary income and guaranteed payments (${fmt(k1Sum)})${
+            unitUpe > 0 ? ` less the ${fmt(unitUpe)} of unreimbursed partnership expenses` : ""
+          } — another K-1, a basis limitation, or a passive loss`,
+        );
+      }
     }
     const gpOnReturn = k1s.reduce((s, k) => s + k.guaranteed, 0);
     if (gpOnReturn > guaranteed + TOL) {
@@ -2922,15 +3296,20 @@ function buildModel(
     if (shares.reduce((s, p) => s + p, 0) > 1.001) {
       unitReason(ui, "The partners' profit shares on this return add up to more than 100%");
     }
+    // Held to what Schedule E deducts when a limit held the loss back; a
+    // rental-only partnership's K-1 is rental income, not a partner's
+    // business: no Schedule SE, so no partners in the household's list.
+    const limitedPartners = lossFloor !== null ? limitPartners(partners, lossFloor) : partners;
     return {
       ...u,
       writeOffs: Math.max(0, totalDeductions - guaranteed),
       section179: 0,
       ownershipPct: 1,
       shares,
-      partners,
+      partners: u.rental ? [] : limitedPartners,
       // With one entity return, what the 1040's line carries for it.
-      k1After: several ? k1Sum - unitUpe : partnershipIncome,
+      k1After: several ? (lossFloor !== null ? Math.max(k1Sum - unitUpe, lossFloor) : k1Sum - unitUpe) : partnershipIncome,
+      lossFloor,
     };
   };
 
@@ -2941,6 +3320,11 @@ function buildModel(
     if (!several && reasons.length) return refuse();
   }
   if (reasons.length) return refuse();
+  // One entity's K-1 inside another's other income (engine v18): the
+  // receiving unit's other income follows the paying unit on every scenario.
+  for (const t of tierLinks) {
+    if (units[t.to] && units[t.from]) units[t.to].tierIn = { from: t.from, share: t.share, after: t.after };
+  }
   const scorpUnits = units.filter((u) => u.form === "1120-S");
   const partnershipUnits = units.filter((u) => u.form === "1065");
   const sum = (list: Unit[], f: (u: Unit) => number) => list.reduce((s, u) => s + f(u), 0);
@@ -3095,9 +3479,18 @@ function buildModel(
   // the CPA's before prints keep them. Those two are recomputed.
   /** The K-1's section 179 deduction: a write-off of the entity's, outside line 21, zeroed on the before with the rest. */
   const section179 = sum(scorpUnits, (u) => u.section179);
-  /** Every K-1 on Schedule E, as the after carries them; and the S corporations' alone. */
-  const k1After = sum(units, (u) => u.k1After);
-  const scorpK1After = sum(scorpUnits, (u) => u.k1After);
+  /** Every business K-1 on Schedule E, as the after carries them; and the S corporations' alone. A rental-only entity's isn't business income. */
+  const k1After = sum(units.filter((u) => !u.rental), (u) => u.k1After);
+  const scorpK1After = sum(scorpUnits.filter((u) => !u.rental), (u) => u.k1After);
+  /** The rental-only entities' K-1s on the after (box 2): passive rental income, carried in other income (engine v18). */
+  const rentalK1After = sum(units.filter((u) => u.rental), (u) => u.k1After);
+  /**
+   * Earlier years' suspended passive losses (Form 8582 lines 1c + 2c) a
+   * rental-only entity's income absorbs on the before, when there's no
+   * Schedule E rental to take them (engine v18): with its expenses gone it
+   * earns its rents, and the losses suspended against it come off them.
+   */
+  const unitPrior = rentalK1After !== 0 || units.some((u) => u.rental) ? (hasRental ? 0 : Math.max(0, n(after.passivePriorUnallowed))) : 0;
   // When no mix of dependents gives the credit on line 19, the counts as
   // listed stand and the difference on line 19 is carried across below.
   const dependentsInferred = inferDependents(fed, status, after);
@@ -3239,14 +3632,14 @@ function buildModel(
     qbiLimit: qbiLimitAfter,
     extra: NO_EXTRAS,
     // Schedule F beside the Schedule C: the same Schedule SE, carried as filed.
-    netProfit: netAfter + farm,
+    netProfit: netAfter + farm + flatSe,
     schCSplit: splitFor(null),
     sehiShare,
     schCOwner: 0,
     // The Schedule C's wage base is used up by the W-2 wages — the sole
     // proprietor's, or the shareholder's (the officer's own and any other
     // employer's) when the Schedule C sits next to the corporation.
-    seWages: hasSchC ? w2 : 0,
+    seWages: hasSchC || flatSe !== 0 ? w2 : 0,
     // A partnership's K-1 income rides in with the partners, not here.
     scorp: scorpK1After,
     partners,
@@ -3254,7 +3647,8 @@ function buildModel(
     medicareWages,
     scorpMedicareWages: officerMedicare,
     claimedAsDependent,
-    otherIncome,
+    // A rental-only entity's K-1 is passive rental income: other income here.
+    otherIncome: otherIncome + rentalK1After,
     rental,
     carried: 0,
     sep,
@@ -3695,8 +4089,12 @@ function buildModel(
   const stateAdjustments = n(after.stateAdjustments);
   const stateDeduction = has(after.stateDeduction) ? after.stateDeduction : null;
   // A city resident's tax on the state return (New York City on the IT-201):
-  // the line being read is what says the filer lives there.
-  let localResident = n(after.stateLocalTax) > 0;
+  // the line being read is what says the filer lives there — printed as $0
+  // too (engine v18). The reader leaves it out when the city block is blank;
+  // a $0 is the city's tax wiped out by its household credit, and on the
+  // before, with the write-offs gone, the city taxes the same resident
+  // (Tian: $15 of city tax less a $15 credit, $4,407 on the before).
+  let localResident = has(after.stateLocalTax);
   const stateInputsFor = (
     f: Federal,
     businessIncome: number,
@@ -3986,7 +4384,7 @@ function buildModel(
   for (const o of more.states ?? []) {
     const code = o.stateCode.toUpperCase();
     const sc = card.states[code];
-    const r = o.numbers;
+    let r = o.numbers;
     if (!sc) {
       reasons.push(`${code} isn't on the ${year} tax tables yet — add its card on the Tax Tables page, or type the before column`);
       continue;
@@ -3995,9 +4393,30 @@ function buildModel(
       if (n(r.stateTotalTax) > 0) reasons.push(`${sc.name}'s card says no income tax, but the after return carries ${fmt(n(r.stateTotalTax))} of ${sc.name} tax`);
       continue;
     }
+    // Its total line not read (engine v18): what the payments come to less
+    // the refund plus what's owed, like the main state's; or $0 on a part-
+    // year or nonresident return that taxes no income at all — Tian's
+    // Georgia Form 500, $0 of Georgia income on Schedule 3, whose tax page
+    // the print selection had left out.
     if (!has(r.stateTotalTax)) {
-      reasons.push(`${sc.name} total tax wasn't read from the after return (its ${o.stateForm ?? "state"} return)`);
-      continue;
+      const settled =
+        has(r.statePayments) && (has(r.stateRefund) || has(r.stateAmountOwed)) ? r.statePayments - n(r.stateRefund) + n(r.stateAmountOwed) : null;
+      if (settled !== null && settled >= 0) {
+        softNotes.push(
+          `${sc.name}'s total tax line wasn't read (its ${o.stateForm ?? "state"} return); payments of ${fmt(r.statePayments as number)}${
+            has(r.stateRefund) ? ` less the ${fmt(r.stateRefund)} refund` : ""
+          }${has(r.stateAmountOwed) ? ` plus the ${fmt(r.stateAmountOwed)} still owed` : ""} put it at ${fmt(settled)}`,
+        );
+        r = { ...r, stateTotalTax: settled };
+      } else if (has(r.stateSourceIncome) && r.stateSourceIncome <= 0 && n(r.statePayments) === 0 && n(r.stateAmountOwed) === 0) {
+        softNotes.push(
+          `${sc.name}'s total tax line wasn't read (its ${o.stateForm ?? "state"} return), but the return taxes no ${sc.name} income (${fmt(r.stateSourceIncome)} of ${sc.name}-source income), so its tax is $0`,
+        );
+        r = { ...r, stateTotalTax: 0 };
+      } else {
+        reasons.push(`${sc.name} total tax wasn't read from the after return (its ${o.stateForm ?? "state"} return)`);
+        continue;
+      }
     }
     const form = normalizeForm(o.stateForm);
     const residentForm = !form || !sc.form || form === normalizeForm(sc.form);
@@ -4148,17 +4567,22 @@ function buildModel(
   };
 
   /** One entity return in one scenario: its ordinary income, the household's K-1 from it, its own tax and its lines. */
-  const unitRun = (u: Unit, j: number, s: Scenario) => {
+  /**
+   * `otherNow`: the entity's other income in this scenario, when another
+   * unit's K-1 is inside it (`tierIn`) — it follows that unit's income.
+   */
+  const unitRun = (u: Unit, j: number, s: Scenario, otherNow: number = u.other) => {
     const e = u.e;
+    const income = u.gross + otherNow;
     if (u.form === "1065") {
       // The 1065 with its deductions switched on or off: the write-offs,
       // and the guaranteed payments (the partners' health premiums, which
       // come back as the health insurance deduction on the 1040). Each
       // partner's K-1 is their share of what's left.
-      const ordinary = u.income - (s.writeOffs ? u.cogs + u.writeOffs : 0) - (s.healthInsurance ? u.guaranteed : 0);
+      const ordinary = income - (s.writeOffs ? u.cogs + u.writeOffs : 0) - (s.healthInsurance ? u.guaranteed : 0);
       const ords = allocate(ordinary, u.shares);
       const offset = partnerOffsets[partnershipUnits.indexOf(u)];
-      const ps: Partner[] = partners.slice(offset, offset + u.partners.length).map((p, k) => ({
+      let ps: Partner[] = partners.slice(offset, offset + u.partners.length).map((p, k) => ({
         ...p,
         // The partner's own unreimbursed expenses are write-offs: on Schedule
         // E with the others switched on, gone with them off.
@@ -4167,7 +4591,12 @@ function buildModel(
         guaranteed: s.healthInsurance ? p.guaranteed : 0,
         premiums: s.healthInsurance ? p.premiums : 0,
       }));
-      const k1 = ps.reduce((t, p) => t + p.ordinary + p.guaranteed, 0);
+      // A loss held back on the after is held back the same way here; income passes.
+      if (u.lossFloor !== null && !u.rental) ps = limitPartners(ps, u.lossFloor);
+      // A rental-only partnership has no partners in the Schedule SE sense:
+      // its K-1s (box 2) are rental income, carried by `run`.
+      const rentalK1 = u.rental ? ords.reduce((t, v) => t + v, 0) : 0;
+      const k1 = u.rental ? (u.lossFloor !== null ? Math.max(rentalK1, u.lossFloor) : rentalK1) : ps.reduce((t, p) => t + p.ordinary + p.guaranteed, 0);
       // The state's own adjustment to the partnership's income, carried.
       const stateNet = has(e.stateNetIncome) ? ordinary + ((e.stateNetIncome as number) - u.ordinaryAfter) : ordinary;
       // A card without partnership rules: what the partnership pays its
@@ -4178,12 +4607,12 @@ function buildModel(
         : u.card
           ? { netIncome: stateNet, franchise: n(e.stateTax), pte: 0, city: n(e.cityTax), total: n(e.stateTax) + n(e.cityTax) }
           : null;
-      const numbers: EntityNumbers = {
+      let numbers: EntityNumbers = {
         ...emptyEntityNumbers(),
         grossReceipts: u.gross,
         cogs: s.writeOffs && u.cogs > 0 ? u.cogs : null,
-        otherIncome: u.other ? u.other : null,
-        totalIncome: u.income - (s.writeOffs ? u.cogs : 0),
+        otherIncome: otherNow ? otherNow : null,
+        totalIncome: income - (s.writeOffs ? u.cogs : 0),
         wages: s.writeOffs ? e.wages : null,
         repairs: s.writeOffs ? e.repairs : null,
         rents: s.writeOffs ? e.rents : null,
@@ -4195,7 +4624,7 @@ function buildModel(
         pension: s.writeOffs ? e.pension : null,
         employeeBenefits: s.writeOffs ? e.employeeBenefits : null,
         otherDeductions: s.writeOffs ? e.otherDeductions : null,
-        totalDeductions: u.income - (s.writeOffs ? u.cogs : 0) - ordinary,
+        totalDeductions: income - (s.writeOffs ? u.cogs : 0) - ordinary,
         ordinaryIncome: ordinary,
         k1Ordinary: ords[0] ?? null,
         k1Guaranteed: ps[0] && ps[0].guaranteed > 0 ? ps[0].guaranteed : null,
@@ -4215,18 +4644,22 @@ function buildModel(
         stateAmountDue: ent ? Math.max(0, ent.franchise + (has(e.pteTax) ? ent.pte : 0) - n(e.statePayments)) : null,
         stateRefund: ent ? Math.max(0, n(e.statePayments) - ent.franchise - (has(e.pteTax) ? ent.pte : 0)) || null : null,
       };
-      return { ordinary, k1, ps, ent, numbers, j };
+      // A rental-only partnership's lines are Form 8825's and its K-1s box 2, as read.
+      if (u.rental) numbers = rentalLines(numbers, u, s, ords);
+      return { ordinary, k1, ps: u.rental ? [] : ps, ent, numbers, j, income };
     }
     const ordinary =
-      u.income -
+      income -
       (s.writeOffs ? u.cogs + u.writeOffs : 0) -
       (s.salary ? u.officerComp : 0) -
       (s.retirement ? u.pension : 0) -
       (s.pte ? u.stateAddBack : 0);
     // The K-1's section 179 deduction goes with the write-offs: box 1
-    // stays gross of it, Schedule E nets it.
+    // stays gross of it, Schedule E nets it. A loss held back on the after
+    // is held back the same way here; income passes.
     const k1Gross = Math.round(ordinary * u.ownershipPct);
-    const k1 = k1Gross - (s.writeOffs ? u.section179 : 0);
+    const k1Net = k1Gross - (s.writeOffs ? u.section179 : 0);
+    const k1 = u.lossFloor !== null ? Math.max(k1Net, u.lossFloor) : k1Net;
     const comp = s.salary ? u.officerComp : 0;
     const stateNet = ordinary + (s.pte ? u.stateAddBack : 0) + u.stateNetAdj;
     // The city's tax follows the ordinary income of the scenario at the
@@ -4234,12 +4667,12 @@ function buildModel(
     const ent = u.card?.entity
       ? entityWithExtra(entityTax(u.card, stateNet, u.gross, s.pte && u.electing, u.cityIn ? { ...u.cityIn, base: ordinary } : null), u.extra)
       : null;
-    const numbers: EntityNumbers = {
+    let numbers: EntityNumbers = {
       ...emptyEntityNumbers(),
       grossReceipts: u.gross,
       cogs: s.writeOffs && u.cogs > 0 ? u.cogs : null,
-      otherIncome: u.other ? u.other : null,
-      totalIncome: u.income - (s.writeOffs ? u.cogs : 0),
+      otherIncome: otherNow ? otherNow : null,
+      totalIncome: income - (s.writeOffs ? u.cogs : 0),
       officerComp: s.salary && comp > 0 ? comp : null,
       wages: s.writeOffs ? e.wages : null,
       repairs: s.writeOffs ? e.repairs : null,
@@ -4251,7 +4684,7 @@ function buildModel(
       pension: s.retirement && u.pension > 0 ? u.pension : null,
       employeeBenefits: s.writeOffs ? e.employeeBenefits : null,
       otherDeductions: s.writeOffs ? e.otherDeductions : null,
-      totalDeductions: u.income - (s.writeOffs ? u.cogs : 0) - ordinary,
+      totalDeductions: income - (s.writeOffs ? u.cogs : 0) - ordinary,
       ordinaryIncome: ordinary,
       k1Ordinary: k1Gross,
       k1Section179: s.writeOffs && u.section179 > 0 ? u.section179 : null,
@@ -4274,7 +4707,8 @@ function buildModel(
       cityPayments: e.cityPayments,
       cityAmountDue: ent && (u.cityIn || has(e.cityTax)) ? Math.max(0, ent.city - n(e.cityPayments)) : null,
     };
-    return { ordinary, k1, ps: [] as Partner[], ent, numbers, j };
+    if (u.rental) numbers = rentalLines(numbers, u, s, [k1Gross]);
+    return { ordinary, k1, ps: [] as Partner[], ent, numbers, j, income };
   };
 
   const run = (s: Scenario): Outcome => {
@@ -4295,26 +4729,56 @@ function buildModel(
       : hasSchC
         ? schCKept - (s.expenses ? schCogs + expenses : 0) - (s.homeOffice ? homeOffice : 0)
         : 0;
-    const outcomes = units.map((u, j) => unitRun(u, j, s));
-    const k1 = outcomes.reduce((t, o) => t + o.k1, 0);
-    const scorpK1 = outcomes.reduce((t, o, j) => t + (units[j].form === "1120-S" ? o.k1 : 0), 0);
+    // Each entity return in this scenario; one whose other income holds
+    // another's K-1 (`tierIn`) after that one, its other income moved by
+    // what that one's income moved by.
+    const outcomes: ReturnType<typeof unitRun>[] = new Array(units.length);
+    for (let pass = 0; pass <= units.length; pass++) {
+      for (const [j, u] of units.entries()) {
+        if (outcomes[j]) continue;
+        const t = u.tierIn;
+        // (A loop of K-1s through each other is run as read on the last pass.)
+        if (t && !outcomes[t.from] && pass < units.length) continue;
+        const otherNow = t && outcomes[t.from] ? u.other - t.after + Math.round(outcomes[t.from].ordinary * t.share) : u.other;
+        outcomes[j] = unitRun(u, j, s, otherNow);
+      }
+    }
+    // The rental-only entities' K-1s (box 2) are rental income, not
+    // business: carried in other income, where earlier years' suspended
+    // passive losses come off any income they earn (engine v18).
+    let priorLeft = unitPrior;
+    let rentalK1 = 0;
+    const rentalLine = { scorp: 0, partnership: 0 };
+    outcomes.forEach((o, j) => {
+      if (!units[j].rental) return;
+      let v = o.k1;
+      if (v > 0 && priorLeft > 0) {
+        const used = Math.min(v, priorLeft);
+        v -= used;
+        priorLeft -= used;
+      }
+      rentalK1 += v;
+      rentalLine[units[j].form === "1120-S" ? "scorp" : "partnership"] += v;
+    });
+    const k1 = outcomes.reduce((t, o, j) => t + (units[j].rental ? 0 : o.k1), 0);
+    const scorpK1 = outcomes.reduce((t, o, j) => t + (units[j].form === "1120-S" && !units[j].rental ? o.k1 : 0), 0);
     let ps = outcomes.flatMap((o) => o.ps);
     /** Share of the write-offs switched on, 0 on the before and 1 on the after. */
     const fraction =
       shape === "soleProp"
         ? (schCKept - schCProfit) / Math.max(1, schCKept - netAfter)
-        : (sum(units, (u) => u.income) - outcomes.reduce((t, o) => t + o.ordinary, 0)) / Math.max(1, sum(units, (u) => u.income - u.ordinaryAfter));
+        : (outcomes.reduce((t, o) => t + o.income - o.ordinary, 0)) / Math.max(1, sum(units, (u) => u.income - u.ordinaryAfter));
     /** The business income the state starts from: the Schedule C beside a partnership counts too. */
     const biz = shape === "soleProp" ? schCProfit : k1 + (shape === "partnership" && hasSchC ? schCProfit : 0);
     if (shape === "soleProp") {
       // Without Form 8995-A, the wage limit is the Schedule C's own wages,
       // which leave with the expenses.
-      fi = { ...inputs, netProfit: schCProfit + farm, schCSplit: splitFor(s), qbiLimit: qbiRead ? null : { w2Wages: s.expenses ? n(after.schCWages) : 0, ubia: 0 } };
+      fi = { ...inputs, netProfit: schCProfit + farm + flatSe, schCSplit: splitFor(s), qbiLimit: qbiRead ? null : { w2Wages: s.expenses ? n(after.schCWages) : 0, ubia: 0 } };
     } else if (shape === "partnership") {
       fi = {
         ...inputs,
         partners: ps,
-        netProfit: hasSchC ? schCProfit + farm : inputs.netProfit,
+        netProfit: hasSchC ? schCProfit + farm + flatSe : inputs.netProfit,
         // The premiums the partnership paid go with the guaranteed payments.
         sehiPaid: premiumsViaPartners ? (s.healthInsurance ? sehiPaid : null) : inputs.sehiPaid,
         // Over the threshold, Form 8995-A's QBI scales with the K-1 and the
@@ -4345,8 +4809,8 @@ function buildModel(
         ...inputs,
         scorp: scorpK1,
         partners: ps,
-        netProfit: schCProfit + farm,
-        seWages: hasSchC ? box1 + employee + outsideWages + (officerComp > 0 ? (s.salary ? ssExtra : 0) : ssExtra) : 0,
+        netProfit: schCProfit + farm + flatSe,
+        seWages: hasSchC || flatSe !== 0 ? box1 + employee + outsideWages + (officerComp > 0 ? (s.salary ? ssExtra : 0) : ssExtra) : 0,
         w2: box1 + employee + outsideWages,
         medicareWages: officerMed + employee + outsideWages,
         scorpMedicareWages: officerMed,
@@ -4370,6 +4834,8 @@ function buildModel(
     // What the client saved into a SEP, an IRA or an HSA, and a sole
     // proprietor's health insurance deduction: things DeCypher set up or
     // caught, so off on the before (the tax team's call, 2026-10-05).
+    // The rental-only entities' K-1s in this scenario, in other income.
+    if (units.some((u) => u.rental)) fi = { ...fi, otherIncome: inputs.otherIncome - rentalK1After + rentalK1 };
     if (!s.retirement) fi = { ...fi, sep: 0, carried: Math.max(0, fi.carried - ira - hsa) };
     if (hasSchC && shape !== "scorp" && !premiumsViaPartners && !s.healthInsurance) fi = { ...fi, sehiPaid: null };
     // Without the rental expenses every property nets its rents: profits
@@ -4461,6 +4927,7 @@ function buildModel(
         state: shape === "scorp" ? Math.max(0, n(after.stateWithholding) - stateWithheldOff) : null,
       },
       w2Lines,
+      { scorp: rentalLine.scorp, partnership: rentalLine.partnership + flatK1, flatSe },
     );
     const otherStateNumbers = otherStates.map((o, i) =>
       fillStateNumbers(o.read, otherSt[i], o.card, scaleSource(o.source, o.sourceBusiness, bizNow)),
@@ -4806,6 +5273,13 @@ function fillNumbers(
   withholding: { federal: number | null; state: number | null },
   /** The W-2 lines of this scenario, when the return's were read; null carries the after's. */
   w2Lines: W2Lines | null,
+  /**
+   * Schedule E lines beyond the modeled businesses (engine v18): the
+   * rental-only entities' K-1s, and a partnership K-1 carried as filed —
+   * whose SE part (`flatSe`) rides inside the self-employment profit, like
+   * the farm.
+   */
+  extraK1: { scorp: number; partnership: number; flatSe: number } = { scorp: 0, partnership: 0, flatSe: 0 },
 ): ReturnNumbers {
   const mode = creditMode(stateCard);
   const out = emptyNumbers();
@@ -4820,13 +5294,16 @@ function fillNumbers(
   out.otherDependents = s.noKids ? null : after.otherDependents;
   // A sole proprietor's Schedule C, or the side business beside an entity.
   // The farm rides inside the self-employment profit (deriveBefore's `farm`); Schedule 1 line 3 is the Schedule C alone.
-  const farm = n(after.farmIncome);
+  const farm = n(after.farmIncome) + extraK1.flatSe;
   out.businessNetIncome = shape === "soleProp" ? fi.netProfit - farm : fi.netProfit - farm !== 0 ? fi.netProfit - farm : null;
   out.farmIncome = after.farmIncome;
   out.schCReturns = after.schCReturns;
   out.schCOtherIncome = after.schCOtherIncome;
-  out.scorpIncome = kinds.scorp ? fi.scorp : null;
-  out.partnershipIncome = kinds.partnership ? fi.partners.reduce((s, p) => s + p.ordinary + p.guaranteed, 0) : null;
+  out.scorpIncome = kinds.scorp || extraK1.scorp !== 0 ? fi.scorp + extraK1.scorp : null;
+  out.partnershipIncome =
+    kinds.partnership || extraK1.partnership !== 0
+      ? fi.partners.reduce((s, p) => s + p.ordinary + p.guaranteed, 0) + extraK1.partnership
+      : null;
   if (fi.rental) {
     out.rentalIncome = b.rentalDeducted;
     // On the after these are the lines as read; with the rental expenses
@@ -5262,7 +5739,11 @@ export function deriveBefore(
   if (m.units.length > 1) {
     // Several businesses: each entity return's own before.
     const parts = m.units.map((u) =>
-      u.form === "1120-S"
+      u.rental
+        ? `${u.label}: its ${fmt(u.writeOffs)} of rental expenses (Form 8825), so its K-1 is its share of the rents${
+            !facts.rental && n(after.passivePriorUnallowed) > 0 ? `, less the earlier years' suspended passive losses (Form 8582) that income frees` : ""
+          }`
+        : u.form === "1120-S"
         ? `${u.label}: cost of goods sold (${fmt(u.cogs)}), write-offs (${fmt(u.writeOffs)})${u.section179 > 0 ? `, the ${fmt(u.section179)} section 179 deduction` : ""}, the owner's ${fmt(u.officerComp)} of pay, the ${fmt(u.pension)} retirement plan and the ${fmt(u.stateAddBack)} of state taxes`
         : `${u.label}: ${u.cogs > 0 ? `cost of goods sold (${fmt(u.cogs)}), ` : ""}write-offs (${fmt(u.writeOffs)}) and the ${fmt(u.guaranteed)} of guaranteed payments`,
     );

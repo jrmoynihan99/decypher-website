@@ -18,7 +18,9 @@
 import { readFileSync } from "node:fs";
 import { attributeStrategies, deriveBefore, entityTax } from "../src/lib/tax-recap/derive.ts";
 import { computeRecap } from "../src/lib/tax-recap/compute.ts";
-import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers, unplacedAdjustments } from "../src/lib/tax-recap/schema.ts";
+import { emptyEntityNumbers, emptyNumbers, emptyStateNumbers, sanitizeEstimates, stateLinesMissing, unplacedAdjustments } from "../src/lib/tax-recap/schema.ts";
+import { estimateNotes, estimateTimeline, hasEstimates, mergeEstimates, parseEntityEstimates, parseIndividualEstimates } from "../src/lib/tax-recap/estimates.ts";
+import { selectPages, statePageNumbers } from "../src/lib/tax-recap/pages.ts";
 import { cardFor, validateYearCard } from "../src/lib/tax-recap/tables.ts";
 
 /**
@@ -2261,6 +2263,168 @@ for (const f of NOV) {
       `         → derived; federal before ${money(r.before.federalTotalTax)} (want ${money(f.federal)})${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)} (want ${money(f.state)})` : ""}; ${p.verified ? "verified" : `projected (${p.residuals.length} carried)`}`,
     );
   }
+}
+
+/* ── Refused returns, 2026-11-11 (engine v18) ───────────────────────────────
+   The last five refusals of the November triage, pinned the same way. Three
+   are the reads as recorded; the other two carry what a v18 read adds — the
+   state lines a second, state-only read brings back (Case 36), and a
+   rental-only 1065's Form 8825 lines (Case 37) — each checked on the print. */
+const V18 = JSON.parse(readFileSync(new URL("./fixtures/tax-recap-failures-2026-11-v18.json", import.meta.url), "utf8"));
+console.log("\nRefused returns, 2026-11-11 (engine v18)");
+const moreOf = (f) =>
+  f.more
+    ? {
+        ...f.more,
+        entities: (f.more.entities ?? []).map((e) => ({ ...e, numbers: entityNumbers(e.numbers) })),
+        states: (f.more.states ?? []).map((s) => ({ ...s, numbers: { ...emptyStateNumbers(), ...s.numbers } })),
+      }
+    : {};
+for (const f of V18) {
+  const r = deriveBefore(numbers(f.after), f.meta, undefined, f.entity ? entityNumbers(f.entity) : null, moreOf(f));
+  const ok =
+    r.ok &&
+    r.before.federalTotalTax === f.federal &&
+    r.before.stateTotalTax === f.state &&
+    r.derived.proof.verified === f.verified &&
+    (f.notes ?? []).every((n) => r.derived.notes.some((s) => new RegExp(n).test(s)));
+  if (!ok) failed++;
+  console.log(`  ${ok ? "ok" : "WRONG"}  ${f.name} — ${f.proves}`);
+  if (!r.ok) console.log(`         → ${r.reasons[0]}`);
+  else console.log(`         → derived; federal before ${money(r.before.federalTotalTax)} (want ${money(f.federal)})${has(r.before.stateTotalTax) ? `, state ${money(r.before.stateTotalTax)} (want ${money(f.state)})` : ""}; ${r.derived.proof.verified ? "verified" : `projected (${r.derived.proof.residuals.length} carried)`}`);
+}
+{
+  // What the v18 rules must still refuse. A K-1 loss Schedule E deducts
+  // less of is a limit only when the line was printed: unread, it's a line
+  // to read. A partnership K-1 with no 1065 and no Schedule C beside it is
+  // the business, and its 1065 is still asked for. A K-1 PROFIT Schedule E
+  // shows less of is no limit at all.
+  const kumar = V18.find((f) => f.name.startsWith("Case 34"));
+  const unread = deriveBefore(numbers({ ...kumar.after, scorpIncome: null }), kumar.meta, undefined, entityNumbers(kumar.entity), moreOf(kumar));
+  const v18Check = (name, ok, detail) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok" : "WRONG"}  ${name}`);
+    if (detail) console.log(`         → ${detail}`);
+  };
+  v18Check("a K-1 loss with Schedule E's line unread is still a line to read, not a suspended loss", !unread.ok && unread.reasons.some((s) => /weren't read.*S corporation income/.test(s)), unread.ok ? "derived" : unread.reasons[0]);
+  const salt = V18.find((f) => f.name.startsWith("Case 35"));
+  const noSchC = numbers({ ...salt.after, businessNetIncome: null, grossReceipts: null, totalExpenses: null, homeOffice: null });
+  const asked = deriveBefore(noSchC, salt.meta, undefined, null, {});
+  v18Check("a partnership K-1 with no 1065 and no Schedule C still asks for the 1065", !asked.ok && asked.reasons.some((s) => /add the partnership's 1065/.test(s)), asked.ok ? "derived" : asked.reasons[0]);
+  const profit = entityNumbers({ ...kumar.entity, grossReceipts: 80000, totalIncome: 80000, totalDeductions: 30000, otherDeductions: 30000, ordinaryIncome: 50000, k1Ordinary: 50000 });
+  const less = deriveBefore(numbers({ ...kumar.after, scorpIncome: 20000, totalIncome: 35858, agi: 35858 }), kumar.meta, undefined, profit, moreOf(kumar));
+  // (It goes the way it always went — the 1040 wins, the team's call — never as a loss held back.)
+  v18Check(
+    "a K-1 profit Schedule E carries less of is never taken as a loss held back",
+    !less.ok || !less.derived.notes.some((s) => /isn't all on Schedule E|held back/.test(s)),
+    less.ok ? less.derived.notes.find((s) => /1040 wins|taken from it/.test(s))?.slice(0, 160) : less.reasons[0],
+  );
+}
+{
+  // A state form's pages go together: a $0 nonresident return's tax pages
+  // carry nothing the per-page rules keep, only its refund page does.
+  const fed = (line) => `Form 1040 (2025) Page 2 OMB No. 1545-0074 ${line} ${"filler text ".repeat(10)}`;
+  const ga = (k, body) => `Georgia Form 500 Individual Income Tax Return Georgia Department of Revenue 2025 Page ${k} ${body} ${"line text ".repeat(10)}`;
+  const texts = [
+    "Dear client, enclosed is your return " + "x".repeat(60),
+    fed("This is your total income 9"),
+    fed("This is your adjusted gross income"),
+    fed("This is your taxable income"),
+    fed("This is your total tax 24"),
+    fed("These are your total payments 33"),
+    fed("Business income or (loss)"),
+    fed("Self-employment tax"),
+    ga(1, "Residency status filing status"),
+    ga(2, "Federal adjusted gross income 8467"),
+    ga(3, "Tax multiply line 15c by 5.19% 0 balance 0 withholding type"),
+    ga(4, "Georgia income tax withheld 0 balance due overpayment 0"),
+    ga(5, "Penalty late payment interest THIS IS YOUR REFUND 0"),
+    fed("Qualified business income deduction"),
+    "Payment voucher " + "x".repeat(80),
+  ];
+  const sel = selectPages(texts, "individual");
+  v18Check("a state form's pages are kept together ($0 Georgia Form 500: pages 1–4 with its refund page)", [9, 10, 11, 12, 13].every((p) => sel.pages.includes(p)) && !sel.pages.includes(15), `kept ${sel.pages.join(",")}`);
+  v18Check("the state-only read's pages are the state pages", statePageNumbers(texts).join() === "9,10,11,12,13", statePageNumbers(texts).join());
+  const ex = (fields) => ({ taxpayerName: "", taxYear: 2025, filingStatus: "Single", stateCode: "NY", stateForm: "IT-201", notes: "", fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, { value: v, page: 1, verified: null }])) });
+  v18Check(
+    "a read naming a state with none of its lines asks for the state-only read; a settled one doesn't",
+    stateLinesMissing(ex({})) && !stateLinesMissing(ex({ stateTotalTax: 0 })) && !stateLinesMissing(ex({ statePayments: 695, stateRefund: 695 })) && !stateLinesMissing({ ...ex({}), stateCode: null }),
+  );
+  function v18Check(name, ok, detail) {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok" : "WRONG"}  ${name}`);
+    if (detail) console.log(`         → ${detail}`);
+  }
+}
+
+/* ── Next year's estimated payments (read off the prints) ──────────────────
+   ProSeries' own wording, as the browser's text layer joins it: the 1040's
+   filing instructions (one page per jurisdiction, California's voucher 3
+   missing and voucher 2 electronic-only) and an S corporation's cover
+   letter whose installment list runs onto the next page.                  */
+console.log("\nNext year's estimated payments");
+{
+  const est = (name, ok, detail) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok" : "WRONG"}  ${name}`);
+    if (detail) console.log(`         → ${detail}`);
+  };
+  const individual = [
+    "Client copy cover letter Dear Client, enclosed is your return.",
+    "Tax Summary and Instructions for Filing 2025 Federal Individual Income Tax Return Summary of Federal Information: Federal adjusted gross income ........ $ 342,700.00 Federal refund applied to next year ........ $ 2,500.00 Your federal return shows an overpayment of $3,100.00. Of this amount, $2,500.00 will be applied to your 2026 estimates. Federal estimated income tax payments for tax year 2026 are due as follows: Voucher 1 ...................... 04/15/2026 ....................... $ 12,056.00 Voucher 2 ...................... 06/15/2026 ....................... $ 12,056.00 Voucher 3 ...................... 09/15/2026 ....................... $ 12,056.00 Voucher 4 ...................... 01/15/2027 ....................... $ 12,056.00 Include a separate check or money order for each payment payable to the \"United States Treasury\".",
+    "Tax Summary and Instructions for Filing 2025 California Individual Income Tax Return Summary of Form 540 Information: Mail to: Franchise Tax Board P.O. Box 942867 Sacramento, CA 94267-0008 California estimated income tax payments for tax year 2026 are due as follows: Voucher 1 ..................... 04/15/2026 ..................... $ 4,950.00 Voucher 2* ................... 06/15/2026 ..................... $ 6,600.00 Voucher 4 01/15/2027 ..................... $ 4,950.00 ..................... The estimates marked with an asterisk (*) must be paid electronically.",
+    "Department of the Treasury Internal Revenue Service 2026 Form 1040-ES Payment Voucher 1 Due 04/15/2026 File only if you are making a payment of estimated tax by check.",
+  ];
+  const a = parseIndividualEstimates(individual);
+  const fed = a.schedules.find((s) => s.kind === "federal");
+  const ca = a.schedules.find((s) => s.stateCode === "CA");
+  est(
+    "the 1040's filing instructions: the IRS's four vouchers and the overpayment applied, California's 1, 2 and 4 with the online-only one",
+    a.year === 2026 &&
+      fed?.installments.map((x) => `${x.n}:${x.due}:${x.amount}`).join() === "1:2026-04-15:12056,2:2026-06-15:12056,3:2026-09-15:12056,4:2027-01-15:12056" &&
+      fed?.applied === 2500 &&
+      ca?.label === "California" &&
+      ca?.installments.map((x) => `${x.n}:${x.amount}:${x.electronic ? "e" : ""}`).join() === "1:4950:,2:6600:e,4:4950:",
+    JSON.stringify(a.schedules.map((s) => [s.label, s.installments.length, s.applied])),
+  );
+  const entity = [
+    "Dear Client, We have prepared and enclosed your 2025 Form 1120S for CORPORATION A LLC. There is an overpayment in the amount of $874.00, of which $713.00 is credited to next year's estimated tax. The due dates and required payments for the 2026 California S Corporation Franchise or Income Tax Return estimated income tax are as follows: Installment #1 ......................... 04/15/26 ............................ $ 328 Installment #2 06/15/26 ............................ $ 1,389",
+    "......... Installment #4 ......................... 12/15/26 ............................ $ 1,041 Estimated tax payments that are not required to be paid electronically should be made by check or money order and sent to: Franchise Tax Board",
+  ];
+  const b = parseEntityEstimates(entity, "Corporation A LLC");
+  const corp = b.schedules[0];
+  est(
+    "an S corporation's cover letter: installments across a page break, the credit carried to next year, labelled with the business",
+    b.schedules.length === 1 && corp.label === "Corporation A LLC (California)" && corp.applied === 713 &&
+      corp.installments.map((x) => `${x.n}:${x.due}:${x.amount}`).join() === "1:2026-04-15:328,2:2026-06-15:1389,4:2026-12-15:1041",
+    JSON.stringify(b.schedules),
+  );
+  const merged = mergeEstimates([b, a], 2026);
+  const dates = estimateTimeline(merged);
+  const notes = estimateNotes(merged, 2025);
+  est(
+    "the IRS first, then the state, then the business; payments grouped by due date with each date's total",
+    merged.schedules.map((s) => s.kind).join() === "federal,state,entity" &&
+      dates.map((d) => `${d.due}:${d.items.length}:${d.total}`).join() === "2026-04-15:3:17334,2026-06-15:3:20045,2026-09-15:1:12056,2026-12-15:1:1041,2027-01-15:2:17006",
+    dates.map((d) => `${d.due} ${d.total}`).join(" · "),
+  );
+  est(
+    "the notes say California has no third payment, which ones go online, and what's already credited",
+    notes.some((n) => /^California splits the year 30%, 40%, 0%, 30%/.test(n)) &&
+      notes.some((n) => /Corporation A LLC \(California\) follows California's/.test(n)) &&
+      notes.some((n) => /marked “online”/.test(n)) &&
+      notes.some((n) => /\$2,500 of your 2025 overpayment to the IRS/.test(n)) &&
+      notes.some((n) => /\$713 of your 2025 overpayment on Corporation A LLC/.test(n)),
+    notes.join(" | ").slice(0, 300),
+  );
+  const cleaned = sanitizeEstimates({ year: 2026, schedules: [{ kind: "state", stateCode: "ny", label: "", installments: [{ n: 1, due: "2026-04-15", amount: "1,200" }, { n: 2, due: "", amount: 50 }, { n: 3, due: "2026-09-15", amount: 0 }], applied: 0 }] });
+  est(
+    "a typed schedule is cleaned: blank and $0 payments dropped, the state named; nothing left is no section at all",
+    cleaned?.schedules[0].label === "NY" && cleaned.schedules[0].stateCode === "NY" && cleaned.schedules[0].installments.length === 1 && cleaned.schedules[0].installments[0].amount === 1200 &&
+      sanitizeEstimates({ year: 2026, schedules: [{ kind: "federal", installments: [], applied: 0 }] }) === null &&
+      !hasEstimates(null) && hasEstimates(merged) &&
+      parseIndividualEstimates(["Form 1040 page with no filing instructions"]).schedules.length === 0,
+  );
 }
 
 /* ── Several states and several businesses on one 1040 (engine v13) ─────────
