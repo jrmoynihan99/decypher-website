@@ -147,7 +147,7 @@ function entityReturnKind(description: string): string | null {
 /**
  * An S corporation's or LLC's print: each state return's installments from
  * the cover letter, and the overpayment credited to next year.
- * `entityName` labels them ("IMAP LLC (California)").
+ * `entityName` labels them ("Acme LLC (California)").
  */
 export function parseEntityEstimates(pageTexts: string[], entityName: string | null = null): ParsedEstimates {
   const text = pageTexts.map(normalize).join(" ");

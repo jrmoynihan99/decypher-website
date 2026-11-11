@@ -1238,7 +1238,7 @@ export type EstimateInstallment = { n: number; due: string; amount: number; elec
 export type EstimateSchedule = {
   kind: EstimateKind;
   stateCode: string | null;
-  /** How the recap names the payee: "Federal (IRS)", "California", "IMAP LLC (California)". */
+  /** How the recap names the payee: "Federal (IRS)", "California", "Acme LLC (California)". */
   label: string;
   installments: EstimateInstallment[];
   applied: number;

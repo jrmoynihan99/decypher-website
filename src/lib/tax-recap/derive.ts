@@ -292,7 +292,7 @@ const isRentalUnit = (x: EntityNumbers) => has(x.rentalRents) || has(x.k1Rental)
 /**
  * An entity whose only activity is rental real estate (engine v18): Form
  * 8825 carries its rents and expenses, page 1 is blank, and its K-1s carry
- * box 2, not box 1 (Moynihan's LUXE LIVING: $16,200 of rents, $44,795 of
+ * box 2, not box 1 (Case 37's rental LLC: $16,200 of rents, $44,795 of
  * expenses, a $14,583 loss on the 51% K-1 that Form 8582 suspends). Laid
  * out on the lines the engine models an entity by — the rents as its
  * receipts, the expenses as its deductions, box 2 as the K-1 — and kept
@@ -2469,8 +2469,8 @@ function buildModel(
     // One entity return's K-1 to another on the same 1040 (engine v18): the
     // receiving return carries it in its own other income (1120-S lines
     // 4–5, 1065 lines 4–7), to the dollar, and only its own K-1 reaches the
-    // 1040. Counted on Schedule E as well, it was counted twice (Moynihan:
-    // RAYN's 50% K-1 to VIVACIOUS HONEY, $159,080 in both). It's that
+    // 1040. Counted on Schedule E as well, it was counted twice (Case 37:
+    // a partnership's 50% K-1 to the client's S corporation, $159,080 in both). It's that
     // entity's income: off this 1040, and on every scenario the receiving
     // return's other income follows the paying one's ordinary income.
     {
@@ -2653,7 +2653,7 @@ function buildModel(
   }
   // A partnership K-1 on Schedule E with no 1065 added, beside a Schedule
   // C of the client's own (engine v18): the Schedule C is the business, and
-  // the K-1 (Muslim-Ali's −$770 from another LLC) is carried as filed on
+  // the K-1 (Case 35's −$770 from another LLC) is carried as filed on
   // both sides — as the S corporation's shape already carries one — with
   // its self-employment earnings on Schedule SE when the return puts them
   // there. Its own write-offs aren't counted: the savings can come out
@@ -3149,7 +3149,7 @@ function buildModel(
     let lossFloor = u.lossFloor;
     if (!several && off(k1 - s179, scorpIncome)) {
       if (limitedLine(k1 - s179, scorpIncome, scorpLineRead)) {
-        // A loss Schedule E deducts less of (engine v18): Kumar's −$58,283
+        // A loss Schedule E deducts less of (engine v18): Case 34's −$58,283
         // K-1, a passive loss Form 8582 suspends in full, on Schedule E as $0.
         lossFloor = scorpIncome;
         softNotes.push(
@@ -4093,7 +4093,7 @@ function buildModel(
   // too (engine v18). The reader leaves it out when the city block is blank;
   // a $0 is the city's tax wiped out by its household credit, and on the
   // before, with the write-offs gone, the city taxes the same resident
-  // (Tian: $15 of city tax less a $15 credit, $4,407 on the before).
+  // (Case 36: $15 of city tax less a $15 credit, $4,407 on the before).
   let localResident = has(after.stateLocalTax);
   const stateInputsFor = (
     f: Federal,
@@ -4395,7 +4395,7 @@ function buildModel(
     }
     // Its total line not read (engine v18): what the payments come to less
     // the refund plus what's owed, like the main state's; or $0 on a part-
-    // year or nonresident return that taxes no income at all — Tian's
+    // year or nonresident return that taxes no income at all — Case 36's
     // Georgia Form 500, $0 of Georgia income on Schedule 3, whose tax page
     // the print selection had left out.
     if (!has(r.stateTotalTax)) {

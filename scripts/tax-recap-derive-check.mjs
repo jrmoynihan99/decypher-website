@@ -2299,8 +2299,8 @@ for (const f of V18) {
   // to read. A partnership K-1 with no 1065 and no Schedule C beside it is
   // the business, and its 1065 is still asked for. A K-1 PROFIT Schedule E
   // shows less of is no limit at all.
-  const kumar = V18.find((f) => f.name.startsWith("Case 34"));
-  const unread = deriveBefore(numbers({ ...kumar.after, scorpIncome: null }), kumar.meta, undefined, entityNumbers(kumar.entity), moreOf(kumar));
+  const passive = V18.find((f) => f.name.startsWith("Case 34"));
+  const unread = deriveBefore(numbers({ ...passive.after, scorpIncome: null }), passive.meta, undefined, entityNumbers(passive.entity), moreOf(passive));
   const v18Check = (name, ok, detail) => {
     if (!ok) failed++;
     console.log(`  ${ok ? "ok" : "WRONG"}  ${name}`);
@@ -2311,8 +2311,8 @@ for (const f of V18) {
   const noSchC = numbers({ ...salt.after, businessNetIncome: null, grossReceipts: null, totalExpenses: null, homeOffice: null });
   const asked = deriveBefore(noSchC, salt.meta, undefined, null, {});
   v18Check("a partnership K-1 with no 1065 and no Schedule C still asks for the 1065", !asked.ok && asked.reasons.some((s) => /add the partnership's 1065/.test(s)), asked.ok ? "derived" : asked.reasons[0]);
-  const profit = entityNumbers({ ...kumar.entity, grossReceipts: 80000, totalIncome: 80000, totalDeductions: 30000, otherDeductions: 30000, ordinaryIncome: 50000, k1Ordinary: 50000 });
-  const less = deriveBefore(numbers({ ...kumar.after, scorpIncome: 20000, totalIncome: 35858, agi: 35858 }), kumar.meta, undefined, profit, moreOf(kumar));
+  const profit = entityNumbers({ ...passive.entity, grossReceipts: 80000, totalIncome: 80000, totalDeductions: 30000, otherDeductions: 30000, ordinaryIncome: 50000, k1Ordinary: 50000 });
+  const less = deriveBefore(numbers({ ...passive.after, scorpIncome: 20000, totalIncome: 35858, agi: 35858 }), passive.meta, undefined, profit, moreOf(passive));
   // (It goes the way it always went — the 1040 wins, the team's call — never as a loss held back.)
   v18Check(
     "a K-1 profit Schedule E carries less of is never taken as a loss held back",
