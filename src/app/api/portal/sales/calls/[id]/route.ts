@@ -50,6 +50,7 @@ const PARSERS: {
   isReferral: (v) => Boolean(v),
   paid: (v) => Boolean(v),
   archived: (v) => Boolean(v),
+  pinned: (v) => Boolean(v),
 
   leadSource: (v, c) => asOption(v, keysOf(c, "leadSource")),
   showStatus: (v) => asOption(v, SHOW_STATUSES),

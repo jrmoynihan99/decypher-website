@@ -74,6 +74,15 @@ export interface SalesCallEdits {
    */
   archived: boolean;
 
+  /**
+   * Pinned to the top of the Deal Desk, for deals someone is actively chasing.
+   *
+   * On the document rather than in the browser so the whole team sees the same
+   * watchlist, on every device. Purely an ordering hint: no total, filter or
+   * export branches on it.
+   */
+  pinned: boolean;
+
   /** A key from the editable leadSource list — plain string, not a union. */
   leadSource: string | null;
   showStatus: ShowStatus | null;

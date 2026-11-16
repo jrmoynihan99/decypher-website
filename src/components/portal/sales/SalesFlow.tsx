@@ -60,6 +60,7 @@ import {
   DeleteCell,
   MoneyCell,
   NotesCell,
+  PinCell,
   ReferrerCell,
   RestoreCell,
   SelectCell,
@@ -659,6 +660,9 @@ export default function SalesFlow({
       r = r.filter((c) => c.isSales || c.isReferral);
       if (serviceFilter) r = r.filter((c) => c.service === serviceFilter);
       if (statusFilter) r = r.filter((c) => c.status === statusFilter);
+      // Pinned first, before the render window is cut, so a pin is always on
+      // the first page. Each half keeps the newest-first order it arrived in.
+      r = [...r.filter((c) => c.pinned), ...r.filter((c) => !c.pinned)];
     } else if (tab === "referrals") {
       r = r.filter((c) => c.isReferral);
       if (referrerFilter) r = r.filter((c) => c.referrerId === referrerFilter);
@@ -668,6 +672,32 @@ export default function SalesFlow({
   }, [searched, tab, serviceFilter, statusFilter, referrerFilter]);
 
   const page = useMemo(() => rows.slice(0, visible), [rows, visible]);
+
+  /**
+   * Pinned deals the current filters are hiding.
+   *
+   * Pins obey the filters like any other row — a pinned deal showing up under
+   * "Closed won" when it isn't won would be a lie. But the default view is Year
+   * to date, so a deal pinned in December would silently vanish on 1 January,
+   * which reads as the pin being lost. Counting them is what makes that visible.
+   */
+  const hiddenPins = useMemo(() => {
+    if (tab !== "deals" || showArchived) return 0;
+    const all = calls.filter(
+      (c) => c.pinned && !c.archived && (c.isSales || c.isReferral),
+    ).length;
+    return all - rows.filter((c) => c.pinned).length;
+  }, [calls, rows, tab, showArchived]);
+
+  /** Clear whatever is hiding them. Every filter, since any one of them could. */
+  const showAllPins = () => {
+    setRange("all");
+    setCallType("all");
+    setQuery("");
+    setServiceFilter("");
+    setStatusFilter("");
+    setVisible(PAGE);
+  };
 
   /* ── headline numbers, over the current date range and call type ── */
 
@@ -1098,6 +1128,16 @@ export default function SalesFlow({
           }
           action={
             <span className="flex items-center gap-3">
+              {hiddenPins > 0 ? (
+                <button
+                  type="button"
+                  onClick={showAllPins}
+                  title="Clear the date range, call type, search and filters so every pinned deal shows"
+                  className="cursor-pointer font-mono text-[10.5px] uppercase tracking-[1.2px] text-magenta hover:underline"
+                >
+                  {hiddenPins} pinned outside this view · show
+                </button>
+              ) : null}
               {activeCols.customised ? (
                 <button
                   type="button"
@@ -1448,6 +1488,7 @@ function BookedTable({
 /* ═══════════════════════════ deal desk ═══════════════════════════ */
 
 const DEAL_COLUMNS: ColumnDef[] = [
+  { id: "pin", label: "Pin", width: 48, align: "left", hiddenLabel: true },
   { id: "booked", label: "Booked", width: 92, align: "left" },
   { id: "call", label: "Call", width: 130, align: "left" },
   { id: "name", label: "Name", width: 200, align: "left" },
@@ -1473,11 +1514,35 @@ function DealTable({
   restore,
   showArchived,
 }: TableProps & RowActionProps) {
+  // Rows arrive pinned-first (see `rows` in SalesFlow), so the pinned block is
+  // the leading run and its last row is where the divider goes.
+  const lastPinned = rows.findLastIndex((r) => r.pinned);
+
   return (
     <GridTable columns={DEAL_COLUMNS} widths={widths}>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.id} className="align-top hover:bg-white/[0.02]">
+        {rows.map((row, i) => (
+          <tr
+            key={row.id}
+            className={`group align-top ${
+              row.pinned
+                ? "bg-magenta/[0.05] hover:bg-magenta/[0.08]"
+                : "hover:bg-white/[0.02]"
+            } ${
+              // Beats GridCell's own border-edge on specificity (tr > td).
+              i === lastPinned && i < rows.length - 1
+                ? "[&>td]:border-b-magenta/40"
+                : ""
+            }`}
+          >
+            <GridCell>
+              <PinCell
+                pinned={row.pinned}
+                saving={busy(row.id, "pinned")}
+                who={row.name || row.email || "this deal"}
+                onToggle={() => save(row.id, "pinned", !row.pinned)}
+              />
+            </GridCell>
             <GridCell>
               <span className="text-[12px] text-mist">{shortDate(row.bookedAt)}</span>
             </GridCell>

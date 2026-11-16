@@ -483,6 +483,59 @@ export function RawHint({ text }: { text: string }) {
   );
 }
 
+/* ─────────────────────────── pin ─────────────────────────── */
+
+/**
+ * One-click pin toggle. Always visible (faint when off) so nobody has to
+ * discover it by hovering; filled magenta when on, so a pinned row reads as
+ * pinned from across the table.
+ */
+export function PinCell({
+  pinned,
+  onToggle,
+  saving,
+  who,
+}: {
+  pinned: boolean;
+  onToggle: () => void;
+  saving?: boolean;
+  who: string;
+}) {
+  const label = pinned ? `Unpin ${who}` : `Pin ${who} to the top`;
+  return (
+    <button
+      type="button"
+      disabled={saving}
+      aria-pressed={pinned}
+      aria-label={label}
+      title={pinned ? "Unpin" : "Pin to the top"}
+      onClick={onToggle}
+      className={`flex h-7 w-7 cursor-pointer items-center justify-center rounded-[7px] transition-colors duration-150 disabled:opacity-40 ${
+        pinned
+          ? "text-magenta hover:bg-magenta/15"
+          : "text-faint hover:bg-white/[0.06] hover:text-fog group-hover:text-dusk"
+      }`}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill={pinned ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        // A pinned pin stands up; an unpinned one leans, like it's waiting.
+        className={`transition-transform duration-150 ${pinned ? "" : "rotate-45"}`}
+      >
+        <path d="M12 17v5" />
+        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+      </svg>
+    </button>
+  );
+}
+
 /* ─────────────────────────── delete ─────────────────────────── */
 
 /**
