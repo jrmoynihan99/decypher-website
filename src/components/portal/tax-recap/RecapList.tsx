@@ -19,6 +19,7 @@ import type { RecapSummary } from "@/lib/tax-recap/store";
 
 /**
  * Every recap built so far, newest first, narrowed by client and by year.
+ * Before, After, Savings and Created headers sort on click (again to flip).
  * Copy hands over the client link, PDF downloads the attachment, Edit
  * reopens the builder on the saved numbers (no re-read — the extraction is
  * stored), Delete removes the recap for good, link and all, after a confirm.
@@ -62,11 +63,50 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
   // A choice whose last recap was just deleted falls back to all, not to an empty table.
   const activeClient = clients.some((o) => o.value === client) ? client : "";
   const activeYear = years.includes(Number(year)) ? year : "";
-  const shown = recaps.filter(
+  const filtered = recaps.filter(
     (r) =>
       (!activeClient || clientKey(r.clientName) === activeClient) &&
       (!activeYear || r.taxYear === Number(activeYear)),
   );
+
+  /** Newest first until a column is clicked — the order the server sends. */
+  const [sort, setSort] = useState<SortKey>("created");
+  const [dir, setDir] = useState<"asc" | "desc">("desc");
+  const toggleSort = (key: SortKey) => {
+    if (key === sort) {
+      setDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      // Money and dates both read naturally biggest/newest first.
+      setSort(key);
+      setDir("desc");
+    }
+  };
+  // Array sort is stable and the server's rows are newest first, so ties stay newest first.
+  const shown = [...filtered].sort((a, b) => {
+    const va = SORT_VALUE[sort](a);
+    const vb = SORT_VALUE[sort](b);
+    if (va == null || vb == null) return va == null ? (vb == null ? 0 : 1) : -1; // unknowns last
+    return dir === "asc" ? va - vb : vb - va;
+  });
+  const sortHead = (key: SortKey, label: string, align: "left" | "right" = "right") => {
+    const active = sort === key;
+    return (
+      <TableHead align={align} ariaSort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          onClick={() => toggleSort(key)}
+          className={`cursor-pointer font-mono uppercase tracking-[0.8px] transition-colors duration-150 hover:text-fog ${
+            active ? "text-magenta" : "text-dusk"
+          }`}
+        >
+          {label}
+          <span aria-hidden className="ml-1">
+            {active ? (dir === "asc" ? "↑" : "↓") : "↕"}
+          </span>
+        </button>
+      </TableHead>
+    );
+  };
 
   const copy = async (r: RecapSummary) => {
     try {
@@ -146,10 +186,10 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
             <tr>
               <TableHead align="left">Client</TableHead>
               <TableHead>Year</TableHead>
-              <TableHead>Before</TableHead>
-              <TableHead>After</TableHead>
-              <TableHead>Savings</TableHead>
-              <TableHead align="left">Created</TableHead>
+              {sortHead("before", "Before")}
+              {sortHead("after", "After")}
+              {sortHead("savings", "Savings")}
+              {sortHead("created", "Created", "left")}
               <TableHead align="left">Link</TableHead>
             </tr>
           </thead>
@@ -221,6 +261,16 @@ export default function RecapList({ recaps: fromServer }: { recaps: RecapSummary
     </Panel>
   );
 }
+
+type SortKey = "created" | "before" | "after" | "savings";
+
+/** A row's sort value; null (a recap with no stamp) always sinks to the bottom. */
+const SORT_VALUE: Record<SortKey, (r: RecapSummary) => number | null> = {
+  created: (r) => (r.createdAt ? Date.parse(r.createdAt) : null),
+  before: (r) => r.totalBefore,
+  after: (r) => r.totalAfter,
+  savings: (r) => r.savings,
+};
 
 const action =
   "cursor-pointer rounded-full border border-white/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[1px] text-mist no-underline transition-colors hover:border-mist hover:text-fog disabled:opacity-50";
